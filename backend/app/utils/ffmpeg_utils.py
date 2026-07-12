@@ -14,7 +14,14 @@ def run_ffmpeg(args: list[str]) -> None:
     settings = get_settings()
     command = [_resolve_tool(settings.ffmpeg_path, "ffmpeg.exe"), *args]
     try:
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
     except FileNotFoundError as exc:
         raise RuntimeError(f"FFmpeg executable was not found: {command[0]}") from exc
     if result.returncode != 0:
@@ -35,7 +42,14 @@ def probe_duration(audio_path: Path) -> float:
         str(audio_path),
     ]
     try:
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
     except FileNotFoundError as exc:
         raise RuntimeError(f"ffprobe executable was not found: {command[0]}") from exc
     if result.returncode != 0:

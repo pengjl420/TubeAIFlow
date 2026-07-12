@@ -3,6 +3,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from app.config import get_settings
@@ -16,6 +17,11 @@ from app.utils.project_paths import get_project_output_dir, get_project_work_dir
 router = APIRouter(tags=["segments"])
 
 
+class SegmentUpdateRequest(BaseModel):
+    text_zh: str | None = None
+    text_en: str | None = None
+
+
 @router.get("/projects/{project_id}/segments")
 def list_segments(project_id: str, session: Session = Depends(get_session)) -> dict:
     segments = session.exec(
@@ -27,7 +33,12 @@ def list_segments(project_id: str, session: Session = Depends(get_session)) -> d
 
 
 @router.put("/projects/{project_id}/segments/{segment_id}")
-def update_segment(project_id: str, segment_id: str, payload: dict, session: Session = Depends(get_session)) -> dict:
+def update_segment(
+    project_id: str,
+    segment_id: str,
+    payload: SegmentUpdateRequest,
+    session: Session = Depends(get_session),
+) -> dict:
     segment = session.exec(
         select(Segment).where(
             Segment.project_id == project_id,
@@ -36,11 +47,12 @@ def update_segment(project_id: str, segment_id: str, payload: dict, session: Ses
     ).first()
     if not segment:
         raise HTTPException(status_code=404, detail={"success": False, "error": "Segment not found"})
-    if "text_zh" in payload:
-        segment.text_zh = str(payload["text_zh"])
+    if payload.text_zh is not None:
+        segment.text_zh = payload.text_zh
         segment.status = "pending"
-    if "text_en" in payload:
-        segment.text_en = str(payload["text_en"])
+        segment.error_message = None
+    if payload.text_en is not None:
+        segment.text_en = payload.text_en
     segment.updated_at = datetime.utcnow().isoformat()
     session.add(segment)
     session.commit()

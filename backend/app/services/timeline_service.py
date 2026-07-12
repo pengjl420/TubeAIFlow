@@ -9,7 +9,9 @@ from app.models.segment import Segment
 from app.utils.project_paths import ensure_project_dirs, get_output_stem, get_project_work_dir
 
 
-def build_timeline(session: Session, project: Project, gap_seconds: float = 0.25) -> dict:
+def build_timeline(session: Session, project: Project, gap_seconds: float = 0.0) -> dict:
+    if gap_seconds < 0:
+        raise ValueError("Timeline gap cannot be negative")
     segments = session.exec(
         select(Segment)
         .where(Segment.project_id == project.id)

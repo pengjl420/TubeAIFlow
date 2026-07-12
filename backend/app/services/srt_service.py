@@ -1,4 +1,5 @@
 from pathlib import Path
+import unicodedata
 
 from app.config import get_settings
 from app.models.project import Project
@@ -58,4 +59,5 @@ def _write_srt(path: Path, cues: list[tuple[float, float, str]]) -> None:
 
 
 def _clean_srt_text(text: str) -> str:
-    return text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    return "".join(char for char in normalized if not unicodedata.category(char).startswith("P")).strip()

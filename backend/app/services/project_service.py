@@ -40,6 +40,8 @@ def get_project(session: Session, project_id: str) -> Project | None:
 
 
 def save_script(session: Session, project: Project, raw_text: str) -> Project:
+    if not raw_text.strip():
+        raise ValueError("Script text is required")
     settings = get_settings()
     base_dir = get_project_work_dir(project, settings.workspace_dir)
     ensure_project_dirs(base_dir)
@@ -68,6 +70,8 @@ def create_segments(session: Session, project: Project) -> list[Segment]:
         raise ValueError("Project has no cleaned script")
     clean_text = Path(project.script_clean_path).read_text(encoding="utf-8")
     segment_data = split_script(clean_text)
+    if not segment_data:
+        raise ValueError("Cleaned script is empty")
 
     existing = session.exec(select(Segment).where(Segment.project_id == project.id)).all()
     for segment in existing:

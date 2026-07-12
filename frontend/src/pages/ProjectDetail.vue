@@ -4,7 +4,7 @@ import { useRoute } from 'vue-router'
 
 import { API_BASE_URL } from '../api/client'
 import { mergeProjectAudio } from '../api/exports'
-import { composeProjectVideo } from '../api/videos'
+import { composeProjectVideo, getVideoStatus, type VideoProgress } from '../api/videos'
 import {
   createSegments,
   getProject,
@@ -39,8 +39,10 @@ const scriptDragActive = ref(false)
 const error = ref('')
 const message = ref('')
 let pollTimer: number | undefined
+let videoPollTimer: number | undefined
 
 const ttsStatus = ref<TtsStatus>({ total: 0, completed: 0, failed: 0, pending: 0 })
+const videoProgress = ref<VideoProgress | null>(null)
 
 const projectConfig = computed(() => {
   if (!project.value?.config_json) return {}
@@ -239,6 +241,24 @@ function stopPolling() {
   }
 }
 
+function startVideoPolling() {
+  stopVideoPolling()
+  videoPollTimer = window.setInterval(async () => {
+    try {
+      videoProgress.value = await getVideoStatus(projectId)
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : '刷新视频进度失败'
+    }
+  }, 1000)
+}
+
+function stopVideoPolling() {
+  if (videoPollTimer !== undefined) {
+    window.clearInterval(videoPollTimer)
+    videoPollTimer = undefined
+  }
+}
+
 async function ensureFilenameSaved() {
   if (!project.value) throw new Error('项目未加载')
   project.value = await saveOutputSettings(
@@ -342,15 +362,21 @@ async function composeVideo() {
     return
   }
   composingVideo.value = true
+  videoProgress.value = {
+    status: 'running', stage: 'preparing', percent: 0, total: 0, completed: 0, message: '正在准备视频生成',
+  }
   try {
     await ensureFilenameSaved()
+    startVideoPolling()
     const result = await composeProjectVideo(projectId)
+    videoProgress.value = await getVideoStatus(projectId)
     await refreshAfterChange()
-    message.value = `无声视频已生成：${result.path}`
+    message.value = `视频已生成：${result.path}`
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '无声视频生成失败'
+    error.value = err instanceof Error ? err.message : '视频生成失败'
   } finally {
     composingVideo.value = false
+    stopVideoPolling()
   }
 }
 
@@ -361,6 +387,10 @@ async function oneClickGenerate() {
   }
   if (!project.value?.reference_audio_path) {
     error.value = '请先配置项目参考音频后再一键生成'
+    return
+  }
+  if (!mediaVideoDir.value) {
+    error.value = '请先在项目配置中选择素材视频目录后再一键生成'
     return
   }
 
@@ -388,7 +418,18 @@ async function oneClickGenerate() {
 
     message.value = '正在合并完整音频...'
     mergingAudio.value = true
-    const result = await mergeProjectAudio(projectId)
+    await mergeProjectAudio(projectId)
+    await refreshAfterChange()
+
+    message.value = '正在生成视频...'
+    mergingAudio.value = false
+    composingVideo.value = true
+    videoProgress.value = {
+      status: 'running', stage: 'preparing', percent: 0, total: 0, completed: 0, message: '正在准备视频生成',
+    }
+    startVideoPolling()
+    const result = await composeProjectVideo(projectId)
+    videoProgress.value = await getVideoStatus(projectId)
     await refreshAfterChange()
     message.value = `一键生成完成：${result.path}`
   } catch (err) {
@@ -398,7 +439,9 @@ async function oneClickGenerate() {
     oneClickGenerating.value = false
     ttsRunning.value = false
     mergingAudio.value = false
+    composingVideo.value = false
     stopPolling()
+    stopVideoPolling()
   }
 }
 
@@ -434,7 +477,10 @@ async function regenerateSegment(segment: Segment) {
 }
 
 onMounted(load)
-onBeforeUnmount(stopPolling)
+onBeforeUnmount(() => {
+  stopPolling()
+  stopVideoPolling()
+})
 </script>
 
 <template>
@@ -484,12 +530,27 @@ onBeforeUnmount(stopPolling)
             {{ mergingAudio ? '合并中' : '合并完整音频' }}
           </button>
           <button class="secondary-button" :disabled="composingVideo || oneClickGenerating" @click="composeVideo">
-            {{ composingVideo ? '视频生成中' : '生成无声视频' }}
+            {{ composingVideo ? '视频生成中' : '生成视频' }}
           </button>
         </div>
 
         <p v-if="error" class="error">{{ error }}</p>
         <p v-if="message" class="success">{{ message }}</p>
+        <div v-if="composingVideo || videoProgress" class="video-progress-panel">
+          <div class="section-head">
+            <strong>视频生成进度</strong>
+            <span class="muted">{{ videoProgress?.percent || 0 }}%</span>
+          </div>
+          <div class="progress-bar">
+            <div class="progress-fill" :style="{ width: `${videoProgress?.percent || 0}%` }"></div>
+          </div>
+          <p class="muted">
+            {{ videoProgress?.message || '正在准备视频生成' }}
+            <span v-if="videoProgress?.total">（{{ videoProgress.completed }}/{{ videoProgress.total }}）</span>
+          </p>
+          <p v-if="videoProgress?.current_file" class="muted path-line">当前素材：{{ videoProgress.current_file }}</p>
+          <p v-if="videoProgress?.error" class="error">{{ videoProgress.error }}</p>
+        </div>
       </div>
 
       <div class="panel">
@@ -526,7 +587,7 @@ onBeforeUnmount(stopPolling)
           <p class="path-line"><strong>本次生成目录：</strong>{{ hasOutputFilename ? outputs?.work_dir : '保存或生成后自动创建' }}</p>
           <p class="path-line"><strong>最终完整音频：</strong>{{ finalAudioPath || '保存或生成后自动创建' }}</p>
           <p class="path-line"><strong>素材视频目录：</strong>{{ mediaVideoDir || '未配置' }}</p>
-          <p class="path-line"><strong>最终无声视频：</strong>{{ finalVideoPath || '生成后自动创建' }}</p>
+          <p class="path-line"><strong>最终视频：</strong>{{ finalVideoPath || '生成后自动创建' }}</p>
         </div>
       </div>
     </div>

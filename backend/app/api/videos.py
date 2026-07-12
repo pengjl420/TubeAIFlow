@@ -38,7 +38,16 @@ def compose_video(project_id: str, session: Session = Depends(get_session)) -> d
         raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
     try:
         project = project_service.ensure_output_filename(session, project)
-        path = video_service.compose_silent_video(session, project)
+        path = video_service.compose_video(session, project)
         return {"success": True, "data": {"path": str(path)}}
     except (ValueError, RuntimeError) as exc:
+        video_service.mark_video_progress_failed(project, str(exc))
         raise HTTPException(status_code=400, detail={"success": False, "error": str(exc)}) from exc
+
+
+@router.get("/projects/{project_id}/video/status")
+def video_status(project_id: str, session: Session = Depends(get_session)) -> dict:
+    project = project_service.get_project(session, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
+    return {"success": True, "data": video_service.read_video_progress(project)}

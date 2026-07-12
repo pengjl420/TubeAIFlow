@@ -33,13 +33,21 @@ def generate_project_tts(session: Session, project: Project) -> list[Segment]:
     ensure_project_dirs(base_dir)
     audio_dir = base_dir / "audio" / "segments"
     audio_dir.mkdir(parents=True, exist_ok=True)
-    pending = [item for item in segments if not (audio_dir / f"{item.segment_id}.wav").exists()]
+    pending = [
+        item
+        for item in segments
+        if item.status != "completed" or not (audio_dir / f"{item.segment_id}.wav").is_file()
+    ]
 
     project.status = "tts_running"
     session.add(project)
     session.commit()
 
     if pending:
+        # A pending segment may still have an older WAV after its text was edited.
+        # Remove it so a failed regeneration cannot be mistaken for a new result.
+        for segment in pending:
+            (audio_dir / f"{segment.segment_id}.wav").unlink(missing_ok=True)
         logs_dir = base_dir / "logs"
         _write_initial_progress(logs_dir / "tts_progress.json", pending)
         _run_index_tts_batch(reference_audio_path, pending, audio_dir, logs_dir)
@@ -84,6 +92,10 @@ def regenerate_segment_tts(session: Session, project: Project, segment: Segment)
 
     output_path = audio_dir / f"{segment.segment_id}.wav"
     output_path.unlink(missing_ok=True)
+    segment.audio_path = None
+    segment.duration = None
+    segment.start_time = None
+    segment.end_time = None
     segment.status = "tts_running"
     segment.error_message = None
     segment.updated_at = datetime.utcnow().isoformat()

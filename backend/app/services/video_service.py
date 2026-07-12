@@ -26,6 +26,10 @@ VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".m4v", ".mpg", ".mpeg"}
 TARGET_WIDTH = 1920
 TARGET_HEIGHT = 1080
 TARGET_FPS = 30
+# Source videos occasionally contain an undecodable or placeholder first frame.
+# Skipping a few frames also prevents that frame from becoming a clip boundary.
+CLIP_START_OFFSET = 0.1
+VIDEO_TAIL_PADDING = 0.5
 
 
 @dataclass
@@ -51,7 +55,7 @@ def save_video_settings(session: Session, project: Project, media_video_dir: str
     return project
 
 
-def compose_silent_video(session: Session, project: Project) -> Path:
+def compose_video(session: Session, project: Project) -> Path:
     config = _load_project_config(project)
     media_dir_value = str(config.get("media_video_dir") or "").strip()
     if not media_dir_value:
@@ -74,6 +78,8 @@ def compose_silent_video(session: Session, project: Project) -> Path:
     video_dir = base_dir / "video"
     temp_dir = video_dir / "temp"
     temp_dir.mkdir(parents=True, exist_ok=True)
+    progress_path = video_dir / "progress.json"
+    write_video_progress(progress_path, "running", "scanning", 5, message="Scanning video materials")
 
     project.status = "video_composing"
     project.updated_at = datetime.utcnow().isoformat()
@@ -81,11 +87,20 @@ def compose_silent_video(session: Session, project: Project) -> Path:
     session.commit()
 
     source_paths = scan_video_files(media_dir)
+    write_video_progress(progress_path, "running", "selecting", 12, message="Selecting video materials")
     grouped_paths = group_video_files(source_paths)
     selected = select_videos_for_duration(grouped_paths, target_duration)
     write_selected_manifest(video_dir / "selected_videos.json", selected, target_duration)
 
-    temp_paths = normalize_selected_clips(selected, temp_dir)
+    write_video_progress(
+        progress_path,
+        "running",
+        "normalizing",
+        15,
+        total=len(selected),
+        message="Normalizing selected clips",
+    )
+    temp_paths = normalize_selected_clips(selected, temp_dir, progress_path)
     concat_path = video_dir / "concat.txt"
     concat_path.write_text(
         "\n".join(f"file '{path.as_posix()}'" for path in temp_paths),
@@ -94,6 +109,43 @@ def compose_silent_video(session: Session, project: Project) -> Path:
 
     output_path = get_final_video_path(project, get_settings().workspace_dir)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    write_video_progress(
+        progress_path,
+        "running",
+        "concatenating",
+        95,
+        total=len(selected),
+        completed=len(selected),
+        message="Concatenating final video",
+    )
+    concatenate_normalized_clips(concat_path, output_path)
+    video_duration = probe_duration(output_path)
+    if video_duration <= target_duration:
+        raise RuntimeError(
+            f"Generated video is not longer than audio: "
+            f"video={video_duration:.3f}s, audio={target_duration:.3f}s"
+        )
+
+    project.status = "video_completed"
+    project.updated_at = datetime.utcnow().isoformat()
+    session.add(project)
+    session.commit()
+    write_video_progress(
+        progress_path,
+        "completed",
+        "completed",
+        100,
+        total=len(selected),
+        completed=len(selected),
+        message="Video generation completed",
+    )
+    return output_path
+
+
+def concatenate_normalized_clips(concat_path: Path, output_path: Path) -> None:
+    # Re-encode the joined stream so every boundary gets a clean timestamp and
+    # reference-frame chain. Stream copying can produce a one-frame flash on
+    # some hardware decoders even when all input clips use H.264.
     run_ffmpeg([
         "-y",
         "-f",
@@ -102,17 +154,25 @@ def compose_silent_video(session: Session, project: Project) -> Path:
         "0",
         "-i",
         str(concat_path),
+        "-map",
+        "0:v:0",
+        "-vf",
+        f"tpad=stop_mode=clone:stop_duration={VIDEO_TAIL_PADDING:.3f}",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "20",
+        "-pix_fmt",
+        "yuv420p",
+        "-r",
+        str(TARGET_FPS),
         "-an",
-        "-c",
-        "copy",
+        "-movflags",
+        "+faststart",
         str(output_path),
     ])
-
-    project.status = "video_completed"
-    project.updated_at = datetime.utcnow().isoformat()
-    session.add(project)
-    session.commit()
-    return output_path
 
 
 def scan_video_files(media_dir: Path) -> list[Path]:
@@ -147,24 +207,26 @@ def select_videos_for_duration(groups: dict[str, list[Path]], target_duration: f
 
     selected: list[SelectedVideo] = []
     total = 0.0
-    errors: list[str] = []
-
     for title_group, paths in group_items:
         path = random.choice(paths)
         try:
             duration = probe_duration(path)
         except RuntimeError as exc:
             logger.warning("Skip video with unreadable duration %s: %s", path, exc)
-            errors.append(f"{path}: {exc}")
             continue
         if duration <= 0:
             continue
 
-        remaining = target_duration - total
-        clip_duration = min(duration, remaining)
+        usable_duration = duration - CLIP_START_OFFSET
+        if usable_duration <= 0:
+            continue
+
+        # This is a rough-cut composition. Keep the final selected material in
+        # full instead of trimming it to the exact remaining audio duration.
+        clip_duration = usable_duration
         selected.append(SelectedVideo(path, title_group, duration, clip_duration))
         total += clip_duration
-        if total >= target_duration:
+        if total > target_duration:
             return selected
 
     if not selected:
@@ -175,9 +237,25 @@ def select_videos_for_duration(groups: dict[str, list[Path]], target_duration: f
     )
 
 
-def normalize_selected_clips(selected: list[SelectedVideo], temp_dir: Path) -> list[Path]:
+def normalize_selected_clips(
+    selected: list[SelectedVideo],
+    temp_dir: Path,
+    progress_path: Path | None = None,
+) -> list[Path]:
     temp_paths: list[Path] = []
     for index, item in enumerate(selected, start=1):
+        if progress_path:
+            percent = 15 + int((index - 1) / len(selected) * 75)
+            write_video_progress(
+                progress_path,
+                "running",
+                "normalizing",
+                percent,
+                total=len(selected),
+                completed=index - 1,
+                current_file=item.source_path.name,
+                message=f"Normalizing clip {index} of {len(selected)}",
+            )
         output_path = temp_dir / f"{index:04d}.mp4"
         output_path.unlink(missing_ok=True)
         vf = (
@@ -189,6 +267,8 @@ def normalize_selected_clips(selected: list[SelectedVideo], temp_dir: Path) -> l
             "-y",
             "-i",
             str(item.source_path),
+            "-ss",
+            f"{CLIP_START_OFFSET:.3f}",
             "-t",
             f"{item.clip_duration:.3f}",
             "-vf",
@@ -205,7 +285,73 @@ def normalize_selected_clips(selected: list[SelectedVideo], temp_dir: Path) -> l
             str(output_path),
         ])
         temp_paths.append(output_path)
+        if progress_path:
+            write_video_progress(
+                progress_path,
+                "running",
+                "normalizing",
+                15 + int(index / len(selected) * 75),
+                total=len(selected),
+                completed=index,
+                current_file=item.source_path.name,
+                message=f"Normalized clip {index} of {len(selected)}",
+            )
     return temp_paths
+
+
+def write_video_progress(
+    path: Path,
+    status: str,
+    stage: str,
+    percent: int,
+    *,
+    total: int = 0,
+    completed: int = 0,
+    current_file: str | None = None,
+    message: str = "",
+    error: str | None = None,
+) -> None:
+    data = {
+        "status": status,
+        "stage": stage,
+        "percent": max(0, min(percent, 100)),
+        "total": total,
+        "completed": completed,
+        "current_file": current_file,
+        "message": message,
+        "error": error,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_suffix(path.suffix + ".tmp")
+    temp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp_path.replace(path)
+
+
+def read_video_progress(project: Project) -> dict | None:
+    path = get_project_work_dir(project, get_settings().workspace_dir) / "video" / "progress.json"
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def mark_video_progress_failed(project: Project, error: str) -> None:
+    path = get_project_work_dir(project, get_settings().workspace_dir) / "video" / "progress.json"
+    previous = read_video_progress(project) or {}
+    write_video_progress(
+        path,
+        "failed",
+        "failed",
+        int(previous.get("percent", 0)),
+        total=int(previous.get("total", 0)),
+        completed=int(previous.get("completed", 0)),
+        current_file=previous.get("current_file"),
+        message="Video generation failed",
+        error=error,
+    )
 
 
 def write_selected_manifest(path: Path, selected: list[SelectedVideo], target_duration: float) -> None:

@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from pathlib import Path
 
 from sqlmodel import Session, select
@@ -35,7 +36,20 @@ def merge_project_audio(session: Session, project: Project) -> Path:
         .where(Segment.project_id == project.id)
         .order_by(Segment.segment_index)
     ).all()
-    audio_segments = [segment for segment in segments if segment.audio_path]
+    if not segments:
+        raise ValueError("Project has no segments to merge")
+
+    missing = [
+        segment.segment_id
+        for segment in segments
+        if not segment.audio_path or not Path(segment.audio_path).is_file()
+    ]
+    if missing:
+        preview = ", ".join(missing[:10])
+        suffix = "..." if len(missing) > 10 else ""
+        raise ValueError(f"Segment audio is missing: {preview}{suffix}")
+
+    audio_segments = list(segments)
     audio_paths = [Path(segment.audio_path) for segment in audio_segments]
     if not audio_paths:
         raise ValueError("No segment audio files to merge")
@@ -58,6 +72,7 @@ def merge_project_audio(session: Session, project: Project) -> Path:
             session.add(segment)
     srt_service.create_full_srt(project, list(audio_segments))
     project.status = "audio_merged"
+    project.updated_at = datetime.utcnow().isoformat()
     session.add(project)
     session.commit()
     return full_voice_path

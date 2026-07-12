@@ -11,7 +11,13 @@ from app.config import get_settings
 from app.database import get_session
 from app.services import project_service
 from app.utils.file_utils import ensure_inside_workspace, project_dir
-from app.utils.project_paths import get_final_audio_path, get_final_video_path, get_project_output_dir, get_project_work_dir
+from app.utils.project_paths import (
+    get_final_audio_path,
+    get_final_en_srt_path,
+    get_final_video_path,
+    get_project_output_dir,
+    get_project_work_dir,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -84,6 +90,7 @@ def get_project_outputs(project_id: str, session: Session = Depends(get_session)
     output_root = get_project_output_dir(project, get_settings().workspace_dir)
     work_dir = get_project_work_dir(project, get_settings().workspace_dir)
     final_audio_path = get_final_audio_path(project, get_settings().workspace_dir)
+    final_en_srt_path = get_final_en_srt_path(project, get_settings().workspace_dir)
     final_video_path = get_final_video_path(project, get_settings().workspace_dir)
     output_files = []
     if work_dir.is_dir():
@@ -122,11 +129,23 @@ def get_project_outputs(project_id: str, session: Session = Depends(get_session)
                 "modified_at": stat.st_mtime,
             }
         )
+    if final_en_srt_path.is_file():
+        stat = final_en_srt_path.stat()
+        output_files.append(
+            {
+                "name": final_en_srt_path.name,
+                "path": str(final_en_srt_path),
+                "relative_path": final_en_srt_path.name,
+                "size": stat.st_size,
+                "modified_at": stat.st_mtime,
+            }
+        )
 
     return ok({
         "output_dir": str(output_root),
         "work_dir": str(work_dir),
         "final_audio_path": str(final_audio_path),
+        "final_en_srt_path": str(final_en_srt_path),
         "final_video_path": str(final_video_path),
         "files": output_files,
     })

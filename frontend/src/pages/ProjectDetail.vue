@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 
 import { API_BASE_URL } from '../api/client'
 import { mergeProjectAudio } from '../api/exports'
+import { createZhSrt } from '../api/subtitles'
 import { composeProjectVideo, getVideoStatus, type VideoProgress } from '../api/videos'
 import {
   createSegments,
@@ -31,6 +32,7 @@ const outputFilename = ref('')
 const loading = ref(false)
 const ttsRunning = ref(false)
 const mergingAudio = ref(false)
+const generatingSubtitles = ref(false)
 const composingVideo = ref(false)
 const oneClickGenerating = ref(false)
 const savingFilename = ref(false)
@@ -90,6 +92,13 @@ function fallbackFinalAudioPath() {
 const finalAudioPath = computed(() => {
   if (!hasOutputFilename.value) return ''
   return outputs.value?.final_audio_path || fallbackFinalAudioPath()
+})
+
+const finalEnglishSrtPath = computed(() => {
+  if (!hasOutputFilename.value) return ''
+  const dir = outputs.value?.output_dir || project.value?.output_dir || ''
+  if (!dir || !outputFilename.value.trim()) return outputs.value?.final_en_srt_path || ''
+  return outputs.value?.final_en_srt_path || `${dir.replace(/[\\/]$/, '')}\\${outputFilename.value.trim()}_en.srt`
 })
 
 const mediaVideoDir = computed(() => {
@@ -345,12 +354,17 @@ async function mergeAudio() {
   try {
     await ensureFilenameSaved()
     const result = await mergeProjectAudio(projectId)
+    message.value = '正在生成中英文字幕...'
+    mergingAudio.value = false
+    generatingSubtitles.value = true
+    const subtitles = await createZhSrt(projectId)
     await refreshAfterChange()
-    message.value = `完整音频已生成：${result.path}`
+    message.value = `完整音频已生成：${result.path}；英文字幕已生成：${subtitles.en_path}`
   } catch (err) {
     error.value = err instanceof Error ? err.message : '完整音频合并失败'
   } finally {
     mergingAudio.value = false
+    generatingSubtitles.value = false
   }
 }
 
@@ -421,6 +435,13 @@ async function oneClickGenerate() {
     await mergeProjectAudio(projectId)
     await refreshAfterChange()
 
+    message.value = '正在生成中英文字幕...'
+    mergingAudio.value = false
+    generatingSubtitles.value = true
+    await createZhSrt(projectId)
+    generatingSubtitles.value = false
+    await refreshAfterChange()
+
     message.value = '正在生成视频...'
     mergingAudio.value = false
     composingVideo.value = true
@@ -439,6 +460,7 @@ async function oneClickGenerate() {
     oneClickGenerating.value = false
     ttsRunning.value = false
     mergingAudio.value = false
+    generatingSubtitles.value = false
     composingVideo.value = false
     stopPolling()
     stopVideoPolling()
@@ -526,8 +548,8 @@ onBeforeUnmount(() => {
           <button class="secondary-button" :disabled="ttsRunning || oneClickGenerating" @click="runTts">
             {{ ttsRunning ? 'TTS 生成中' : '开始 TTS' }}
           </button>
-          <button class="secondary-button" :disabled="mergingAudio || oneClickGenerating" @click="mergeAudio">
-            {{ mergingAudio ? '合并中' : '合并完整音频' }}
+          <button class="secondary-button" :disabled="mergingAudio || generatingSubtitles || oneClickGenerating" @click="mergeAudio">
+            {{ generatingSubtitles ? '字幕生成中' : mergingAudio ? '合并中' : '合并完整音频' }}
           </button>
           <button class="secondary-button" :disabled="composingVideo || oneClickGenerating" @click="composeVideo">
             {{ composingVideo ? '视频生成中' : '生成视频' }}
@@ -586,6 +608,7 @@ onBeforeUnmount(() => {
           <p class="path-line"><strong>输出根目录：</strong>{{ outputs?.output_dir || project.output_dir || '暂无输出目录' }}</p>
           <p class="path-line"><strong>本次生成目录：</strong>{{ hasOutputFilename ? outputs?.work_dir : '保存或生成后自动创建' }}</p>
           <p class="path-line"><strong>最终完整音频：</strong>{{ finalAudioPath || '保存或生成后自动创建' }}</p>
+          <p class="path-line"><strong>英文字幕：</strong>{{ finalEnglishSrtPath || '生成后自动创建' }}</p>
           <p class="path-line"><strong>素材视频目录：</strong>{{ mediaVideoDir || '未配置' }}</p>
           <p class="path-line"><strong>最终视频：</strong>{{ finalVideoPath || '生成后自动创建' }}</p>
         </div>

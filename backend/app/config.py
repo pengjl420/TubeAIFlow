@@ -18,6 +18,13 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     openai_api_key: str = ""
     deepl_api_key: str = ""
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_model: str = "deepseek-chat"
+    translation_timeout_seconds: float = 60.0
+    translation_batch_size: int = 30
+    translation_max_tokens: int = 8192
+    translation_retry_count: int = 1
     index_tts_root: Path | None = None
     index_tts_python: Path | None = None
     index_tts_model_dir: Path | None = None

@@ -8,7 +8,7 @@ Current scope:
 - Split Chinese text into TTS-friendly segments
 - Keep index-tts calls centralized in the backend TTS service
 - Generate timeline JSON from real audio durations
-- Generate Chinese and English ASS subtitle files
+- Generate English SRT subtitle files with DeepSeek translation
 - Export a simple project manifest
 
 ## Local URLs
@@ -52,3 +52,4 @@ npm run dev
 - Generated project files live under `backend/workspace/projects/{project_id}` by default.
 - FFmpeg and ffprobe must be available on PATH, or configured in `.env`.
 - The default index-tts command is `index-tts`; adjust `INDEX_TTS_COMMAND` in `.env` if your local CLI differs.
+- English subtitles use DeepSeek by default. Set `DEEPSEEK_API_KEY` in `backend\.env`.

@@ -28,6 +28,7 @@ export interface ProjectOutputs {
   output_dir: string
   work_dir?: string
   final_audio_path?: string
+  final_en_srt_path?: string
   final_video_path?: string
   files: ProjectOutputFile[]
 }

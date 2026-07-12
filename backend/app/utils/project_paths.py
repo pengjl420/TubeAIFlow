@@ -24,6 +24,10 @@ def get_final_srt_path(project: Project, workspace_dir: Path) -> Path:
     return get_project_output_dir(project, workspace_dir) / f"{get_output_stem(project)}.srt"
 
 
+def get_final_en_srt_path(project: Project, workspace_dir: Path) -> Path:
+    return get_project_output_dir(project, workspace_dir) / f"{get_output_stem(project)}_en.srt"
+
+
 def get_final_video_path(project: Project, workspace_dir: Path) -> Path:
     return get_project_output_dir(project, workspace_dir) / f"{get_output_stem(project)}.mp4"
 

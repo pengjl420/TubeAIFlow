@@ -1,0 +1,240 @@
+import json
+import logging
+import os
+import subprocess
+from datetime import datetime
+from pathlib import Path
+
+from sqlmodel import Session, select
+
+from app.config import get_settings
+from app.models.project import Project
+from app.models.segment import Segment
+from app.services import srt_service
+from app.utils.ffmpeg_utils import probe_duration
+from app.utils.project_paths import ensure_project_dirs, get_project_work_dir
+
+
+logger = logging.getLogger(__name__)
+
+
+def generate_project_tts(session: Session, project: Project) -> list[Segment]:
+    settings = get_settings()
+    segments = list(
+        session.exec(
+            select(Segment)
+            .where(Segment.project_id == project.id)
+            .order_by(Segment.segment_index)
+        ).all()
+    )
+    reference_audio_path = _validate_configuration(project, segments)
+
+    base_dir = get_project_work_dir(project, settings.workspace_dir)
+    ensure_project_dirs(base_dir)
+    audio_dir = base_dir / "audio" / "segments"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    pending = [item for item in segments if not (audio_dir / f"{item.segment_id}.wav").exists()]
+
+    project.status = "tts_running"
+    session.add(project)
+    session.commit()
+
+    if pending:
+        logs_dir = base_dir / "logs"
+        _write_initial_progress(logs_dir / "tts_progress.json", pending)
+        _run_index_tts_batch(reference_audio_path, pending, audio_dir, logs_dir)
+
+    result_path = base_dir / "logs" / "tts_results.json"
+    result_by_id = {}
+    if result_path.exists():
+        result_by_id = {
+            item["segment_id"]: item
+            for item in json.loads(result_path.read_text(encoding="utf-8"))
+        }
+
+    for segment in segments:
+        output_path = audio_dir / f"{segment.segment_id}.wav"
+        result = result_by_id.get(segment.segment_id, {})
+        if output_path.exists():
+            segment.audio_path = str(output_path)
+            segment.duration = probe_duration(output_path)
+            segment.status = "completed"
+            segment.error_message = None
+            srt_service.create_segment_srt(project, segment)
+        else:
+            segment.status = "failed"
+            segment.error_message = result.get("error", "IndexTTS did not create an audio file")
+        segment.updated_at = datetime.utcnow().isoformat()
+        session.add(segment)
+
+    project.status = "failed" if any(item.status == "failed" for item in segments) else "tts_completed"
+    project.updated_at = datetime.utcnow().isoformat()
+    session.add(project)
+    session.commit()
+    return segments
+
+
+def regenerate_segment_tts(session: Session, project: Project, segment: Segment) -> Segment:
+    settings = get_settings()
+    reference_audio_path = _validate_configuration(project, [segment])
+    base_dir = get_project_work_dir(project, settings.workspace_dir)
+    ensure_project_dirs(base_dir)
+    audio_dir = base_dir / "audio" / "segments"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+
+    output_path = audio_dir / f"{segment.segment_id}.wav"
+    output_path.unlink(missing_ok=True)
+    segment.status = "tts_running"
+    segment.error_message = None
+    segment.updated_at = datetime.utcnow().isoformat()
+    session.add(segment)
+    session.commit()
+
+    logs_dir = base_dir / "logs"
+    _write_initial_progress(logs_dir / "tts_progress.json", [segment])
+    _run_index_tts_batch(reference_audio_path, [segment], audio_dir, logs_dir)
+
+    result_path = base_dir / "logs" / "tts_results.json"
+    result = {}
+    if result_path.exists():
+        for item in json.loads(result_path.read_text(encoding="utf-8")):
+            if item.get("segment_id") == segment.segment_id:
+                result = item
+                break
+
+    if output_path.exists():
+        segment.audio_path = str(output_path)
+        segment.duration = probe_duration(output_path)
+        segment.status = "completed"
+        segment.error_message = None
+        srt_service.create_segment_srt(project, segment)
+    else:
+        segment.status = "failed"
+        segment.error_message = result.get("error", "IndexTTS did not create an audio file")
+    segment.updated_at = datetime.utcnow().isoformat()
+    session.add(segment)
+    session.commit()
+    session.refresh(segment)
+    return segment
+
+
+def _validate_configuration(project: Project, segments: list[Segment]) -> Path:
+    settings = get_settings()
+    if not segments:
+        raise ValueError("Please create transcript segments before starting TTS")
+    reference_audio_path = _project_reference_audio_path(project)
+    if reference_audio_path is None:
+        raise ValueError("请先配置项目参考音频后再开始 TTS")
+    if not reference_audio_path.is_file():
+        raise ValueError("项目配置的参考音频文件不存在，请重新上传参考音频")
+    required_paths = {
+        "INDEX_TTS_ROOT": settings.index_tts_root,
+        "INDEX_TTS_PYTHON": settings.index_tts_python,
+        "INDEX_TTS_MODEL_DIR": settings.index_tts_model_dir,
+    }
+    for name, path in required_paths.items():
+        if path is None or not path.exists():
+            raise ValueError(f"{name} is not configured or does not exist: {path}")
+    if not (settings.index_tts_model_dir / "config.yaml").is_file():
+        raise ValueError("IndexTTS model config is missing")
+    return reference_audio_path
+
+
+def _project_reference_audio_path(project: Project) -> Path | None:
+    if project.reference_audio_path:
+        return Path(project.reference_audio_path).resolve()
+    if not project.config_json:
+        return None
+    try:
+        config = json.loads(project.config_json)
+    except json.JSONDecodeError:
+        return None
+    reference_audio_path = config.get("reference_audio_path") if isinstance(config, dict) else None
+    return Path(reference_audio_path).resolve() if reference_audio_path else None
+
+
+def _run_index_tts_batch(
+    reference_audio_path: Path,
+    segments: list[Segment],
+    audio_dir: Path,
+    logs_dir: Path,
+) -> None:
+    settings = get_settings()
+    reference_audio_path = reference_audio_path.resolve()
+    audio_dir = audio_dir.resolve()
+    logs_dir = logs_dir.resolve()
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    batch_path = logs_dir / "tts_batch.json"
+    result_path = logs_dir / "tts_results.json"
+    progress_path = logs_dir / "tts_progress.json"
+    batch_path.write_text(
+        json.dumps(
+            [
+                {
+                    "segment_id": item.segment_id,
+                    "text": item.text_zh,
+                    "output_path": str(audio_dir / f"{item.segment_id}.wav"),
+                }
+                for item in segments
+            ],
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    runner_path = Path(__file__).with_name("index_tts_v1_runner.py").resolve()
+    command = [
+        str(settings.index_tts_python),
+        "-s",
+        str(runner_path),
+        "--index-root",
+        str(settings.index_tts_root.resolve()),
+        "--model-dir",
+        str(settings.index_tts_model_dir.resolve()),
+        "--batch-file",
+        str(batch_path),
+        "--voice",
+        str(reference_audio_path),
+        "--result-file",
+        str(result_path),
+        "--progress-file",
+        str(progress_path),
+    ]
+    if settings.index_tts_fp16:
+        command.append("--fp16")
+
+    env = os.environ.copy()
+    env["PYTHONUTF8"] = "1"
+    result = subprocess.run(
+        command,
+        cwd=settings.index_tts_root.resolve(),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        env=env,
+    )
+    (logs_dir / "tts.log").write_text(result.stdout, encoding="utf-8")
+    if result.stderr:
+        (logs_dir / "error.log").write_text(result.stderr, encoding="utf-8")
+    if result.returncode != 0 and not result_path.exists():
+        message = result.stderr.strip() or result.stdout.strip() or "IndexTTS batch failed"
+        raise RuntimeError(message[-4000:])
+
+
+def _write_initial_progress(progress_path: Path, segments: list[Segment]) -> None:
+    segment_ids = [item.segment_id for item in segments]
+    data = {
+        "total": len(segments),
+        "completed": 0,
+        "failed": 0,
+        "current_segment_id": None,
+        "status": "running",
+        "segment_ids": segment_ids,
+        "segment_results": [],
+    }
+    progress_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = progress_path.with_suffix(progress_path.suffix + ".tmp")
+    temp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp_path.replace(progress_path)

@@ -1,0 +1,195 @@
+import json
+import uuid
+from datetime import datetime
+from pathlib import Path
+
+from sqlmodel import Session, select
+
+from app.config import get_settings
+from app.models.project import Project
+from app.models.segment import Segment
+from app.services.segmenter import split_script
+from app.services.text_cleaner import clean_script
+from app.utils.file_utils import project_dir
+from app.utils.project_paths import ensure_project_dirs, get_output_stem, get_project_work_dir, safe_filename_stem
+
+
+def create_project(session: Session, name: str, config: dict | None = None) -> Project:
+    settings = get_settings()
+    project_id = uuid.uuid4().hex[:12]
+    output_dir = project_dir(settings.workspace_dir, project_id)
+    project = Project(
+        id=project_id,
+        name=name,
+        output_dir=str(output_dir),
+        status="created",
+        config_json=json.dumps(config or {}, ensure_ascii=False),
+    )
+    session.add(project)
+    session.commit()
+    session.refresh(project)
+    return project
+
+
+def list_projects(session: Session) -> list[Project]:
+    return list(session.exec(select(Project).order_by(Project.created_at.desc())).all())
+
+
+def get_project(session: Session, project_id: str) -> Project | None:
+    return session.get(Project, project_id)
+
+
+def save_script(session: Session, project: Project, raw_text: str) -> Project:
+    settings = get_settings()
+    base_dir = get_project_work_dir(project, settings.workspace_dir)
+    ensure_project_dirs(base_dir)
+    input_dir = base_dir / "input"
+    input_dir.mkdir(parents=True, exist_ok=True)
+
+    clean_text = clean_script(raw_text)
+    stem = get_output_stem(project)
+    raw_path = input_dir / f"{stem}_raw.txt"
+    clean_path = input_dir / f"{stem}_clean.txt"
+    raw_path.write_text(raw_text, encoding="utf-8")
+    clean_path.write_text(clean_text, encoding="utf-8")
+
+    project.script_raw_path = str(raw_path)
+    project.script_clean_path = str(clean_path)
+    project.status = "script_imported"
+    project.updated_at = datetime.utcnow().isoformat()
+    session.add(project)
+    session.commit()
+    session.refresh(project)
+    return project
+
+
+def create_segments(session: Session, project: Project) -> list[Segment]:
+    if not project.script_clean_path:
+        raise ValueError("Project has no cleaned script")
+    clean_text = Path(project.script_clean_path).read_text(encoding="utf-8")
+    segment_data = split_script(clean_text)
+
+    existing = session.exec(select(Segment).where(Segment.project_id == project.id)).all()
+    for segment in existing:
+        session.delete(segment)
+    session.commit()
+
+    segments = [
+        Segment(
+            id=f"{project.id}_{item['segment_id']}",
+            segment_id=item["segment_id"],
+            project_id=project.id,
+            segment_index=item["index"],
+            text_zh=item["text_zh"],
+            status=item["status"],
+        )
+        for item in segment_data
+    ]
+    for segment in segments:
+        session.add(segment)
+
+    base_dir = get_project_work_dir(project, get_settings().workspace_dir)
+    ensure_project_dirs(base_dir)
+    segments_dir = base_dir / "segments"
+    segments_dir.mkdir(parents=True, exist_ok=True)
+    (segments_dir / f"{get_output_stem(project)}_segments.json").write_text(
+        json.dumps(segment_data, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    project.status = "segmented"
+    project.updated_at = datetime.utcnow().isoformat()
+    session.add(project)
+    session.commit()
+    return segments
+
+
+def save_reference_audio(
+    session: Session,
+    project: Project,
+    source,
+    original_filename: str,
+    max_bytes: int = 100 * 1024 * 1024,
+) -> Project:
+    extension = Path(original_filename).suffix.lower()
+    if extension not in {".wav", ".mp3", ".flac", ".m4a"}:
+        raise ValueError("Reference audio must be WAV, MP3, FLAC, or M4A")
+
+    base_dir = get_project_work_dir(project, get_settings().workspace_dir)
+    ensure_project_dirs(base_dir)
+    input_dir = base_dir / "input"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    output_path = input_dir / f"reference{extension}"
+    written = 0
+    try:
+        with output_path.open("wb") as target:
+            while chunk := source.read(1024 * 1024):
+                written += len(chunk)
+                if written > max_bytes:
+                    raise ValueError("Reference audio exceeds the 100 MB limit")
+                target.write(chunk)
+    except Exception:
+        output_path.unlink(missing_ok=True)
+        raise
+
+    project.reference_audio_path = str(output_path)
+    config = _load_project_config(project)
+    config["reference_audio_path"] = str(output_path)
+    config["reference_audio_filename"] = Path(original_filename).name or output_path.name
+    project.config_json = json.dumps(config, ensure_ascii=False)
+    project.updated_at = datetime.utcnow().isoformat()
+    session.add(project)
+    session.commit()
+    session.refresh(project)
+    return project
+
+
+def update_output_settings(
+    session: Session,
+    project: Project,
+    output_dir: str,
+    output_filename: str,
+) -> Project:
+    if not output_dir.strip():
+        raise ValueError("Output directory is required")
+    directory = Path(output_dir).expanduser().resolve()
+    directory.mkdir(parents=True, exist_ok=True)
+
+    config = _load_project_config(project)
+    config["output_filename"] = safe_filename_stem(output_filename or _timestamp_stem())
+    project.output_dir = str(directory)
+    project.config_json = json.dumps(config, ensure_ascii=False)
+    ensure_project_dirs(get_project_work_dir(project, get_settings().workspace_dir))
+    project.updated_at = datetime.utcnow().isoformat()
+    session.add(project)
+    session.commit()
+    session.refresh(project)
+    return project
+
+
+def ensure_output_filename(session: Session, project: Project) -> Project:
+    config = _load_project_config(project)
+    if str(config.get("output_filename") or "").strip():
+        return project
+    config["output_filename"] = safe_filename_stem(_timestamp_stem())
+    project.config_json = json.dumps(config, ensure_ascii=False)
+    project.updated_at = datetime.utcnow().isoformat()
+    ensure_project_dirs(get_project_work_dir(project, get_settings().workspace_dir))
+    session.add(project)
+    session.commit()
+    session.refresh(project)
+    return project
+
+
+def _load_project_config(project: Project) -> dict:
+    if not project.config_json:
+        return {}
+    try:
+        data = json.loads(project.config_json)
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _timestamp_stem() -> str:
+    return datetime.now().strftime("%Y%m%d_%H%M%S")

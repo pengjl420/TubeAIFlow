@@ -1,0 +1,63 @@
+import logging
+from pathlib import Path
+
+from sqlmodel import Session, select
+
+from app.config import get_settings
+from app.models.project import Project
+from app.models.segment import Segment
+from app.services import srt_service
+from app.utils.ffmpeg_utils import probe_duration, run_ffmpeg
+from app.utils.project_paths import ensure_project_dirs, get_final_audio_path, get_project_work_dir
+
+
+logger = logging.getLogger(__name__)
+
+
+def update_segment_durations(session: Session, project: Project) -> list[Segment]:
+    segments = session.exec(
+        select(Segment)
+        .where(Segment.project_id == project.id)
+        .order_by(Segment.segment_index)
+    ).all()
+    for segment in segments:
+        if not segment.audio_path:
+            continue
+        segment.duration = probe_duration(Path(segment.audio_path))
+        session.add(segment)
+    session.commit()
+    return list(segments)
+
+
+def merge_project_audio(session: Session, project: Project) -> Path:
+    segments = session.exec(
+        select(Segment)
+        .where(Segment.project_id == project.id)
+        .order_by(Segment.segment_index)
+    ).all()
+    audio_segments = [segment for segment in segments if segment.audio_path]
+    audio_paths = [Path(segment.audio_path) for segment in audio_segments]
+    if not audio_paths:
+        raise ValueError("No segment audio files to merge")
+
+    base_dir = get_project_work_dir(project, get_settings().workspace_dir)
+    ensure_project_dirs(base_dir)
+    list_path = base_dir / "audio" / "segments.txt"
+    full_voice_path = get_final_audio_path(project, get_settings().workspace_dir)
+    try:
+        list_path.write_text(
+            "\n".join(f"file '{path.as_posix()}'" for path in audio_paths),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        raise RuntimeError(f"Cannot write FFmpeg concat list: {list_path}") from exc
+    run_ffmpeg(["-y", "-f", "concat", "-safe", "0", "-i", str(list_path), "-c", "copy", str(full_voice_path)])
+    for segment in audio_segments:
+        if segment.duration is None:
+            segment.duration = probe_duration(Path(segment.audio_path))
+            session.add(segment)
+    srt_service.create_full_srt(project, list(audio_segments))
+    project.status = "audio_merged"
+    session.add(project)
+    session.commit()
+    return full_voice_path

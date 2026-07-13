@@ -57,7 +57,7 @@ def translate_project_to_english(session: Session, project: Project, overwrite: 
     if missing_segments:
         settings = get_settings()
         if not settings.deepseek_api_key:
-            raise ValueError("DEEPSEEK_API_KEY is not configured")
+            raise ValueError("DeepSeek API Key is not configured in System Settings")
 
         project.status = "translating"
         project.updated_at = datetime.utcnow().isoformat()
@@ -134,7 +134,7 @@ def translate_subtitle_cues_to_english(project: Project, zh_cues: list[dict]) ->
 
     settings = get_settings()
     if not settings.deepseek_api_key:
-        raise ValueError("DEEPSEEK_API_KEY is not configured")
+        raise ValueError("DeepSeek API Key is not configured in System Settings")
 
     translations = _translate_cues_with_deepseek(zh_cues, _get_translation_log_path(project))
     missing = [

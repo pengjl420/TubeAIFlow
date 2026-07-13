@@ -48,7 +48,7 @@ def ensure_project_dirs(base_dir: Path) -> None:
 
 
 def get_output_stem(project: Project) -> str:
-    config = _load_project_config(project)
+    config = load_project_config(project)
     configured = str(config.get("output_filename") or "").strip()
     return safe_filename_stem(configured or project.name or project.id)
 
@@ -58,7 +58,7 @@ def safe_filename_stem(value: str) -> str:
     return stem[:80] or "output"
 
 
-def _load_project_config(project: Project) -> dict:
+def load_project_config(project: Project) -> dict:
     if not project.config_json:
         return {}
     try:

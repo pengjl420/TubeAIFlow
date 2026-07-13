@@ -29,13 +29,6 @@ if errorlevel 1 (
   exit /b 1
 )
 
-if not exist "%BACKEND_DIR%\.env" (
-  if exist "%BACKEND_DIR%\.env.example" (
-    echo Creating backend\.env from backend\.env.example...
-    copy "%BACKEND_DIR%\.env.example" "%BACKEND_DIR%\.env" >nul
-  )
-)
-
 if not exist "%BACKEND_DIR%\.venv\Scripts\python.exe" (
   echo Creating backend virtual environment...
   python -m venv "%BACKEND_DIR%\.venv"
@@ -70,9 +63,20 @@ if not exist "%FRONTEND_DIR%\node_modules" (
   popd >nul
 )
 
+pushd "%BACKEND_DIR%" >nul
+for /f %%P in ('.venv\Scripts\python.exe -m app.find_available_port') do set "BACKEND_PORT=%%P"
+popd >nul
+if not defined BACKEND_PORT (
+  echo [ERROR] No available backend port was found.
+  pause
+  exit /b 1
+)
+set "APP_PORT_OVERRIDE=%BACKEND_PORT%"
+set "VITE_API_PORT=%BACKEND_PORT%"
+
 echo.
-echo Starting backend:  http://127.0.0.1:18080
-start "TubeAIFlow Backend" cmd /k "cd /d "%BACKEND_DIR%" && .venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 18080 --reload"
+echo Starting backend on http://127.0.0.1:%BACKEND_PORT% ...
+start "TubeAIFlow Backend" cmd /k "cd /d "%BACKEND_DIR%" && .venv\Scripts\python.exe -m app.run"
 
 echo Starting frontend: http://127.0.0.1:5173
 start "TubeAIFlow Frontend" cmd /k "cd /d "%FRONTEND_DIR%" && npm run dev"

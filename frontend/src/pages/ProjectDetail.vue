@@ -425,7 +425,7 @@ async function composeVideo() {
   error.value = ''
   message.value = ''
   if (!mediaVideoDir.value) {
-    error.value = '请先在项目配置中选择素材视频目录'
+    error.value = '请先在项目设置中选择素材视频目录'
     return
   }
   composingVideo.value = true
@@ -457,7 +457,7 @@ async function oneClickGenerate() {
     return
   }
   if (!mediaVideoDir.value) {
-    error.value = '请先在项目配置中选择素材视频目录后再一键生成'
+    error.value = '请先在项目设置中选择素材视频目录后再一键生成'
     return
   }
 
@@ -586,7 +586,7 @@ onBeforeUnmount(() => {
             </p>
           </div>
           <AudioPlayer v-if="referenceAudioUrl" :src="referenceAudioUrl" />
-          <RouterLink class="secondary-button" :to="`/projects/${project.id}/config`">项目配置</RouterLink>
+          <RouterLink class="secondary-button" :to="`/projects/${project.id}/config`">项目设置</RouterLink>
         </div>
 
         <label class="field">

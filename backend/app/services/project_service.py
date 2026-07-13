@@ -10,8 +10,15 @@ from app.models.project import Project
 from app.models.segment import Segment
 from app.services.segmenter import split_script
 from app.services.text_cleaner import clean_script
-from app.utils.file_utils import project_dir
-from app.utils.project_paths import ensure_project_dirs, get_output_stem, get_project_work_dir, safe_filename_stem
+from app.utils.file_utils import ensure_inside_any, project_dir
+from app.utils.project_paths import (
+    ensure_project_dirs,
+    get_output_stem,
+    get_project_work_dir,
+    load_project_config,
+    safe_filename_stem,
+)
+from app.utils.time_utils import utc_now_iso
 
 
 def create_project(session: Session, name: str, config: dict | None = None) -> Project:
@@ -58,7 +65,7 @@ def save_script(session: Session, project: Project, raw_text: str) -> Project:
     project.script_raw_path = str(raw_path)
     project.script_clean_path = str(clean_path)
     project.status = "script_imported"
-    project.updated_at = datetime.utcnow().isoformat()
+    project.updated_at = utc_now_iso()
     session.add(project)
     session.commit()
     session.refresh(project)
@@ -68,16 +75,19 @@ def save_script(session: Session, project: Project, raw_text: str) -> Project:
 def create_segments(session: Session, project: Project) -> list[Segment]:
     if not project.script_clean_path:
         raise ValueError("Project has no cleaned script")
-    clean_text = Path(project.script_clean_path).read_text(encoding="utf-8")
+    settings = get_settings()
+    clean_path = ensure_inside_any(
+        Path(project.script_clean_path),
+        [get_project_work_dir(project, settings.workspace_dir), project_dir(settings.workspace_dir, project.id)],
+    )
+    if not clean_path.is_file():
+        raise ValueError("Cleaned script file does not exist")
+    clean_text = clean_path.read_text(encoding="utf-8")
     segment_data = split_script(clean_text)
     if not segment_data:
         raise ValueError("Cleaned script is empty")
 
     existing = session.exec(select(Segment).where(Segment.project_id == project.id)).all()
-    for segment in existing:
-        session.delete(segment)
-    session.commit()
-
     segments = [
         Segment(
             id=f"{project.id}_{item['segment_id']}",
@@ -89,9 +99,6 @@ def create_segments(session: Session, project: Project) -> list[Segment]:
         )
         for item in segment_data
     ]
-    for segment in segments:
-        session.add(segment)
-
     base_dir = get_project_work_dir(project, get_settings().workspace_dir)
     ensure_project_dirs(base_dir)
     segments_dir = base_dir / "segments"
@@ -101,8 +108,13 @@ def create_segments(session: Session, project: Project) -> list[Segment]:
         encoding="utf-8",
     )
 
+    for segment in existing:
+        session.delete(segment)
+    for segment in segments:
+        session.add(segment)
+
     project.status = "segmented"
-    project.updated_at = datetime.utcnow().isoformat()
+    project.updated_at = utc_now_iso()
     session.add(project)
     session.commit()
     return segments
@@ -137,11 +149,11 @@ def save_reference_audio(
         raise
 
     project.reference_audio_path = str(output_path)
-    config = _load_project_config(project)
+    config = load_project_config(project)
     config["reference_audio_path"] = str(output_path)
     config["reference_audio_filename"] = Path(original_filename).name or output_path.name
     project.config_json = json.dumps(config, ensure_ascii=False)
-    project.updated_at = datetime.utcnow().isoformat()
+    project.updated_at = utc_now_iso()
     session.add(project)
     session.commit()
     session.refresh(project)
@@ -159,12 +171,53 @@ def update_output_settings(
     directory = Path(output_dir).expanduser().resolve()
     directory.mkdir(parents=True, exist_ok=True)
 
-    config = _load_project_config(project)
+    config = load_project_config(project)
     config["output_filename"] = safe_filename_stem(output_filename or _timestamp_stem())
     project.output_dir = str(directory)
     project.config_json = json.dumps(config, ensure_ascii=False)
     ensure_project_dirs(get_project_work_dir(project, get_settings().workspace_dir))
-    project.updated_at = datetime.utcnow().isoformat()
+    project.updated_at = utc_now_iso()
+    session.add(project)
+    session.commit()
+    session.refresh(project)
+    return project
+
+
+def update_project_settings(
+    session: Session,
+    project: Project,
+    name: str,
+    output_dir: str,
+    output_filename: str,
+    media_video_dir: str,
+) -> Project:
+    project_name = name.strip()
+    if not project_name:
+        raise ValueError("Project name is required")
+    if not output_dir.strip():
+        raise ValueError("Output directory is required")
+
+    video_directory: Path | None = None
+    if media_video_dir.strip():
+        video_directory = Path(media_video_dir).expanduser().resolve()
+        if not video_directory.is_dir():
+            raise ValueError("Video material directory does not exist")
+
+    output_directory = Path(output_dir).expanduser().resolve()
+    output_directory.mkdir(parents=True, exist_ok=True)
+
+    config = load_project_config(project)
+    config["output_filename"] = safe_filename_stem(output_filename or _timestamp_stem())
+    if video_directory:
+        config["media_video_dir"] = str(video_directory)
+    else:
+        config.pop("media_video_dir", None)
+
+    project.name = project_name
+    project.output_dir = str(output_directory)
+    project.config_json = json.dumps(config, ensure_ascii=False)
+    ensure_project_dirs(get_project_work_dir(project, get_settings().workspace_dir))
+    project.updated_at = utc_now_iso()
     session.add(project)
     session.commit()
     session.refresh(project)
@@ -172,27 +225,17 @@ def update_output_settings(
 
 
 def ensure_output_filename(session: Session, project: Project) -> Project:
-    config = _load_project_config(project)
+    config = load_project_config(project)
     if str(config.get("output_filename") or "").strip():
         return project
     config["output_filename"] = safe_filename_stem(_timestamp_stem())
     project.config_json = json.dumps(config, ensure_ascii=False)
-    project.updated_at = datetime.utcnow().isoformat()
+    project.updated_at = utc_now_iso()
     ensure_project_dirs(get_project_work_dir(project, get_settings().workspace_dir))
     session.add(project)
     session.commit()
     session.refresh(project)
     return project
-
-
-def _load_project_config(project: Project) -> dict:
-    if not project.config_json:
-        return {}
-    try:
-        data = json.loads(project.config_json)
-    except json.JSONDecodeError:
-        return {}
-    return data if isinstance(data, dict) else {}
 
 
 def _timestamp_stem() -> str:

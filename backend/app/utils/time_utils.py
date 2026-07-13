@@ -1,3 +1,11 @@
+from datetime import UTC, datetime
+
+
+def utc_now_iso() -> str:
+    """Return a timezone-aware UTC timestamp for persisted records."""
+    return datetime.now(UTC).isoformat()
+
+
 def seconds_to_ass_time(seconds: float) -> str:
     centiseconds = int(round(seconds * 100))
     hours = centiseconds // 360000

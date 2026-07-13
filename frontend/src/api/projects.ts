@@ -33,24 +33,24 @@ export interface ProjectOutputs {
   files: ProjectOutputFile[]
 }
 
-export interface DirectoryEntry {
-  name: string
-  path: string
-}
-
-export interface DirectoryList {
-  current: string
-  parent?: string | null
-  roots: string[]
-  directories: DirectoryEntry[]
-}
-
 export async function getProjectOutputs(id: string): Promise<ProjectOutputs> {
   return unwrap<ProjectOutputs>(await apiClient.get(`/projects/${id}/outputs`))
 }
 
-export async function listDirectories(path?: string): Promise<DirectoryList> {
-  return unwrap<DirectoryList>(await apiClient.post('/projects/directories', { path: path || null }))
+export async function selectDirectory(initialPath: string, title: string): Promise<string | null> {
+  try {
+    const result = unwrap<{ path: string | null }>(await apiClient.post(
+      '/projects/select-directory',
+      { initial_path: initialPath || null, title },
+      { timeout: 0 },
+    ))
+    return result.path
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Method Not Allowed') {
+      throw new Error('后端仍在运行旧版本，请重启 TubeAIFlow 后再选择文件夹')
+    }
+    throw error
+  }
 }
 
 export async function saveScript(id: string, text: string): Promise<Project> {
@@ -76,4 +76,15 @@ export async function saveOutputSettings(
     output_dir: outputDir,
     output_filename: outputFilename,
   }))
+}
+
+export interface ProjectSettingsInput {
+  name: string
+  output_dir: string
+  output_filename: string
+  media_video_dir: string
+}
+
+export async function saveProjectSettings(id: string, settings: ProjectSettingsInput): Promise<Project> {
+  return unwrap<Project>(await apiClient.put(`/projects/${id}/settings`, settings))
 }

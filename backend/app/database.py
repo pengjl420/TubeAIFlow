@@ -2,11 +2,11 @@ from collections.abc import Generator
 
 from sqlmodel import Session, SQLModel, create_engine
 
-from app.config import get_settings
+from app.config import DATABASE_PATH
 
 
-settings = get_settings()
-engine = create_engine(settings.database_url, connect_args={"check_same_thread": False})
+DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
+engine = create_engine(f"sqlite:///{DATABASE_PATH}", connect_args={"check_same_thread": False})
 
 
 def create_db_and_tables() -> None:

@@ -5,12 +5,10 @@ import { useRoute, useRouter } from 'vue-router'
 import { API_BASE_URL } from '../api/client'
 import {
   getProject,
-  listDirectories,
-  saveOutputSettings,
+  saveProjectSettings,
+  selectDirectory,
   uploadReferenceAudio,
-  type DirectoryList,
 } from '../api/projects'
-import { saveVideoSettings } from '../api/videos'
 import AudioPlayer from '../components/AudioPlayer.vue'
 import type { Project } from '../types/project'
 
@@ -18,18 +16,14 @@ const route = useRoute()
 const router = useRouter()
 const projectId = String(route.params.id)
 const project = ref<Project | null>(null)
+const projectName = ref('')
 const referenceAudio = ref<File | null>(null)
 const outputDir = ref('')
 const outputFilename = ref('')
 const mediaVideoDir = ref('')
 const loading = ref(false)
-const savingAudio = ref(false)
-const savingOutput = ref(false)
-const savingVideo = ref(false)
-const pickerOpen = ref(false)
-const pickerLoading = ref(false)
-const pickerTarget = ref<'output' | 'video'>('output')
-const directoryList = ref<DirectoryList | null>(null)
+const saving = ref(false)
+const selectingFolder = ref<'output' | 'video' | null>(null)
 const error = ref('')
 const message = ref('')
 
@@ -53,8 +47,9 @@ const referenceAudioUrl = computed(() => {
   return `${API_BASE_URL}/projects/${projectId}/reference-audio?v=${encodeURIComponent(project.value.updated_at)}`
 })
 
-function fillOutputForm() {
+function fillForm() {
   if (!project.value) return
+  projectName.value = project.value.name
   outputDir.value = project.value.output_dir || ''
   const filename = projectConfig.value.output_filename
   const videoDir = projectConfig.value.media_video_dir
@@ -67,9 +62,9 @@ async function load() {
   error.value = ''
   try {
     project.value = await getProject(projectId)
-    fillOutputForm()
+    fillForm()
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '项目配置加载失败'
+    error.value = err instanceof Error ? err.message : '项目设置加载失败'
   } finally {
     loading.value = false
   }
@@ -79,92 +74,53 @@ function selectReferenceAudio(event: Event) {
   referenceAudio.value = (event.target as HTMLInputElement).files?.[0] || null
 }
 
-async function saveReferenceAudio() {
-  if (!referenceAudio.value) {
-    error.value = '请选择参考音频文件'
-    return
-  }
-  savingAudio.value = true
+async function chooseFolder(target: 'output' | 'video') {
+  selectingFolder.value = target
   error.value = ''
-  message.value = ''
   try {
-    project.value = await uploadReferenceAudio(projectId, referenceAudio.value)
-    referenceAudio.value = null
-    message.value = '参考音频已保存'
+    const current = target === 'output' ? outputDir.value : mediaVideoDir.value
+    const title = target === 'output' ? '选择输出文件夹' : '选择素材视频文件夹'
+    const selected = await selectDirectory(current, title)
+    if (selected && target === 'output') outputDir.value = selected
+    if (selected && target === 'video') mediaVideoDir.value = selected
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '参考音频保存失败'
+    error.value = err instanceof Error ? err.message : '系统文件夹选择窗口打开失败'
   } finally {
-    savingAudio.value = false
+    selectingFolder.value = null
   }
 }
 
-async function saveOutputConfig() {
+async function save() {
+  if (!projectName.value.trim()) {
+    error.value = '请输入项目名称'
+    return
+  }
   if (!outputDir.value.trim()) {
-    error.value = '请选择输出目录'
+    error.value = '请选择输出文件夹'
     return
   }
-  savingOutput.value = true
-  error.value = ''
-  message.value = ''
-  const wasBlank = !outputFilename.value.trim()
-  try {
-    project.value = await saveOutputSettings(projectId, outputDir.value.trim(), outputFilename.value.trim())
-    fillOutputForm()
-    message.value = wasBlank ? '已使用当前时间戳作为文件名' : '输出配置已保存'
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '输出配置保存失败'
-  } finally {
-    savingOutput.value = false
-  }
-}
 
-async function saveVideoConfig() {
-  if (!mediaVideoDir.value.trim()) {
-    error.value = '请选择素材视频目录'
-    return
-  }
-  savingVideo.value = true
+  saving.value = true
   error.value = ''
   message.value = ''
   try {
-    project.value = await saveVideoSettings(projectId, mediaVideoDir.value.trim())
-    fillOutputForm()
-    message.value = '视频素材目录已保存'
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '视频素材目录保存失败'
-  } finally {
-    savingVideo.value = false
-  }
-}
-
-async function openFolderPicker(target: 'output' | 'video' = 'output') {
-  pickerTarget.value = target
-  pickerOpen.value = true
-  const current = target === 'video' ? mediaVideoDir.value : outputDir.value
-  await browseDirectory(current || undefined)
-}
-
-async function browseDirectory(path?: string | null) {
-  pickerLoading.value = true
-  error.value = ''
-  try {
-    directoryList.value = await listDirectories(path || undefined)
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '目录读取失败'
-  } finally {
-    pickerLoading.value = false
-  }
-}
-
-function chooseCurrentDirectory() {
-  if (directoryList.value) {
-    if (pickerTarget.value === 'video') {
-      mediaVideoDir.value = directoryList.value.current
-    } else {
-      outputDir.value = directoryList.value.current
+    project.value = await saveProjectSettings(projectId, {
+      name: projectName.value.trim(),
+      output_dir: outputDir.value.trim(),
+      output_filename: outputFilename.value.trim(),
+      media_video_dir: mediaVideoDir.value.trim(),
+    })
+    if (referenceAudio.value) {
+      project.value = await uploadReferenceAudio(projectId, referenceAudio.value)
+      referenceAudio.value = null
     }
+    fillForm()
+    message.value = '项目设置已保存'
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '项目设置保存失败'
+  } finally {
+    saving.value = false
   }
-  pickerOpen.value = false
 }
 
 onMounted(load)
@@ -173,58 +129,69 @@ onMounted(load)
 <template>
   <section v-if="project">
     <div class="page-title">
-      <h1>项目配置</h1>
-      <button class="secondary-button" @click="router.push(`/projects/${project.id}`)">返回项目</button>
+      <h1>项目设置</h1>
+      <div class="page-title-actions">
+        <button class="secondary-button" @click="router.push(`/projects/${project.id}`)">返回项目</button>
+        <button class="primary-button" type="button" :disabled="saving || selectingFolder !== null" @click="save">
+          {{ saving ? '保存中…' : '保存项目设置' }}
+        </button>
+      </div>
     </div>
 
     <div class="grid">
       <div class="panel">
-        <div class="section-head">
-          <h2>输出设置</h2>
-        </div>
+        <div class="section-head"><h2>基本信息</h2></div>
+        <label class="field reference-field">
+          <span>项目名称</span>
+          <input v-model="projectName" maxlength="120" placeholder="请输入项目名称" />
+        </label>
+      </div>
+
+      <div class="panel">
+        <div class="section-head"><h2>输出设置</h2></div>
         <label class="field reference-field">
           <span>输出根目录</span>
           <div class="inline-form">
             <input v-model="outputDir" readonly placeholder="请选择输出文件夹" />
-            <button class="secondary-button" type="button" @click="openFolderPicker('output')">选择文件夹</button>
+            <button
+              class="secondary-button"
+              type="button"
+              :disabled="selectingFolder !== null"
+              @click="chooseFolder('output')"
+            >
+              {{ selectingFolder === 'output' ? '等待选择…' : '选择文件夹' }}
+            </button>
           </div>
-          <span class="muted">每次生成会按文件名创建子文件夹，例如 D:\测试\4-0715。</span>
+          <span class="muted">点击后将打开系统文件夹选择窗口。</span>
         </label>
         <label class="field reference-field">
           <span>默认输出文件名</span>
           <input v-model="outputFilename" placeholder="留空则使用当前时间戳" />
           <span class="muted">中间文件写入同名子文件夹，完整音频输出到根目录下的同名 WAV。</span>
         </label>
-        <div class="actions">
-          <button class="primary-button" :disabled="savingOutput" @click="saveOutputConfig">
-            {{ savingOutput ? '保存中' : '保存输出配置' }}
-          </button>
-        </div>
       </div>
 
       <div class="panel">
-        <div class="section-head">
-          <h2>视频素材</h2>
-        </div>
+        <div class="section-head"><h2>视频素材</h2></div>
         <label class="field reference-field">
           <span>素材视频目录</span>
           <div class="inline-form">
-            <input v-model="mediaVideoDir" readonly placeholder="请选择素材视频文件夹" />
-            <button class="secondary-button" type="button" @click="openFolderPicker('video')">选择文件夹</button>
+            <input v-model="mediaVideoDir" readonly placeholder="请选择素材视频文件夹（可选）" />
+            <button
+              class="secondary-button"
+              type="button"
+              :disabled="selectingFolder !== null"
+              @click="chooseFolder('video')"
+            >
+              {{ selectingFolder === 'video' ? '等待选择…' : '选择文件夹' }}
+            </button>
           </div>
-          <span class="muted">生成最终视频时会扫描该目录，按标题归类后每类随机选取一个素材。</span>
+          <span class="muted">生成最终视频时会扫描该目录；不生成视频可留空。</span>
         </label>
-        <div class="actions">
-          <button class="primary-button" :disabled="savingVideo" @click="saveVideoConfig">
-            {{ savingVideo ? '保存中' : '保存视频素材配置' }}
-          </button>
-        </div>
       </div>
 
       <div class="panel">
-        <div class="section-head">
-          <h2>参考音频</h2>
-        </div>
+        <div class="section-head"><h2>参考音频</h2></div>
         <div class="reference-box">
           <div>
             <strong>当前参考音频</strong>
@@ -243,76 +210,15 @@ onMounted(load)
             @change="selectReferenceAudio"
           />
           <span class="muted">
-            {{ referenceAudio ? `已选择：${referenceAudio.name}` : '支持 WAV、MP3、FLAC、M4A' }}
+            {{ referenceAudio ? `已选择：${referenceAudio.name}` : '不更换可留空；支持 WAV、MP3、FLAC、M4A' }}
           </span>
         </label>
-
-        <div class="actions">
-          <button class="primary-button" :disabled="savingAudio" @click="saveReferenceAudio">
-            {{ savingAudio ? '保存中' : '保存参考音频' }}
-          </button>
-        </div>
       </div>
     </div>
 
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="message" class="success">{{ message }}</p>
 
-    <div v-if="pickerOpen" class="modal-backdrop">
-      <div class="modal-panel">
-        <div class="section-head">
-          <h2>{{ pickerTarget === 'video' ? '选择素材视频文件夹' : '选择输出文件夹' }}</h2>
-          <button class="secondary-button" type="button" @click="pickerOpen = false">关闭</button>
-        </div>
-
-        <div class="folder-current">
-          <span class="muted">当前目录</span>
-          <strong>{{ directoryList?.current || '加载中' }}</strong>
-        </div>
-
-        <div class="folder-roots">
-          <button
-            v-for="root in directoryList?.roots || []"
-            :key="root"
-            class="secondary-button"
-            type="button"
-            @click="browseDirectory(root)"
-          >
-            {{ root }}
-          </button>
-        </div>
-
-        <div class="folder-list">
-          <button
-            v-if="directoryList?.parent"
-            class="folder-row"
-            type="button"
-            @click="browseDirectory(directoryList.parent)"
-          >
-            ..
-          </button>
-          <button
-            v-for="directory in directoryList?.directories || []"
-            :key="directory.path"
-            class="folder-row"
-            type="button"
-            @click="browseDirectory(directory.path)"
-          >
-            {{ directory.name }}
-          </button>
-          <p v-if="!pickerLoading && directoryList && !directoryList.directories.length" class="muted">
-            当前目录没有可进入的子文件夹。
-          </p>
-        </div>
-
-        <div class="actions">
-          <button class="primary-button" type="button" :disabled="!directoryList" @click="chooseCurrentDirectory">
-            使用当前文件夹
-          </button>
-          <button class="secondary-button" type="button" @click="pickerOpen = false">取消</button>
-        </div>
-      </div>
-    </div>
   </section>
 
   <section v-else class="panel">

@@ -21,11 +21,11 @@ Current scope:
 From the project root, double-click:
 
 - `Start_TubeAIFlow.bat` to start the backend and frontend
-- `Restart_TubeAIFlow.bat` to release ports `18080` and `5173`, then start again
+- `Restart_TubeAIFlow.bat` to stop the running app, then start again
 
-The start script creates `backend\.env` from `backend\.env.example` if needed,
-creates the backend virtual environment if needed, installs missing dependencies,
-and opens separate terminal windows for the backend and frontend services.
+The start script creates the backend virtual environment if needed, installs missing
+dependencies, and opens separate terminal windows for the backend and frontend services.
+Backend runtime configuration is loaded from the local SQLite system settings table.
 
 ## Backend
 
@@ -34,8 +34,7 @@ cd backend
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-Copy-Item .env.example .env
-uvicorn app.main:app --host 127.0.0.1 --port 18080 --reload
+python -m app.run
 ```
 
 ## Frontend
@@ -48,8 +47,8 @@ npm run dev
 
 ## Notes
 
-- `.env` is intentionally ignored.
+- Runtime configuration is managed on the **System Settings** page and stored locally in SQLite.
+- API keys are never returned to the frontend after they are saved.
 - Generated project files live under `backend/workspace/projects/{project_id}` by default.
-- FFmpeg and ffprobe must be available on PATH, or configured in `.env`.
-- The default index-tts command is `index-tts`; adjust `INDEX_TTS_COMMAND` in `.env` if your local CLI differs.
-- English subtitles use DeepSeek by default. Set `DEEPSEEK_API_KEY` in `backend\.env`.
+- FFmpeg, ffprobe, IndexTTS, translation services, workspace, host, and port are configured on the System Settings page.
+- Host and port changes take effect after restarting the app.

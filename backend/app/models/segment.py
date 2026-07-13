@@ -1,6 +1,6 @@
-from datetime import datetime
-
 from sqlmodel import Field, SQLModel
+
+from app.utils.time_utils import utc_now_iso
 
 
 class Segment(SQLModel, table=True):
@@ -18,5 +18,5 @@ class Segment(SQLModel, table=True):
     end_time: float | None = None
     status: str = "pending"
     error_message: str | None = None
-    created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
-    updated_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+    created_at: str = Field(default_factory=utc_now_iso)
+    updated_at: str = Field(default_factory=utc_now_iso)

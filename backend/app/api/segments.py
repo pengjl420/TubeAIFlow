@@ -1,4 +1,3 @@
-from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -10,8 +9,9 @@ from app.config import get_settings
 from app.database import get_session
 from app.models.segment import Segment
 from app.services import project_service
-from app.utils.file_utils import ensure_inside_workspace, project_dir
+from app.utils.file_utils import ensure_inside_any, project_dir
 from app.utils.project_paths import get_project_output_dir, get_project_work_dir
+from app.utils.time_utils import utc_now_iso
 
 
 router = APIRouter(tags=["segments"])
@@ -53,7 +53,7 @@ def update_segment(
         segment.error_message = None
     if payload.text_en is not None:
         segment.text_en = payload.text_en
-    segment.updated_at = datetime.utcnow().isoformat()
+    segment.updated_at = utc_now_iso()
     session.add(segment)
     session.commit()
     session.refresh(segment)
@@ -76,13 +76,14 @@ def get_segment_audio(project_id: str, segment_id: str, session: Session = Depen
 
     audio_path = Path(segment.audio_path)
     try:
-        try:
-            audio_path = ensure_inside_workspace(audio_path, get_project_work_dir(project, get_settings().workspace_dir))
-        except ValueError:
-            try:
-                audio_path = ensure_inside_workspace(audio_path, get_project_output_dir(project, get_settings().workspace_dir))
-            except ValueError:
-                audio_path = ensure_inside_workspace(audio_path, project_dir(get_settings().workspace_dir, project_id))
+        audio_path = ensure_inside_any(
+            audio_path,
+            [
+                get_project_work_dir(project, get_settings().workspace_dir),
+                get_project_output_dir(project, get_settings().workspace_dir),
+                project_dir(get_settings().workspace_dir, project_id),
+            ],
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"success": False, "error": str(exc)}) from exc
     if not audio_path.is_file():

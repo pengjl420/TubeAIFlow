@@ -2,6 +2,8 @@
 setlocal
 
 set "ROOT=%~dp0"
+set "BACKEND_DIR=%ROOT%backend"
+set "BACKEND_LOCK=%BACKEND_DIR%\workspace\backend.lock"
 
 title TubeAIFlow Restart
 
@@ -11,13 +13,20 @@ echo  TubeAIFlow - Restart
 echo ========================================
 echo.
 
-echo Releasing local ports 18080 and 5173...
-for %%P in (18080 5173) do (
-  for /f "tokens=5" %%A in ('netstat -ano ^| findstr /R /C:":%%P .*LISTENING"') do (
-    echo Stopping process %%A on port %%P...
-    taskkill /PID %%A /F >nul 2>nul
-  )
+echo Stopping TubeAIFlow windows...
+taskkill /FI "WINDOWTITLE eq TubeAIFlow Backend*" /T /F >nul 2>nul
+taskkill /FI "WINDOWTITLE eq TubeAIFlow Frontend*" /T /F >nul 2>nul
+
+if exist "%BACKEND_LOCK%" (
+  set /p BACKEND_PID=<"%BACKEND_LOCK%"
 )
+if defined BACKEND_PID (
+  echo Stopping recorded backend process %BACKEND_PID%...
+  taskkill /PID %BACKEND_PID% /T /F >nul 2>nul
+)
+
+echo Releasing default local ports 18080 and 5173...
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ROOT%Stop_TubeAIFlow.ps1"
 
 echo.
 echo Starting TubeAIFlow again...

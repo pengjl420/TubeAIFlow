@@ -1,5 +1,4 @@
 import logging
-import string
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -9,8 +8,8 @@ from sqlmodel import Session
 
 from app.config import get_settings
 from app.database import get_session
-from app.services import project_service
-from app.utils.file_utils import ensure_inside_workspace, project_dir
+from app.services import native_dialog_service, project_service
+from app.utils.file_utils import ensure_inside_any, project_dir
 from app.utils.project_paths import (
     get_final_audio_path,
     get_final_en_srt_path,
@@ -33,8 +32,16 @@ class OutputSettingsRequest(BaseModel):
     output_filename: str
 
 
-class DirectoryListRequest(BaseModel):
-    path: str | None = None
+class ProjectSettingsRequest(BaseModel):
+    name: str
+    output_dir: str
+    output_filename: str = ""
+    media_video_dir: str = ""
+
+
+class DirectoryPickerRequest(BaseModel):
+    initial_path: str | None = None
+    title: str = "选择文件夹"
 
 
 def ok(data) -> dict:
@@ -69,6 +76,9 @@ def create_project(
             )
         )
     except ValueError as exc:
+        if "project" in locals():
+            session.delete(project)
+            session.commit()
         logger.exception("Failed to create project with reference audio")
         fail(str(exc))
 
@@ -172,35 +182,37 @@ def save_output_settings(
         fail(str(exc))
 
 
-@router.post("/projects/directories")
-def list_directories(payload: DirectoryListRequest) -> dict:
-    if payload.path:
-        current = Path(payload.path).expanduser().resolve()
-    else:
-        current = get_settings().workspace_dir.resolve()
-
-    roots = [f"{drive}:\\" for drive in string.ascii_uppercase if Path(f"{drive}:\\").exists()]
-    if not current.exists() or not current.is_dir():
-        fail("Directory does not exist", 404)
-
-    directories = []
+@router.put("/projects/{project_id}/settings")
+def save_project_settings(
+    project_id: str,
+    payload: ProjectSettingsRequest,
+    session: Session = Depends(get_session),
+) -> dict:
+    project = project_service.get_project(session, project_id)
+    if not project:
+        fail("Project not found", 404)
     try:
-        for child in current.iterdir():
-            if child.is_dir():
-                directories.append({"name": child.name, "path": str(child.resolve())})
-    except OSError as exc:
-        logger.exception("Failed to list directory %s", current)
+        return ok(project_service.update_project_settings(
+            session,
+            project,
+            payload.name,
+            payload.output_dir,
+            payload.output_filename,
+            payload.media_video_dir,
+        ))
+    except (OSError, ValueError) as exc:
+        logger.exception("Failed to save settings for project %s", project_id)
         fail(str(exc))
 
-    parent = current.parent if current.parent != current else None
-    return ok(
-        {
-            "current": str(current),
-            "parent": str(parent) if parent else None,
-            "roots": roots,
-            "directories": sorted(directories, key=lambda item: item["name"].lower()),
-        }
-    )
+
+@router.post("/projects/select-directory")
+def select_directory(payload: DirectoryPickerRequest) -> dict:
+    try:
+        selected = native_dialog_service.select_directory(payload.initial_path, payload.title)
+        return ok({"path": selected})
+    except (OSError, RuntimeError) as exc:
+        logger.exception("Failed to open the system directory picker")
+        fail(str(exc), 500)
 
 
 @router.get("/projects/{project_id}/reference-audio")
@@ -211,17 +223,13 @@ def get_reference_audio(project_id: str, session: Session = Depends(get_session)
     if not project.reference_audio_path:
         fail("Project has no reference audio configured", 404)
     try:
-        audio_path = Path(project.reference_audio_path)
-        try:
-            audio_path = ensure_inside_workspace(
-                audio_path,
+        audio_path = ensure_inside_any(
+            Path(project.reference_audio_path),
+            [
                 get_project_work_dir(project, get_settings().workspace_dir),
-            )
-        except ValueError:
-            audio_path = ensure_inside_workspace(
-                audio_path,
                 project_dir(get_settings().workspace_dir, project_id),
-            )
+            ],
+        )
     except ValueError as exc:
         logger.exception("Invalid reference audio path for project %s", project_id)
         fail(str(exc))

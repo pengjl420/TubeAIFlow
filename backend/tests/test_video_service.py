@@ -7,6 +7,35 @@ from app.services import video_service
 
 
 class VideoServiceTests(unittest.TestCase):
+    def test_write_video_progress_retries_permission_error(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "progress.json"
+            original_replace = Path.replace
+            attempts = 0
+
+            def flaky_replace(source: Path, target: Path) -> Path:
+                nonlocal attempts
+                attempts += 1
+                if attempts == 1:
+                    raise PermissionError("busy")
+                return original_replace(source, target)
+
+            with patch.object(Path, "replace", flaky_replace), patch("app.services.video_service.time.sleep"):
+                video_service.write_video_progress(path, "running", "normalizing", 25)
+
+            self.assertEqual(attempts, 2)
+            self.assertEqual(video_service.json.loads(path.read_text(encoding="utf-8"))["percent"], 25)
+            self.assertEqual(list(Path(directory).glob("*.tmp")), [])
+
+    def test_compose_video_rejects_duplicate_project(self) -> None:
+        project = type("ProjectStub", (), {"id": "project-1"})()
+        video_service._composing_project_ids.add(project.id)
+        try:
+            with self.assertRaisesRegex(video_service.VideoCompositionRunningError, "already running"):
+                video_service.compose_video(object(), project)
+        finally:
+            video_service._composing_project_ids.discard(project.id)
+
     @patch("app.services.video_service.run_ffmpeg")
     def test_normalizing_skips_source_first_frames(self, run_mock) -> None:
         selected = [

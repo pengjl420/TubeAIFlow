@@ -2,6 +2,9 @@ import json
 import logging
 import random
 import re
+import threading
+import time
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -30,6 +33,9 @@ TARGET_FPS = 30
 # Skipping a few frames also prevents that frame from becoming a clip boundary.
 CLIP_START_OFFSET = 0.1
 VIDEO_TAIL_PADDING = 0.5
+PROGRESS_WRITE_RETRIES = 5
+_composing_project_ids: set[str] = set()
+_composing_projects_lock = threading.Lock()
 
 
 @dataclass
@@ -38,6 +44,10 @@ class SelectedVideo:
     title_group: str
     source_duration: float
     clip_duration: float
+
+
+class VideoCompositionRunningError(ValueError):
+    pass
 
 
 def save_video_settings(session: Session, project: Project, media_video_dir: str) -> Project:
@@ -56,6 +66,19 @@ def save_video_settings(session: Session, project: Project, media_video_dir: str
 
 
 def compose_video(session: Session, project: Project) -> Path:
+    with _composing_projects_lock:
+        if project.id in _composing_project_ids:
+            raise VideoCompositionRunningError("Video composition is already running for this project")
+        _composing_project_ids.add(project.id)
+
+    try:
+        return _compose_video(session, project)
+    finally:
+        with _composing_projects_lock:
+            _composing_project_ids.discard(project.id)
+
+
+def _compose_video(session: Session, project: Project) -> Path:
     config = _load_project_config(project)
     media_dir_value = str(config.get("media_video_dir") or "").strip()
     if not media_dir_value:
@@ -322,9 +345,22 @@ def write_video_progress(
         "error": error,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = path.with_suffix(path.suffix + ".tmp")
-    temp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    temp_path.replace(path)
+    # A unique temporary name prevents concurrent writers from opening the
+    # same file. Windows will reject os.replace while either file is briefly
+    # held by another process, so retry that transient failure.
+    temp_path = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        for attempt in range(PROGRESS_WRITE_RETRIES):
+            try:
+                temp_path.replace(path)
+                break
+            except PermissionError:
+                if attempt == PROGRESS_WRITE_RETRIES - 1:
+                    raise
+                time.sleep(0.05 * (attempt + 1))
+    finally:
+        temp_path.unlink(missing_ok=True)
 
 
 def read_video_progress(project: Project) -> dict | None:

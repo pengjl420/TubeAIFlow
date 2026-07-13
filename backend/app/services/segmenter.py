@@ -1,7 +1,7 @@
 import re
 
 
-def split_script(text: str, min_len: int = 60, max_len: int = 150) -> list[dict]:
+def split_script(text: str, min_len: int = 30, max_len: int = 60) -> list[dict]:
     pieces = [item.strip() for item in re.split(r"(?<=[。！？!?])", text) if item.strip()]
     if not pieces:
         pieces = [text.strip()] if text.strip() else []

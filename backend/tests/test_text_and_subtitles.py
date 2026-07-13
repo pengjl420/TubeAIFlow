@@ -18,6 +18,13 @@ class TextServiceTests(unittest.TestCase):
         self.assertTrue(all(len(item["text_zh"]) <= 40 for item in segments))
         self.assertEqual([item["segment_id"] for item in segments], [f"{i:04d}" for i in range(1, len(segments) + 1)])
 
+    def test_split_script_defaults_to_sixty_character_maximum(self) -> None:
+        text = "第一句。" + "适合配音切分的内容，" * 20 + "结束。"
+        segments = split_script(text)
+
+        self.assertEqual("".join(item["text_zh"] for item in segments), text)
+        self.assertTrue(all(len(item["text_zh"]) <= 60 for item in segments))
+
     def test_subtitle_cues_are_contiguous_and_cover_full_duration(self) -> None:
         cues = split_timed_subtitle_cues("这是第一句，这是第二句，这是第三句。", 1.0, 5.0, "zh")
 

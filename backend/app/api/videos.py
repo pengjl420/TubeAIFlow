@@ -40,8 +40,15 @@ def compose_video(project_id: str, session: Session = Depends(get_session)) -> d
         project = project_service.ensure_output_filename(session, project)
         path = video_service.compose_video(session, project)
         return {"success": True, "data": {"path": str(path)}}
-    except (ValueError, RuntimeError) as exc:
-        video_service.mark_video_progress_failed(project, str(exc))
+    except video_service.VideoCompositionRunningError as exc:
+        raise HTTPException(status_code=409, detail={"success": False, "error": str(exc)}) from exc
+    except (ValueError, RuntimeError, OSError) as exc:
+        try:
+            video_service.mark_video_progress_failed(project, str(exc))
+        except OSError:
+            # Preserve the original composition error if the progress file is
+            # itself temporarily unavailable.
+            pass
         raise HTTPException(status_code=400, detail={"success": False, "error": str(exc)}) from exc
 
 

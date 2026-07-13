@@ -42,9 +42,62 @@ const error = ref('')
 const message = ref('')
 let pollTimer: number | undefined
 let videoPollTimer: number | undefined
+let oneClickTimer: number | undefined
+
+const oneClickStage = ref('')
+const oneClickStartedAt = ref(0)
+const oneClickStageStartedAt = ref(0)
+const oneClickFinishedAt = ref(0)
+const timerNow = ref(Date.now())
 
 const ttsStatus = ref<TtsStatus>({ total: 0, completed: 0, failed: 0, pending: 0 })
 const videoProgress = ref<VideoProgress | null>(null)
+
+const oneClickStageElapsed = computed(() => {
+  if (!oneClickStageStartedAt.value) return 0
+  const end = oneClickFinishedAt.value || timerNow.value
+  return Math.max(0, end - oneClickStageStartedAt.value)
+})
+
+const oneClickTotalElapsed = computed(() => {
+  if (!oneClickStartedAt.value) return 0
+  const end = oneClickFinishedAt.value || timerNow.value
+  return Math.max(0, end - oneClickStartedAt.value)
+})
+
+function formatElapsed(milliseconds: number) {
+  const totalSeconds = Math.floor(milliseconds / 1000)
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  if (hours > 0) return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+}
+
+function beginOneClickStage(stage: string) {
+  oneClickStage.value = stage
+  oneClickStageStartedAt.value = Date.now()
+  timerNow.value = oneClickStageStartedAt.value
+}
+
+function startOneClickTimer() {
+  stopOneClickTimer()
+  const startedAt = Date.now()
+  oneClickStartedAt.value = startedAt
+  oneClickStageStartedAt.value = startedAt
+  oneClickFinishedAt.value = 0
+  timerNow.value = startedAt
+  oneClickTimer = window.setInterval(() => {
+    timerNow.value = Date.now()
+  }, 1000)
+}
+
+function stopOneClickTimer() {
+  if (oneClickTimer !== undefined) {
+    window.clearInterval(oneClickTimer)
+    oneClickTimer = undefined
+  }
+}
 
 const projectConfig = computed(() => {
   if (!project.value?.config_json) return {}
@@ -413,16 +466,20 @@ async function oneClickGenerate() {
   oneClickGenerating.value = true
   ttsRunning.value = true
   mergingAudio.value = false
+  oneClickStage.value = '保存脚本'
+  startOneClickTimer()
   startPolling()
 
   try {
     await ensureFilenameSaved()
     project.value = await saveScript(projectId, scriptText.value)
     message.value = '正在生成切段...'
+    beginOneClickStage('生成切段')
     await createSegments(projectId)
     await refreshAfterChange()
 
     message.value = '正在生成分段音频...'
+    beginOneClickStage('生成分段音频')
     await startTts(projectId)
     await refreshAfterChange()
 
@@ -431,11 +488,13 @@ async function oneClickGenerate() {
     }
 
     message.value = '正在合并完整音频...'
+    beginOneClickStage('合并完整音频')
     mergingAudio.value = true
     await mergeProjectAudio(projectId)
     await refreshAfterChange()
 
     message.value = '正在生成中英文字幕...'
+    beginOneClickStage('生成中英文字幕')
     mergingAudio.value = false
     generatingSubtitles.value = true
     await createZhSrt(projectId)
@@ -443,6 +502,7 @@ async function oneClickGenerate() {
     await refreshAfterChange()
 
     message.value = '正在生成视频...'
+    beginOneClickStage('生成视频')
     mergingAudio.value = false
     composingVideo.value = true
     videoProgress.value = {
@@ -457,6 +517,9 @@ async function oneClickGenerate() {
     error.value = err instanceof Error ? err.message : '一键生成失败'
     await refreshAfterChange()
   } finally {
+    oneClickFinishedAt.value = Date.now()
+    timerNow.value = oneClickFinishedAt.value
+    stopOneClickTimer()
     oneClickGenerating.value = false
     ttsRunning.value = false
     mergingAudio.value = false
@@ -502,6 +565,7 @@ onMounted(load)
 onBeforeUnmount(() => {
   stopPolling()
   stopVideoPolling()
+  stopOneClickTimer()
 })
 </script>
 
@@ -558,6 +622,20 @@ onBeforeUnmount(() => {
 
         <p v-if="error" class="error">{{ error }}</p>
         <p v-if="message" class="success">{{ message }}</p>
+        <div v-if="oneClickStartedAt" class="generation-timing">
+          <div>
+            <span class="muted">当前阶段</span>
+            <strong>{{ oneClickStage }}</strong>
+          </div>
+          <div>
+            <span class="muted">当前执行时长</span>
+            <strong>{{ formatElapsed(oneClickStageElapsed) }}</strong>
+          </div>
+          <div>
+            <span class="muted">总用时</span>
+            <strong>{{ formatElapsed(oneClickTotalElapsed) }}</strong>
+          </div>
+        </div>
         <div v-if="composingVideo || videoProgress" class="video-progress-panel">
           <div class="section-head">
             <strong>视频生成进度</strong>

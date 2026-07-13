@@ -268,6 +268,27 @@ main {
   margin-top: 14px;
 }
 
+.generation-timing {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid #dbe1e5;
+  border-radius: 10px;
+  background: #f5f7f8;
+}
+
+.generation-timing > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.generation-timing strong {
+  font-variant-numeric: tabular-nums;
+}
+
 .current-segment {
   margin: 12px 0 0;
   word-break: break-word;
@@ -386,6 +407,7 @@ main {
   .two-column,
   .output-row,
   .stats-row,
+  .generation-timing,
   .inline-form {
     grid-template-columns: 1fr;
   }

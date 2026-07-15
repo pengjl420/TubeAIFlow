@@ -28,8 +28,23 @@ class Settings(BaseModel):
     index_tts_python: Path | None = None
     index_tts_model_dir: Path | None = None
     index_tts_fp16: bool = True
+    qwen_tts_root: Path | None = None
+    qwen_tts_python: Path | None = None
+    qwen_tts_model_dir: Path | None = None
+    qwen_tts_device: str = "cuda:0"
+    qwen_tts_dtype: str = "bfloat16"
+    qwen_tts_language: str = "Chinese"
+    qwen_tts_max_new_tokens: int = Field(default=2048, ge=128, le=16384)
 
-    @field_validator("index_tts_root", "index_tts_python", "index_tts_model_dir", mode="before")
+    @field_validator(
+        "index_tts_root",
+        "index_tts_python",
+        "index_tts_model_dir",
+        "qwen_tts_root",
+        "qwen_tts_python",
+        "qwen_tts_model_dir",
+        mode="before",
+    )
     @classmethod
     def empty_path_is_none(cls, value):
         return None if value is None or str(value).strip() == "" else value
@@ -44,6 +59,22 @@ class Settings(BaseModel):
             raise ValueError("Unsupported DeepSeek model")
         return model
 
+    @field_validator("qwen_tts_dtype")
+    @classmethod
+    def validate_qwen_tts_dtype(cls, value):
+        dtype = str(value or "").strip().lower()
+        if dtype not in {"bfloat16", "float16", "float32"}:
+            raise ValueError("Unsupported Qwen3-TTS dtype")
+        return dtype
+
+    @field_validator("qwen_tts_device", "qwen_tts_language")
+    @classmethod
+    def non_empty_qwen_setting(cls, value):
+        text = str(value or "").strip()
+        if not text:
+            raise ValueError("Qwen3-TTS device and language cannot be empty")
+        return text
+
     @property
     def database_url(self) -> str:
         return f"sqlite:///{DATABASE_PATH}"
@@ -52,7 +83,14 @@ class Settings(BaseModel):
 def _normalize_paths(settings: Settings) -> Settings:
     workspace = settings.workspace_dir.expanduser()
     settings.workspace_dir = (BASE_DIR / workspace).resolve() if not workspace.is_absolute() else workspace.resolve()
-    for field_name in ("index_tts_root", "index_tts_python", "index_tts_model_dir"):
+    for field_name in (
+        "index_tts_root",
+        "index_tts_python",
+        "index_tts_model_dir",
+        "qwen_tts_root",
+        "qwen_tts_python",
+        "qwen_tts_model_dir",
+    ):
         value = getattr(settings, field_name)
         if value is not None:
             setattr(settings, field_name, value.expanduser().resolve())

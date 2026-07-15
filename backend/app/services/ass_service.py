@@ -3,7 +3,7 @@ from pathlib import Path
 
 from app.config import get_settings
 from app.models.project import Project
-from app.services.subtitle_splitter import split_timed_subtitle_cues, wrap_subtitle_text
+from app.services.subtitle_splitter import wrap_subtitle_text
 from app.utils.project_paths import ensure_project_dirs, get_output_stem, get_project_work_dir
 from app.utils.time_utils import seconds_to_ass_time
 
@@ -38,16 +38,10 @@ def create_ass(project: Project, language: str) -> Path:
         text = item.get("text_en") if language == "en" else item.get("text_zh")
         if not text:
             continue
-        for cue_start, cue_end, cue_text in split_timed_subtitle_cues(
-            text,
-            float(item["start"]),
-            float(item["end"]),
-            language,
-        ):
-            wrapped = wrap_subtitle_text(cue_text, language)
-            start = seconds_to_ass_time(cue_start)
-            end = seconds_to_ass_time(cue_end)
-            lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{_escape_ass(wrapped)}")
+        wrapped = wrap_subtitle_text(text, language)
+        start = seconds_to_ass_time(float(item["start"]))
+        end = seconds_to_ass_time(float(item["end"]))
+        lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{_escape_ass(wrapped)}")
 
     ensure_project_dirs(base_dir)
     subtitles_dir = base_dir / "subtitles"

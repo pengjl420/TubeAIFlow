@@ -18,6 +18,13 @@ export interface SystemSettings {
   index_tts_python: string | null
   index_tts_model_dir: string | null
   index_tts_fp16: boolean
+  qwen_tts_root: string | null
+  qwen_tts_python: string | null
+  qwen_tts_model_dir: string | null
+  qwen_tts_device: string
+  qwen_tts_dtype: 'bfloat16' | 'float16' | 'float32'
+  qwen_tts_language: string
+  qwen_tts_max_new_tokens: number
 }
 
 export async function getSystemSettings(): Promise<SystemSettings> {

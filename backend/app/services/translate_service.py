@@ -129,17 +129,36 @@ def get_translation_path(project: Project) -> Path:
 
 
 def translate_subtitle_cues_to_english(project: Project, zh_cues: list[dict]) -> tuple[Path, dict[str, str]]:
-    if not zh_cues:
-        raise ValueError("No Chinese subtitle cues to translate")
+    path, translations, _ = translate_subtitle_cues(project, zh_cues, target_language="en")
+    return path, translations
+
+
+def translate_subtitle_cues(
+    project: Project,
+    source_cues: list[dict],
+    target_language: str | None = None,
+) -> tuple[Path, dict[str, str], str]:
+    if not source_cues:
+        raise ValueError("No subtitle cues to translate")
+
+    source_language = detect_text_language(
+        "\n".join(str(cue.get("text_zh") or "") for cue in source_cues)
+    )
+    resolved_target = target_language or ("en" if source_language == "zh" else "zh")
 
     settings = get_settings()
     if not settings.deepseek_api_key:
         raise ValueError("DeepSeek API Key is not configured in System Settings")
 
-    translations = _translate_cues_with_deepseek(zh_cues, _get_translation_log_path(project))
+    translations = _translate_cues_with_deepseek(
+        source_cues,
+        _get_translation_log_path(project),
+        source_language,
+        resolved_target,
+    )
     missing = [
         str(cue.get("cue_id") or "").strip()
-        for cue in zh_cues
+        for cue in source_cues
         if not translations.get(str(cue.get("cue_id") or "").strip(), "").strip()
     ]
     if missing:
@@ -151,15 +170,25 @@ def translate_subtitle_cues_to_english(project: Project, zh_cues: list[dict]) ->
             "segment_id": cue.get("segment_id"),
             "start": cue["start"],
             "end": cue["end"],
-            "text_zh": cue["text_zh"],
-            "text_en": translations[cue["cue_id"]],
+            "source_language": source_language,
+            "target_language": resolved_target,
+            "source_text": cue["text_zh"],
+            "translated_text": translations[cue["cue_id"]],
+            "text_zh": cue["text_zh"] if source_language == "zh" else translations[cue["cue_id"]],
+            "text_en": translations[cue["cue_id"]] if resolved_target == "en" else cue["text_zh"],
         }
-        for cue in zh_cues
+        for cue in source_cues
     ]
     output_path = get_translation_path(project)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    return output_path, translations
+    return output_path, translations, resolved_target
+
+
+def detect_text_language(text: str) -> str:
+    chinese_count = len(re.findall(r"[\u3400-\u9fff]", text))
+    latin_count = len(re.findall(r"[A-Za-z]", text))
+    return "zh" if chinese_count >= latin_count else "en"
 
 
 def load_cue_translation(project: Project) -> dict[str, str]:
@@ -177,9 +206,9 @@ def load_cue_translation(project: Project) -> dict[str, str]:
         if not isinstance(item, dict):
             continue
         cue_id = str(item.get("cue_id") or "").strip()
-        text_en = str(item.get("text_en") or "").strip()
-        if cue_id and text_en:
-            translations[cue_id] = text_en
+        translated_text = str(item.get("translated_text") or item.get("text_en") or "").strip()
+        if cue_id and translated_text:
+            translations[cue_id] = translated_text
     return translations
 
 
@@ -260,13 +289,17 @@ def _translate_segment_batch(
 def _translate_cues_with_deepseek(
     zh_cues: list[dict],
     log_path: Path | None = None,
+    source_language: str = "zh",
+    target_language: str = "en",
 ) -> dict[str, str]:
     settings = get_settings()
     batch_size = max(1, settings.translation_batch_size)
     translations: dict[str, str] = {}
     for batch_index, start in enumerate(range(0, len(zh_cues), batch_size), start=1):
         batch = zh_cues[start:start + batch_size]
-        translations.update(_translate_cue_batch(batch, batch_index, log_path))
+        translations.update(_translate_cue_batch(
+            batch, batch_index, log_path, source_language, target_language
+        ))
     return translations
 
 
@@ -274,6 +307,8 @@ def _translate_cue_batch(
     zh_cues: list[dict],
     batch_index: int,
     log_path: Path | None,
+    source_language: str = "zh",
+    target_language: str = "en",
 ) -> dict[str, str]:
     settings = get_settings()
     payload = {
@@ -282,7 +317,7 @@ def _translate_cue_batch(
             {
                 "role": "system",
                 "content": (
-                    "You translate Chinese subtitle cues into natural English. "
+                    f"You translate {source_language} subtitle cues into natural {target_language}. "
                     "Keep the original cue_id values exactly. "
                     "Each output item must correspond to exactly one input cue. "
                     "Do not merge, split, summarize, add explanations, or change the order. "
@@ -304,7 +339,7 @@ def _translate_cue_batch(
                             "translations": [
                                 {
                                     "cue_id": "0001",
-                                    "text_en": "English subtitle text",
+                                    "translated_text": f"{target_language} subtitle text",
                                 }
                             ]
                         },
@@ -346,8 +381,12 @@ def _translate_cue_batch(
                 "right_items": len(zh_cues) - midpoint,
             },
         )
-        translations = _translate_cue_batch(zh_cues[:midpoint], batch_index, log_path)
-        translations.update(_translate_cue_batch(zh_cues[midpoint:], batch_index, log_path))
+        translations = _translate_cue_batch(
+            zh_cues[:midpoint], batch_index, log_path, source_language, target_language
+        )
+        translations.update(_translate_cue_batch(
+            zh_cues[midpoint:], batch_index, log_path, source_language, target_language
+        ))
         return translations
 
 
@@ -647,7 +686,7 @@ def _looks_like_translation_item(data: dict) -> bool:
 
 
 def _get_translation_text(item: dict) -> str:
-    for key in ("text_en", "english", "translation", "translated_text", "text"):
+    for key in ("translated_text", "text_en", "text_zh", "english", "chinese", "translation", "text"):
         value = str(item.get(key) or "").strip()
         if value:
             return value

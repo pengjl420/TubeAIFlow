@@ -338,6 +338,30 @@ class TranslationServiceTests(unittest.TestCase):
 
 
 class EnglishSrtTests(unittest.TestCase):
+    def test_each_audio_segment_creates_exactly_one_subtitle_cue(self) -> None:
+        segments = [
+            SimpleNamespace(
+                segment_id="0001",
+                text_zh="Shanghai's career-defining public offering.",
+                duration=3.25,
+            ),
+            SimpleNamespace(
+                segment_id="0002",
+                text_zh="A second line stays in one subtitle cue.",
+                duration=2.5,
+            ),
+        ]
+
+        cues = build_chinese_subtitle_cues(segments)
+
+        self.assertEqual(len(cues), 2)
+        self.assertEqual(cues[0]["cue_id"], "0001")
+        self.assertEqual(cues[0]["start"], 0.0)
+        self.assertEqual(cues[0]["end"], 3.25)
+        self.assertEqual(cues[0]["text_zh"], "Shanghai's career-defining public offering.")
+        self.assertEqual(cues[1]["start"], 3.25)
+        self.assertEqual(cues[1]["end"], 5.75)
+
     def test_chinese_cues_skip_text_that_is_empty_after_cleaning(self) -> None:
         segments = [
             SimpleNamespace(

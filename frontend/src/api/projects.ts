@@ -1,14 +1,35 @@
 import { apiClient, unwrap } from './client'
 import type { Project } from '../types/project'
 
+export type TtsEngine = 'index_tts' | 'qwen3_tts'
+
+export interface CreateProjectInput {
+  name: string
+  reference_audio: File
+  output_dir: string
+  output_filename: string
+  media_video_dir: string
+  include_translation: boolean
+  include_video: boolean
+  tts_engine: TtsEngine
+  reference_audio_text: string
+}
+
 export async function listProjects(): Promise<Project[]> {
   return unwrap<Project[]>(await apiClient.get('/projects'))
 }
 
-export async function createProject(name: string, referenceAudio: File): Promise<Project> {
+export async function createProject(input: CreateProjectInput): Promise<Project> {
   const form = new FormData()
-  form.append('name', name)
-  form.append('reference_audio', referenceAudio)
+  form.append('name', input.name)
+  form.append('reference_audio', input.reference_audio)
+  form.append('output_dir', input.output_dir)
+  form.append('output_filename', input.output_filename)
+  form.append('media_video_dir', input.media_video_dir)
+  form.append('include_translation', String(input.include_translation))
+  form.append('include_video', String(input.include_video))
+  form.append('tts_engine', input.tts_engine)
+  form.append('reference_audio_text', input.reference_audio_text)
   return unwrap<Project>(await apiClient.post('/projects', form))
 }
 
@@ -29,6 +50,7 @@ export interface ProjectOutputs {
   work_dir?: string
   final_audio_path?: string
   final_en_srt_path?: string
+  final_translated_srt_path?: string
   final_video_path?: string
   files: ProjectOutputFile[]
 }
@@ -83,6 +105,10 @@ export interface ProjectSettingsInput {
   output_dir: string
   output_filename: string
   media_video_dir: string
+  include_translation: boolean
+  include_video: boolean
+  tts_engine: TtsEngine
+  reference_audio_text: string
 }
 
 export async function saveProjectSettings(id: string, settings: ProjectSettingsInput): Promise<Project> {

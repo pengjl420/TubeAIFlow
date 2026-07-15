@@ -28,6 +28,12 @@ def get_final_en_srt_path(project: Project, workspace_dir: Path) -> Path:
     return get_project_output_dir(project, workspace_dir) / f"{get_output_stem(project)}_en.srt"
 
 
+def get_final_translated_srt_path(project: Project, workspace_dir: Path, language: str) -> Path:
+    if language not in {"en", "zh"}:
+        raise ValueError("Translated subtitle language must be 'en' or 'zh'")
+    return get_project_output_dir(project, workspace_dir) / f"{get_output_stem(project)}_{language}.srt"
+
+
 def get_final_video_path(project: Project, workspace_dir: Path) -> Path:
     return get_project_output_dir(project, workspace_dir) / f"{get_output_stem(project)}.mp4"
 

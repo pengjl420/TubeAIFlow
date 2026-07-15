@@ -14,6 +14,7 @@ from app.utils.project_paths import (
     get_final_audio_path,
     get_final_en_srt_path,
     get_final_video_path,
+    get_output_stem,
     get_project_output_dir,
     get_project_work_dir,
 )
@@ -37,6 +38,10 @@ class ProjectSettingsRequest(BaseModel):
     output_dir: str
     output_filename: str = ""
     media_video_dir: str = ""
+    include_translation: bool = False
+    include_video: bool = False
+    tts_engine: str = "index_tts"
+    reference_audio_text: str = ""
 
 
 class DirectoryPickerRequest(BaseModel):
@@ -61,12 +66,37 @@ def list_projects(session: Session = Depends(get_session)) -> dict:
 def create_project(
     name: str = Form(...),
     reference_audio: UploadFile = File(...),
+    output_dir: str = Form(r"D:\video_darft"),
+    output_filename: str = Form(""),
+    media_video_dir: str = Form(""),
+    include_translation: bool = Form(False),
+    include_video: bool = Form(False),
+    tts_engine: str = Form("index_tts"),
+    reference_audio_text: str = Form(""),
     session: Session = Depends(get_session),
 ) -> dict:
     if not name.strip():
         fail("Project name is required")
     try:
-        project = project_service.create_project(session, name.strip())
+        normalized_tts_engine = tts_engine.strip().lower()
+        if normalized_tts_engine not in project_service.SUPPORTED_TTS_ENGINES:
+            fail("Unsupported TTS engine")
+        project = project_service.create_project(
+            session,
+            name.strip(),
+        )
+        project = project_service.update_project_settings(
+            session,
+            project,
+            name.strip(),
+            output_dir,
+            output_filename,
+            media_video_dir,
+            normalized_tts_engine,
+            reference_audio_text,
+            include_translation,
+            include_video,
+        )
         return ok(
             project_service.save_reference_audio(
                 session,
@@ -75,7 +105,7 @@ def create_project(
                 reference_audio.filename or "reference.wav",
             )
         )
-    except ValueError as exc:
+    except (OSError, ValueError) as exc:
         if "project" in locals():
             session.delete(project)
             session.commit()
@@ -101,6 +131,12 @@ def get_project_outputs(project_id: str, session: Session = Depends(get_session)
     work_dir = get_project_work_dir(project, get_settings().workspace_dir)
     final_audio_path = get_final_audio_path(project, get_settings().workspace_dir)
     final_en_srt_path = get_final_en_srt_path(project, get_settings().workspace_dir)
+    final_zh_srt_path = output_root / f"{get_output_stem(project)}_zh.srt"
+    final_translated_srt_path = (
+        final_en_srt_path if final_en_srt_path.is_file()
+        else final_zh_srt_path if final_zh_srt_path.is_file()
+        else None
+    )
     final_video_path = get_final_video_path(project, get_settings().workspace_dir)
     output_files = []
     if work_dir.is_dir():
@@ -156,6 +192,7 @@ def get_project_outputs(project_id: str, session: Session = Depends(get_session)
         "work_dir": str(work_dir),
         "final_audio_path": str(final_audio_path),
         "final_en_srt_path": str(final_en_srt_path),
+        "final_translated_srt_path": str(final_translated_srt_path) if final_translated_srt_path else "",
         "final_video_path": str(final_video_path),
         "files": output_files,
     })
@@ -199,6 +236,10 @@ def save_project_settings(
             payload.output_dir,
             payload.output_filename,
             payload.media_video_dir,
+            payload.tts_engine,
+            payload.reference_audio_text,
+            payload.include_translation,
+            payload.include_video,
         ))
     except (OSError, ValueError) as exc:
         logger.exception("Failed to save settings for project %s", project_id)

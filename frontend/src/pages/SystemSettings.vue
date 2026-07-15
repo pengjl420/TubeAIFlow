@@ -128,6 +128,53 @@ onMounted(load)
       </div>
 
       <div class="panel">
+        <div class="section-head"><h2>Qwen3-TTS</h2></div>
+        <p class="section-description">配置本地 Qwen3-TTS 源码、独立 Python 环境和 Base 声音克隆模型。模型会在每次项目生成任务开始时加载一次。</p>
+        <div class="form-grid">
+          <label class="field full-width">
+            <span>Qwen3-TTS 根目录</span>
+            <input v-model="settings.qwen_tts_root" placeholder="例如 D:\Qwen3-TTS" />
+            <small>填写包含 <code>qwen_tts</code> 源码目录的项目根目录。</small>
+          </label>
+          <label class="field full-width">
+            <span>Python 可执行文件</span>
+            <input v-model="settings.qwen_tts_python" placeholder="例如 D:\Qwen3-TTS\.venv\Scripts\python.exe" />
+            <small>必须使用已经安装 Qwen3-TTS、PyTorch 和 soundfile 的独立 Python 环境。</small>
+          </label>
+          <label class="field full-width">
+            <span>Base 模型目录</span>
+            <input v-model="settings.qwen_tts_model_dir" placeholder="例如 D:\Qwen3-TTS\Qwen3-TTS-12Hz-1.7B-Base" />
+            <small>声音克隆必须使用 Base 模型；目录中应包含 <code>config.json</code> 和模型权重。</small>
+          </label>
+          <label class="field">
+            <span>运行设备</span>
+            <input v-model="settings.qwen_tts_device" placeholder="cuda:0" />
+            <small>推荐使用 <code>cuda:0</code>；CPU 推理速度会非常慢。</small>
+          </label>
+          <label class="field">
+            <span>计算精度</span>
+            <select v-model="settings.qwen_tts_dtype">
+              <option value="bfloat16">BF16（推荐）</option>
+              <option value="float16">FP16</option>
+              <option value="float32">FP32</option>
+            </select>
+            <small>RTX 4060 Ti 推荐 BF16；FP32 会显著增加显存占用。</small>
+          </label>
+          <label class="field">
+            <span>合成语言</span>
+            <input v-model="settings.qwen_tts_language" placeholder="Chinese" />
+            <small>中文项目填写 <code>Chinese</code>，也可以填写 <code>Auto</code> 自动识别。</small>
+          </label>
+          <label class="field">
+            <span>最大生成 Token</span>
+            <input v-model.number="settings.qwen_tts_max_new_tokens" type="number" min="128" max="16384" />
+            <small>默认 2048，适合当前项目的短文本分段，同时限制显存峰值和异常超长输出。</small>
+          </label>
+        </div>
+        <div class="notice">未填写参考音频逐字稿时会自动使用仅声纹模式；填写准确逐字稿可获得更好的声音克隆效果。</div>
+      </div>
+
+      <div class="panel">
         <div class="section-head"><h2>DeepSeek 翻译服务</h2></div>
         <p class="section-description">英文字幕翻译仅使用 DeepSeek。先在 DeepSeek 开放平台创建 API Key，再在此配置。</p>
         <div class="form-grid">

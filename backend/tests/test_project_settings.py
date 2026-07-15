@@ -6,12 +6,14 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.models.project import Project
+from app.models.segment import Segment
 from app.services import project_service
 
 
 class FakeSession:
-    def __init__(self) -> None:
+    def __init__(self, segments: list[Segment] | None = None) -> None:
         self.commits = 0
+        self.segments = segments or []
 
     def add(self, _project: Project) -> None:
         pass
@@ -21,6 +23,9 @@ class FakeSession:
 
     def refresh(self, _project: Project) -> None:
         pass
+
+    def exec(self, _statement):
+        return SimpleNamespace(all=lambda: self.segments)
 
 
 class ProjectSettingsTests(unittest.TestCase):
@@ -70,6 +75,87 @@ class ProjectSettingsTests(unittest.TestCase):
 
         self.assertEqual(project.name, "Old name")
         self.assertIsNone(project.output_dir)
+
+    def test_video_directory_is_required_only_when_video_is_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = Project(id="project-id", name="Name", config_json="{}")
+
+            with patch.object(
+                project_service,
+                "get_settings",
+                return_value=SimpleNamespace(workspace_dir=root / "workspace"),
+            ):
+                with self.assertRaisesRegex(ValueError, "Video material directory is required"):
+                    project_service.update_project_settings(
+                        FakeSession(),
+                        project,
+                        "Name",
+                        str(root / "output"),
+                        "voice",
+                        "",
+                        include_video=True,
+                    )
+
+                result = project_service.update_project_settings(
+                    FakeSession(),
+                    project,
+                    "Name",
+                    str(root / "output"),
+                    "voice",
+                    "",
+                    include_translation=True,
+                    include_video=False,
+                )
+
+            config = json.loads(result.config_json or "{}")
+            self.assertTrue(config["include_translation"])
+            self.assertFalse(config["include_video"])
+
+    def test_switching_to_qwen_resets_completed_segments(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            segment = Segment(
+                id="project-id_0001",
+                project_id="project-id",
+                segment_id="0001",
+                segment_index=1,
+                text_zh="测试",
+                status="completed",
+                audio_path="old.wav",
+                duration=1.2,
+            )
+            project = Project(
+                id="project-id",
+                name="Name",
+                status="tts_completed",
+                config_json='{"tts_engine": "index_tts"}',
+            )
+            session = FakeSession([segment])
+
+            with patch.object(
+                project_service,
+                "get_settings",
+                return_value=SimpleNamespace(workspace_dir=root / "workspace"),
+            ):
+                result = project_service.update_project_settings(
+                    session,
+                    project,
+                    "Name",
+                    str(root / "output"),
+                    "voice",
+                    "",
+                    "qwen3_tts",
+                    "参考文本",
+                )
+
+            config = json.loads(result.config_json or "{}")
+            self.assertEqual(config["tts_engine"], "qwen3_tts")
+            self.assertEqual(config["reference_audio_text"], "参考文本")
+            self.assertEqual(result.status, "segmented")
+            self.assertEqual(segment.status, "pending")
+            self.assertIsNone(segment.audio_path)
+            self.assertIsNone(segment.duration)
 
 
 if __name__ == "__main__":

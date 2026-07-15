@@ -12,10 +12,20 @@ class SettingsModelTests(unittest.TestCase):
             index_tts_root="",
             index_tts_python="  ",
             index_tts_model_dir=None,
+            qwen_tts_root="",
+            qwen_tts_python="  ",
+            qwen_tts_model_dir=None,
         )
         self.assertIsNone(settings.index_tts_root)
         self.assertIsNone(settings.index_tts_python)
         self.assertIsNone(settings.index_tts_model_dir)
+        self.assertIsNone(settings.qwen_tts_root)
+        self.assertIsNone(settings.qwen_tts_python)
+        self.assertIsNone(settings.qwen_tts_model_dir)
+
+    def test_qwen_dtype_is_validated(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Unsupported Qwen3-TTS dtype"):
+            Settings(qwen_tts_dtype="int8")
 
     def test_public_settings_never_expose_secret_values(self) -> None:
         configured = Settings(deepseek_api_key="secret", workspace_dir=Path("workspace"))

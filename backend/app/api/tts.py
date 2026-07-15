@@ -121,7 +121,7 @@ def _build_live_segments(project, segments: list[Segment], progress: dict | None
                 item["error_message"] = None
             else:
                 item["status"] = "failed"
-                item["error_message"] = result.get("error") or "IndexTTS did not create an audio file"
+                item["error_message"] = result.get("error") or "TTS engine did not create an audio file"
         elif segment.segment_id == current_segment_id:
             item["status"] = "tts_running"
             item["error_message"] = None

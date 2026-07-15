@@ -12,7 +12,7 @@ from app.models.project import Project
 from app.models.segment import Segment
 from app.services import srt_service
 from app.utils.ffmpeg_utils import probe_duration
-from app.utils.project_paths import ensure_project_dirs, get_project_work_dir
+from app.utils.project_paths import ensure_project_dirs, get_project_work_dir, load_project_config
 
 
 logger = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ def generate_project_tts(session: Session, project: Project) -> list[Segment]:
             .order_by(Segment.segment_index)
         ).all()
     )
-    reference_audio_path = _validate_configuration(project, segments)
+    engine, reference_audio_path = _validate_configuration(project, segments)
 
     base_dir = get_project_work_dir(project, settings.workspace_dir)
     ensure_project_dirs(base_dir)
@@ -50,7 +50,7 @@ def generate_project_tts(session: Session, project: Project) -> list[Segment]:
             (audio_dir / f"{segment.segment_id}.wav").unlink(missing_ok=True)
         logs_dir = base_dir / "logs"
         _write_initial_progress(logs_dir / "tts_progress.json", pending)
-        _run_index_tts_batch(reference_audio_path, pending, audio_dir, logs_dir)
+        _run_tts_batch(engine, project, reference_audio_path, pending, audio_dir, logs_dir)
 
     result_path = base_dir / "logs" / "tts_results.json"
     result_by_id = {}
@@ -71,7 +71,7 @@ def generate_project_tts(session: Session, project: Project) -> list[Segment]:
             srt_service.create_segment_srt(project, segment)
         else:
             segment.status = "failed"
-            segment.error_message = result.get("error", "IndexTTS did not create an audio file")
+            segment.error_message = result.get("error", f"{_engine_label(engine)} did not create an audio file")
         segment.updated_at = datetime.utcnow().isoformat()
         session.add(segment)
 
@@ -84,7 +84,7 @@ def generate_project_tts(session: Session, project: Project) -> list[Segment]:
 
 def regenerate_segment_tts(session: Session, project: Project, segment: Segment) -> Segment:
     settings = get_settings()
-    reference_audio_path = _validate_configuration(project, [segment])
+    engine, reference_audio_path = _validate_configuration(project, [segment])
     base_dir = get_project_work_dir(project, settings.workspace_dir)
     ensure_project_dirs(base_dir)
     audio_dir = base_dir / "audio" / "segments"
@@ -104,7 +104,7 @@ def regenerate_segment_tts(session: Session, project: Project, segment: Segment)
 
     logs_dir = base_dir / "logs"
     _write_initial_progress(logs_dir / "tts_progress.json", [segment])
-    _run_index_tts_batch(reference_audio_path, [segment], audio_dir, logs_dir)
+    _run_tts_batch(engine, project, reference_audio_path, [segment], audio_dir, logs_dir)
 
     result_path = base_dir / "logs" / "tts_results.json"
     result = {}
@@ -122,7 +122,7 @@ def regenerate_segment_tts(session: Session, project: Project, segment: Segment)
         srt_service.create_segment_srt(project, segment)
     else:
         segment.status = "failed"
-        segment.error_message = result.get("error", "IndexTTS did not create an audio file")
+        segment.error_message = result.get("error", f"{_engine_label(engine)} did not create an audio file")
     segment.updated_at = datetime.utcnow().isoformat()
     session.add(segment)
     session.commit()
@@ -130,7 +130,7 @@ def regenerate_segment_tts(session: Session, project: Project, segment: Segment)
     return segment
 
 
-def _validate_configuration(project: Project, segments: list[Segment]) -> Path:
+def _validate_configuration(project: Project, segments: list[Segment]) -> tuple[str, Path]:
     settings = get_settings()
     if not segments:
         raise ValueError("Please create transcript segments before starting TTS")
@@ -139,17 +139,53 @@ def _validate_configuration(project: Project, segments: list[Segment]) -> Path:
         raise ValueError("请先配置项目参考音频后再开始 TTS")
     if not reference_audio_path.is_file():
         raise ValueError("项目配置的参考音频文件不存在，请重新上传参考音频")
-    required_paths = {
-        "INDEX_TTS_ROOT": settings.index_tts_root,
-        "INDEX_TTS_PYTHON": settings.index_tts_python,
-        "INDEX_TTS_MODEL_DIR": settings.index_tts_model_dir,
-    }
+    engine = _project_tts_engine(project)
+    if engine == "index_tts":
+        required_paths = {
+            "INDEX_TTS_ROOT": settings.index_tts_root,
+            "INDEX_TTS_PYTHON": settings.index_tts_python,
+            "INDEX_TTS_MODEL_DIR": settings.index_tts_model_dir,
+        }
+    elif engine == "qwen3_tts":
+        required_paths = {
+            "QWEN_TTS_ROOT": settings.qwen_tts_root,
+            "QWEN_TTS_PYTHON": settings.qwen_tts_python,
+            "QWEN_TTS_MODEL_DIR": settings.qwen_tts_model_dir,
+        }
+    else:
+        raise ValueError(f"Unsupported TTS engine: {engine}")
+
     for name, path in required_paths.items():
         if path is None or not path.exists():
             raise ValueError(f"{name} is not configured or does not exist: {path}")
-    if not (settings.index_tts_model_dir / "config.yaml").is_file():
-        raise ValueError("IndexTTS model config is missing")
-    return reference_audio_path
+    if engine == "index_tts":
+        if not (settings.index_tts_model_dir / "config.yaml").is_file():
+            raise ValueError("IndexTTS model config is missing")
+    else:
+        if not (settings.qwen_tts_root / "qwen_tts").is_dir():
+            raise ValueError("Qwen3-TTS source package is missing under qwen_tts_root")
+        model_config_path = settings.qwen_tts_model_dir / "config.json"
+        if not model_config_path.is_file():
+            raise ValueError("Qwen3-TTS model config is missing")
+        try:
+            model_config = json.loads(model_config_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError("Qwen3-TTS model config cannot be read") from exc
+        if model_config.get("tts_model_type") != "base":
+            raise ValueError("Qwen3-TTS voice cloning requires a Base model")
+    return engine, reference_audio_path
+
+
+def _project_tts_engine(project: Project) -> str:
+    return str(load_project_config(project).get("tts_engine") or "index_tts").strip().lower()
+
+
+def _project_reference_audio_text(project: Project) -> str:
+    return str(load_project_config(project).get("reference_audio_text") or "").strip()
+
+
+def _engine_label(engine: str) -> str:
+    return "Qwen3-TTS" if engine == "qwen3_tts" else "IndexTTS"
 
 
 def _project_reference_audio_path(project: Project) -> Path | None:
@@ -163,6 +199,23 @@ def _project_reference_audio_path(project: Project) -> Path | None:
         return None
     reference_audio_path = config.get("reference_audio_path") if isinstance(config, dict) else None
     return Path(reference_audio_path).resolve() if reference_audio_path else None
+
+
+def _run_tts_batch(
+    engine: str,
+    project: Project,
+    reference_audio_path: Path,
+    segments: list[Segment],
+    audio_dir: Path,
+    logs_dir: Path,
+) -> None:
+    if engine == "index_tts":
+        _run_index_tts_batch(reference_audio_path, segments, audio_dir, logs_dir)
+        return
+    if engine == "qwen3_tts":
+        _run_qwen3_tts_batch(project, reference_audio_path, segments, audio_dir, logs_dir)
+        return
+    raise ValueError(f"Unsupported TTS engine: {engine}")
 
 
 def _run_index_tts_batch(
@@ -179,6 +232,7 @@ def _run_index_tts_batch(
     batch_path = logs_dir / "tts_batch.json"
     result_path = logs_dir / "tts_results.json"
     progress_path = logs_dir / "tts_progress.json"
+    result_path.unlink(missing_ok=True)
     batch_path.write_text(
         json.dumps(
             [
@@ -232,6 +286,86 @@ def _run_index_tts_batch(
         (logs_dir / "error.log").write_text(result.stderr, encoding="utf-8")
     if result.returncode != 0 and not result_path.exists():
         message = result.stderr.strip() or result.stdout.strip() or "IndexTTS batch failed"
+        raise RuntimeError(message[-4000:])
+
+
+def _run_qwen3_tts_batch(
+    project: Project,
+    reference_audio_path: Path,
+    segments: list[Segment],
+    audio_dir: Path,
+    logs_dir: Path,
+) -> None:
+    settings = get_settings()
+    reference_audio_path = reference_audio_path.resolve()
+    audio_dir = audio_dir.resolve()
+    logs_dir = logs_dir.resolve()
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    batch_path = logs_dir / "tts_batch.json"
+    result_path = logs_dir / "tts_results.json"
+    progress_path = logs_dir / "tts_progress.json"
+    result_path.unlink(missing_ok=True)
+    batch_path.write_text(
+        json.dumps(
+            [
+                {
+                    "segment_id": item.segment_id,
+                    "text": item.text_zh,
+                    "output_path": str(audio_dir / f"{item.segment_id}.wav"),
+                }
+                for item in segments
+            ],
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    runner_path = Path(__file__).with_name("qwen3_tts_runner.py").resolve()
+    command = [
+        str(settings.qwen_tts_python),
+        "-s",
+        str(runner_path),
+        "--qwen-root",
+        str(settings.qwen_tts_root.resolve()),
+        "--model-dir",
+        str(settings.qwen_tts_model_dir.resolve()),
+        "--batch-file",
+        str(batch_path),
+        "--voice",
+        str(reference_audio_path),
+        "--reference-text",
+        _project_reference_audio_text(project),
+        "--result-file",
+        str(result_path),
+        "--progress-file",
+        str(progress_path),
+        "--device",
+        settings.qwen_tts_device,
+        "--dtype",
+        settings.qwen_tts_dtype,
+        "--language",
+        settings.qwen_tts_language,
+        "--max-new-tokens",
+        str(settings.qwen_tts_max_new_tokens),
+    ]
+
+    env = os.environ.copy()
+    env["PYTHONUTF8"] = "1"
+    result = subprocess.run(
+        command,
+        cwd=settings.qwen_tts_root.resolve(),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        env=env,
+    )
+    (logs_dir / "tts.log").write_text(result.stdout, encoding="utf-8")
+    if result.stderr:
+        (logs_dir / "error.log").write_text(result.stderr, encoding="utf-8")
+    if result.returncode != 0 and not result_path.exists():
+        message = result.stderr.strip() or result.stdout.strip() or "Qwen3-TTS batch failed"
         raise RuntimeError(message[-4000:])
 
 

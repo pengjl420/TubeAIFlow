@@ -64,6 +64,15 @@ class VideoServiceTests(unittest.TestCase):
         self.assertIn("-an", args)
         self.assertNotIn("voice.wav", args)
 
+    @patch("app.services.video_service.run_ffmpeg")
+    def test_final_concat_accepts_measured_tail_padding(self, run_mock) -> None:
+        video_service.concatenate_normalized_clips(
+            Path("concat.txt"), Path("out.mp4"), 0.981
+        )
+
+        args = run_mock.call_args.args[0]
+        self.assertIn("tpad=stop_mode=clone:stop_duration=0.981", args)
+
     @patch("app.services.video_service.random.choice", side_effect=lambda paths: paths[0])
     @patch("app.services.video_service.random.shuffle")
     @patch("app.services.video_service.probe_duration")

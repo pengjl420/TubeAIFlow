@@ -144,6 +144,23 @@ def _compose_video(session: Session, project: Project) -> Path:
     concatenate_normalized_clips(concat_path, output_path)
     video_duration = probe_duration(output_path)
     if video_duration <= target_duration:
+        # Frame-rate normalization and imperfect source tails can make the
+        # encoded result slightly shorter than the probed source durations.
+        # Retry with the measured deficit plus one frame instead of failing a
+        # long-running batch at the final validation step.
+        retry_padding = (
+            VIDEO_TAIL_PADDING
+            + (target_duration - video_duration)
+            + (1 / TARGET_FPS)
+        )
+        logger.warning(
+            "Generated video is %.3fs shorter than audio; retrying with %.3fs tail padding",
+            target_duration - video_duration,
+            retry_padding,
+        )
+        concatenate_normalized_clips(concat_path, output_path, retry_padding)
+        video_duration = probe_duration(output_path)
+    if video_duration <= target_duration:
         raise RuntimeError(
             f"Generated video is not longer than audio: "
             f"video={video_duration:.3f}s, audio={target_duration:.3f}s"
@@ -165,7 +182,11 @@ def _compose_video(session: Session, project: Project) -> Path:
     return output_path
 
 
-def concatenate_normalized_clips(concat_path: Path, output_path: Path) -> None:
+def concatenate_normalized_clips(
+    concat_path: Path,
+    output_path: Path,
+    tail_padding: float = VIDEO_TAIL_PADDING,
+) -> None:
     # Re-encode the joined stream so every boundary gets a clean timestamp and
     # reference-frame chain. Stream copying can produce a one-frame flash on
     # some hardware decoders even when all input clips use H.264.
@@ -180,7 +201,7 @@ def concatenate_normalized_clips(concat_path: Path, output_path: Path) -> None:
         "-map",
         "0:v:0",
         "-vf",
-        f"tpad=stop_mode=clone:stop_duration={VIDEO_TAIL_PADDING:.3f}",
+        f"tpad=stop_mode=clone:stop_duration={tail_padding:.3f}",
         "-c:v",
         "libx264",
         "-preset",

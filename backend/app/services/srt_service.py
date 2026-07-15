@@ -5,10 +5,9 @@ from app.config import get_settings
 from app.models.project import Project
 from app.models.segment import Segment
 from app.services import timeline_service, translate_service
-from app.services.subtitle_splitter import split_timed_subtitle_cues
 from app.utils.project_paths import (
     ensure_project_dirs,
-    get_final_en_srt_path,
+    get_final_translated_srt_path,
     get_final_srt_path,
     get_output_stem,
     get_project_work_dir,
@@ -23,8 +22,10 @@ def create_segment_srt(project: Project, segment: Segment) -> Path:
     base_dir = get_project_work_dir(project, get_settings().workspace_dir)
     ensure_project_dirs(base_dir)
     output_path = base_dir / "subtitles" / "segments" / f"{segment.segment_id}.srt"
-    cues = split_timed_subtitle_cues(segment.text_zh, 0.0, float(segment.duration), "zh")
-    _write_srt(output_path, cues)
+    # A transcript line is the atomic TTS and subtitle unit. Do not estimate
+    # timings for smaller text fragments inside an already generated WAV.
+    cues = [(0.0, float(segment.duration), segment.text_zh)]
+    _write_srt(output_path, cues, remove_punctuation=False)
     return output_path
 
 
@@ -36,7 +37,11 @@ def create_full_srt(project: Project, segments: list[Segment]) -> Path:
 
     stem = get_output_stem(project)
     work_path = base_dir / "subtitles" / f"{stem}.srt"
-    _write_srt(work_path, [(item["start"], item["end"], item["text_zh"]) for item in cues])
+    _write_srt(
+        work_path,
+        [(item["start"], item["end"], item["text_zh"]) for item in cues],
+        remove_punctuation=False,
+    )
 
     final_path = get_final_srt_path(project, get_settings().workspace_dir)
     final_path.parent.mkdir(parents=True, exist_ok=True)
@@ -52,26 +57,22 @@ def create_full_srt_with_cues(project: Project, segments: list[Segment]) -> tupl
 def build_chinese_subtitle_cues(segments: list[Segment]) -> list[dict]:
     current = 0.0
     cues = []
-    cue_index = 1
     for segment in segments:
         if segment.duration is None:
             raise ValueError(f"Segment {segment.segment_id} has no audio duration")
         start = current
         end = start + float(segment.duration)
-        for cue_start, cue_end, cue_text in split_timed_subtitle_cues(segment.text_zh, start, end, "zh"):
-            clean_text = _clean_srt_text(cue_text)
-            if not clean_text:
-                continue
+        clean_text = _clean_srt_text(segment.text_zh, remove_punctuation=False)
+        if clean_text:
             cues.append(
                 {
-                    "cue_id": f"{cue_index:04d}",
+                    "cue_id": segment.segment_id,
                     "segment_id": segment.segment_id,
-                    "start": cue_start,
-                    "end": cue_end,
+                    "start": round(start, 3),
+                    "end": round(end, 3),
                     "text_zh": clean_text,
                 }
             )
-            cue_index += 1
         current = end
     return cues
 
@@ -79,45 +80,50 @@ def build_chinese_subtitle_cues(segments: list[Segment]) -> list[dict]:
 def create_english_srt(project: Project) -> Path:
     timeline = timeline_service.load_timeline(project)
     zh_cues = []
-    cue_index = 1
     for item in timeline.get("segments", []):
-        for cue_start, cue_end, cue_text in split_timed_subtitle_cues(
-            str(item.get("text_zh") or ""),
-            float(item["start"]),
-            float(item["end"]),
-            "zh",
-        ):
-            zh_cues.append(
-                {
-                    "cue_id": f"{cue_index:04d}",
-                    "segment_id": item.get("segment_id"),
-                    "start": cue_start,
-                    "end": cue_end,
-                    "text_zh": _clean_srt_text(cue_text),
-                }
-            )
-            cue_index += 1
+        segment_id = str(item.get("segment_id") or "").strip()
+        cue_text = _clean_srt_text(str(item.get("text_zh") or ""), remove_punctuation=False)
+        if not segment_id or not cue_text:
+            continue
+        zh_cues.append(
+            {
+                "cue_id": segment_id,
+                "segment_id": segment_id,
+                "start": float(item["start"]),
+                "end": float(item["end"]),
+                "text_zh": cue_text,
+            }
+        )
     translations = translate_service.load_cue_translation(project)
     return create_english_srt_from_chinese_cues(project, zh_cues, translations)
 
 
 def create_english_srt_from_chinese_cues(project: Project, zh_cues: list[dict], translations: dict[str, str]) -> Path:
+    return create_translated_srt(project, zh_cues, translations, "en")
+
+
+def create_translated_srt(
+    project: Project,
+    source_cues: list[dict],
+    translations: dict[str, str],
+    target_language: str,
+) -> Path:
     base_dir = get_project_work_dir(project, get_settings().workspace_dir)
     ensure_project_dirs(base_dir)
 
     cues = []
-    for cue in zh_cues:
+    for cue in source_cues:
         cue_id = str(cue.get("cue_id") or "").strip()
-        text_en = translations.get(cue_id, "").strip()
-        if not cue_id or not text_en:
-            raise ValueError(f"Missing English translation for subtitle cue {cue_id or '<unknown>'}")
-        cues.append((float(cue["start"]), float(cue["end"]), text_en))
+        translated_text = translations.get(cue_id, "").strip()
+        if not cue_id or not translated_text:
+            raise ValueError(f"Missing translation for subtitle cue {cue_id or '<unknown>'}")
+        cues.append((float(cue["start"]), float(cue["end"]), translated_text))
 
     stem = get_output_stem(project)
-    work_path = base_dir / "subtitles" / f"{stem}_en.srt"
+    work_path = base_dir / "subtitles" / f"{stem}_{target_language}.srt"
     _write_srt(work_path, cues, remove_punctuation=False)
 
-    final_path = get_final_en_srt_path(project, get_settings().workspace_dir)
+    final_path = get_final_translated_srt_path(project, get_settings().workspace_dir, target_language)
     final_path.parent.mkdir(parents=True, exist_ok=True)
     final_path.write_text(work_path.read_text(encoding="utf-8"), encoding="utf-8")
     return final_path

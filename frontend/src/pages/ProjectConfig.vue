@@ -7,6 +7,7 @@ import {
   getProject,
   saveProjectSettings,
   selectDirectory,
+  type TtsEngine,
   uploadReferenceAudio,
 } from '../api/projects'
 import AudioPlayer from '../components/AudioPlayer.vue'
@@ -21,6 +22,10 @@ const referenceAudio = ref<File | null>(null)
 const outputDir = ref('')
 const outputFilename = ref('')
 const mediaVideoDir = ref('')
+const includeTranslation = ref(false)
+const includeVideo = ref(false)
+const ttsEngine = ref<TtsEngine>('index_tts')
+const referenceAudioText = ref('')
 const loading = ref(false)
 const saving = ref(false)
 const selectingFolder = ref<'output' | 'video' | null>(null)
@@ -53,8 +58,14 @@ function fillForm() {
   outputDir.value = project.value.output_dir || ''
   const filename = projectConfig.value.output_filename
   const videoDir = projectConfig.value.media_video_dir
+  const configuredTtsEngine = projectConfig.value.tts_engine
+  const configuredReferenceText = projectConfig.value.reference_audio_text
+  includeTranslation.value = projectConfig.value.include_translation === true
+  includeVideo.value = projectConfig.value.include_video === true
   outputFilename.value = typeof filename === 'string' ? filename : ''
   mediaVideoDir.value = typeof videoDir === 'string' ? videoDir : ''
+  ttsEngine.value = configuredTtsEngine === 'qwen3_tts' ? 'qwen3_tts' : 'index_tts'
+  referenceAudioText.value = typeof configuredReferenceText === 'string' ? configuredReferenceText : ''
 }
 
 async function load() {
@@ -99,6 +110,10 @@ async function save() {
     error.value = '请选择输出文件夹'
     return
   }
+  if (includeVideo.value && !mediaVideoDir.value.trim()) {
+    error.value = '勾选生成视频后，必须选择原始素材文件夹'
+    return
+  }
 
   saving.value = true
   error.value = ''
@@ -109,6 +124,10 @@ async function save() {
       output_dir: outputDir.value.trim(),
       output_filename: outputFilename.value.trim(),
       media_video_dir: mediaVideoDir.value.trim(),
+      include_translation: includeTranslation.value,
+      include_video: includeVideo.value,
+      tts_engine: ttsEngine.value,
+      reference_audio_text: referenceAudioText.value.trim(),
     })
     if (referenceAudio.value) {
       project.value = await uploadReferenceAudio(projectId, referenceAudio.value)
@@ -172,11 +191,19 @@ onMounted(load)
       </div>
 
       <div class="panel">
-        <div class="section-head"><h2>视频素材</h2></div>
-        <label class="field reference-field">
-          <span>素材视频目录</span>
+        <div class="section-head"><h2>一键生成选项</h2></div>
+        <label class="checkbox-field">
+          <input v-model="includeTranslation" type="checkbox" />
+          <span>翻译字幕<small>根据当前逐字稿语种自动选择目标语种；中文逐字稿翻译为英文。</small></span>
+        </label>
+        <label class="checkbox-field">
+          <input v-model="includeVideo" type="checkbox" />
+          <span>生成视频<small>开启后，一键生成会在字幕完成后合并视频。</small></span>
+        </label>
+        <label v-if="includeVideo" class="field reference-field">
+          <span>原始素材文件夹</span>
           <div class="inline-form">
-            <input v-model="mediaVideoDir" readonly placeholder="请选择素材视频文件夹（可选）" />
+            <input v-model="mediaVideoDir" readonly placeholder="请选择原始素材文件夹" />
             <button
               class="secondary-button"
               type="button"
@@ -186,12 +213,20 @@ onMounted(load)
               {{ selectingFolder === 'video' ? '等待选择…' : '选择文件夹' }}
             </button>
           </div>
-          <span class="muted">生成最终视频时会扫描该目录；不生成视频可留空。</span>
+          <span class="muted">生成最终视频时会扫描该目录中的视频素材。</span>
         </label>
       </div>
 
       <div class="panel">
         <div class="section-head"><h2>参考音频</h2></div>
+        <label class="field reference-field">
+          <span>TTS 引擎</span>
+          <select v-model="ttsEngine">
+            <option value="index_tts">Index-TTS</option>
+            <option value="qwen3_tts">Qwen3-TTS</option>
+          </select>
+          <span class="muted">切换引擎后，现有分段会标记为待重新生成。</span>
+        </label>
         <div class="reference-box">
           <div>
             <strong>当前参考音频</strong>
@@ -212,6 +247,11 @@ onMounted(load)
           <span class="muted">
             {{ referenceAudio ? `已选择：${referenceAudio.name}` : '不更换可留空；支持 WAV、MP3、FLAC、M4A' }}
           </span>
+        </label>
+        <label v-if="ttsEngine === 'qwen3_tts'" class="field reference-field">
+          <span>参考音频逐字稿（推荐）</span>
+          <textarea v-model="referenceAudioText" rows="4" placeholder="填写当前参考音频中实际说出的文字"></textarea>
+          <span class="muted">留空时 Qwen3-TTS 使用仅声纹模式；填写准确文字可以提高克隆质量。</span>
         </label>
       </div>
     </div>

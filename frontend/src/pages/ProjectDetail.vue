@@ -154,10 +154,15 @@ const finalEnglishSrtPath = computed(() => {
   return outputs.value?.final_en_srt_path || `${dir.replace(/[\\/]$/, '')}\\${outputFilename.value.trim()}_en.srt`
 })
 
+const finalTranslatedSrtPath = computed(() => outputs.value?.final_translated_srt_path || finalEnglishSrtPath.value)
+
 const mediaVideoDir = computed(() => {
   const value = projectConfig.value.media_video_dir
   return typeof value === 'string' ? value : ''
 })
+
+const includeTranslation = computed(() => projectConfig.value.include_translation === true)
+const includeVideo = computed(() => projectConfig.value.include_video === true)
 
 const finalVideoPath = computed(() => {
   if (!hasOutputFilename.value) return ''
@@ -407,12 +412,14 @@ async function mergeAudio() {
   try {
     await ensureFilenameSaved()
     const result = await mergeProjectAudio(projectId)
-    message.value = '正在生成中英文字幕...'
+    message.value = includeTranslation.value ? '正在生成原文和翻译字幕...' : '正在生成原文字幕...'
     mergingAudio.value = false
     generatingSubtitles.value = true
-    const subtitles = await createZhSrt(projectId)
+    const subtitles = await createZhSrt(projectId, includeTranslation.value)
     await refreshAfterChange()
-    message.value = `完整音频已生成：${result.path}；英文字幕已生成：${subtitles.en_path}`
+    message.value = subtitles.translated_path
+      ? `完整音频已生成：${result.path}；翻译字幕已生成：${subtitles.translated_path}`
+      : `完整音频和原文字幕已生成：${result.path}`
   } catch (err) {
     error.value = err instanceof Error ? err.message : '完整音频合并失败'
   } finally {
@@ -456,7 +463,7 @@ async function oneClickGenerate() {
     error.value = '请先配置项目参考音频后再一键生成'
     return
   }
-  if (!mediaVideoDir.value) {
+  if (includeVideo.value && !mediaVideoDir.value) {
     error.value = '请先在项目设置中选择素材视频目录后再一键生成'
     return
   }
@@ -493,26 +500,30 @@ async function oneClickGenerate() {
     await mergeProjectAudio(projectId)
     await refreshAfterChange()
 
-    message.value = '正在生成中英文字幕...'
-    beginOneClickStage('生成中英文字幕')
+    message.value = includeTranslation.value ? '正在生成原文和翻译字幕...' : '正在生成原文字幕...'
+    beginOneClickStage(includeTranslation.value ? '生成原文和翻译字幕' : '生成原文字幕')
     mergingAudio.value = false
     generatingSubtitles.value = true
-    await createZhSrt(projectId)
+    await createZhSrt(projectId, includeTranslation.value)
     generatingSubtitles.value = false
     await refreshAfterChange()
 
-    message.value = '正在生成视频...'
-    beginOneClickStage('生成视频')
-    mergingAudio.value = false
-    composingVideo.value = true
-    videoProgress.value = {
-      status: 'running', stage: 'preparing', percent: 0, total: 0, completed: 0, message: '正在准备视频生成',
+    if (includeVideo.value) {
+      message.value = '正在生成视频...'
+      beginOneClickStage('生成视频')
+      mergingAudio.value = false
+      composingVideo.value = true
+      videoProgress.value = {
+        status: 'running', stage: 'preparing', percent: 0, total: 0, completed: 0, message: '正在准备视频生成',
+      }
+      startVideoPolling()
+      const result = await composeProjectVideo(projectId)
+      videoProgress.value = await getVideoStatus(projectId)
+      await refreshAfterChange()
+      message.value = `一键生成完成：${result.path}`
+    } else {
+      message.value = '一键生成完成'
     }
-    startVideoPolling()
-    const result = await composeProjectVideo(projectId)
-    videoProgress.value = await getVideoStatus(projectId)
-    await refreshAfterChange()
-    message.value = `一键生成完成：${result.path}`
   } catch (err) {
     error.value = err instanceof Error ? err.message : '一键生成失败'
     await refreshAfterChange()
@@ -686,7 +697,7 @@ onBeforeUnmount(() => {
           <p class="path-line"><strong>输出根目录：</strong>{{ outputs?.output_dir || project.output_dir || '暂无输出目录' }}</p>
           <p class="path-line"><strong>本次生成目录：</strong>{{ hasOutputFilename ? outputs?.work_dir : '保存或生成后自动创建' }}</p>
           <p class="path-line"><strong>最终完整音频：</strong>{{ finalAudioPath || '保存或生成后自动创建' }}</p>
-          <p class="path-line"><strong>英文字幕：</strong>{{ finalEnglishSrtPath || '生成后自动创建' }}</p>
+          <p class="path-line"><strong>翻译字幕：</strong>{{ includeTranslation ? finalTranslatedSrtPath || '生成后自动创建' : '未启用' }}</p>
           <p class="path-line"><strong>素材视频目录：</strong>{{ mediaVideoDir || '未配置' }}</p>
           <p class="path-line"><strong>最终视频：</strong>{{ finalVideoPath || '生成后自动创建' }}</p>
         </div>

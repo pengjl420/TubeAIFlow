@@ -21,6 +21,9 @@ from app.utils.project_paths import (
 from app.utils.time_utils import utc_now_iso
 
 
+SUPPORTED_TTS_ENGINES = {"index_tts", "qwen3_tts"}
+
+
 def create_project(session: Session, name: str, config: dict | None = None) -> Project:
     settings = get_settings()
     project_id = uuid.uuid4().hex[:12]
@@ -148,11 +151,14 @@ def save_reference_audio(
         output_path.unlink(missing_ok=True)
         raise
 
+    had_reference_audio = bool(project.reference_audio_path)
     project.reference_audio_path = str(output_path)
     config = load_project_config(project)
     config["reference_audio_path"] = str(output_path)
     config["reference_audio_filename"] = Path(original_filename).name or output_path.name
     project.config_json = json.dumps(config, ensure_ascii=False)
+    if had_reference_audio and _reset_tts_segments(session, project.id):
+        project.status = "segmented"
     project.updated_at = utc_now_iso()
     session.add(project)
     session.commit()
@@ -190,14 +196,23 @@ def update_project_settings(
     output_dir: str,
     output_filename: str,
     media_video_dir: str,
+    tts_engine: str = "index_tts",
+    reference_audio_text: str = "",
+    include_translation: bool = False,
+    include_video: bool = False,
 ) -> Project:
     project_name = name.strip()
     if not project_name:
         raise ValueError("Project name is required")
     if not output_dir.strip():
         raise ValueError("Output directory is required")
+    normalized_tts_engine = tts_engine.strip().lower()
+    if normalized_tts_engine not in SUPPORTED_TTS_ENGINES:
+        raise ValueError("Unsupported TTS engine")
 
     video_directory: Path | None = None
+    if include_video and not media_video_dir.strip():
+        raise ValueError("Video material directory is required when video generation is enabled")
     if media_video_dir.strip():
         video_directory = Path(media_video_dir).expanduser().resolve()
         if not video_directory.is_dir():
@@ -207,11 +222,24 @@ def update_project_settings(
     output_directory.mkdir(parents=True, exist_ok=True)
 
     config = load_project_config(project)
+    previous_tts_engine = str(config.get("tts_engine") or "index_tts").strip().lower()
+    previous_reference_audio_text = str(config.get("reference_audio_text") or "").strip()
     config["output_filename"] = safe_filename_stem(output_filename or _timestamp_stem())
+    config["tts_engine"] = normalized_tts_engine
+    config["reference_audio_text"] = reference_audio_text.strip()
+    config["include_translation"] = include_translation
+    config["include_video"] = include_video
     if video_directory:
         config["media_video_dir"] = str(video_directory)
     else:
         config.pop("media_video_dir", None)
+
+    if (
+        previous_tts_engine != normalized_tts_engine
+        or previous_reference_audio_text != reference_audio_text.strip()
+    ):
+        if _reset_tts_segments(session, project.id):
+            project.status = "segmented"
 
     project.name = project_name
     project.output_dir = str(output_directory)
@@ -236,6 +264,21 @@ def ensure_output_filename(session: Session, project: Project) -> Project:
     session.commit()
     session.refresh(project)
     return project
+
+
+def _reset_tts_segments(session: Session, project_id: str) -> bool:
+    reset_any = False
+    for segment in session.exec(select(Segment).where(Segment.project_id == project_id)).all():
+        reset_any = True
+        segment.audio_path = None
+        segment.duration = None
+        segment.start_time = None
+        segment.end_time = None
+        segment.status = "pending"
+        segment.error_message = None
+        segment.updated_at = utc_now_iso()
+        session.add(segment)
+    return reset_any
 
 
 def _timestamp_stem() -> str:

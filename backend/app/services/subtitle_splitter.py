@@ -64,10 +64,10 @@ def split_subtitle_text(text: str, max_chars: int = 24) -> list[str]:
 
 def wrap_subtitle_text(text: str, language: str) -> str:
     if language == "en":
-        return "\n".join(textwrap.wrap(text, width=42, break_long_words=False)[:2])
+        return "\n".join(textwrap.wrap(text, width=42, break_long_words=False))
     if len(text) <= 14:
         return text
-    return "\n".join(textwrap.wrap(text, width=14)[:2])
+    return "\n".join(textwrap.wrap(text, width=14))
 
 
 def _normalize_text(text: str) -> str:

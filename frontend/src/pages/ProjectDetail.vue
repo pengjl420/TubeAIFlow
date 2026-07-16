@@ -16,6 +16,7 @@ import {
 } from '../api/projects'
 import { listSegments, updateSegment } from '../api/segments'
 import { getTtsStatus, regenerateSegmentTts, startTts, type TtsStatus } from '../api/tts'
+import { cancelProjectTask } from '../api/tasks'
 import AudioPlayer from '../components/AudioPlayer.vue'
 import type { Project } from '../types/project'
 import type { Segment } from '../types/segment'
@@ -31,11 +32,13 @@ const scriptText = ref('')
 const outputFilename = ref('')
 const loading = ref(false)
 const ttsRunning = ref(false)
+const ttsRequestActive = ref(false)
 const mergingAudio = ref(false)
 const generatingSubtitles = ref(false)
 const composingVideo = ref(false)
 const oneClickGenerating = ref(false)
 const savingFilename = ref(false)
+const stoppingGeneration = ref(false)
 const readingScriptFile = ref(false)
 const scriptDragActive = ref(false)
 const error = ref('')
@@ -52,6 +55,10 @@ const timerNow = ref(Date.now())
 
 const ttsStatus = ref<TtsStatus>({ total: 0, completed: 0, failed: 0, pending: 0 })
 const videoProgress = ref<VideoProgress | null>(null)
+const hasRunningGeneration = computed(() => (
+  ttsRunning.value || mergingAudio.value || generatingSubtitles.value
+  || composingVideo.value || oneClickGenerating.value
+))
 
 const oneClickStageElapsed = computed(() => {
   if (!oneClickStageStartedAt.value) return 0
@@ -185,6 +192,7 @@ async function load() {
     fillOutputFilename()
     await refreshSegments()
     await Promise.all([refreshTtsStatus(), refreshOutputs()])
+    if (ttsRunning.value) startPolling()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '项目加载失败'
   } finally {
@@ -254,7 +262,9 @@ async function refreshSegments() {
 async function refreshTtsStatus() {
   ttsStatus.value = await getTtsStatus(projectId)
   applyLiveSegmentStatus()
-  ttsRunning.value = ttsStatus.value.progress?.status === 'running'
+  if (!ttsRequestActive.value) {
+    ttsRunning.value = ttsStatus.value.progress?.status === 'running'
+  }
 }
 
 function applyLiveSegmentStatus() {
@@ -291,14 +301,27 @@ function startPolling() {
   pollTimer = window.setInterval(async () => {
     try {
       await refreshTtsStatus()
-      if (!ttsRunning.value) {
+      if (!ttsRequestActive.value && !ttsRunning.value) {
         stopPolling()
-        await refreshAfterChange()
+        await Promise.all([refreshSegments(), refreshOutputs()])
       }
     } catch (err) {
       error.value = err instanceof Error ? err.message : '刷新进度失败'
     }
   }, 1500)
+}
+
+async function stopGeneration() {
+  stoppingGeneration.value = true
+  error.value = ''
+  try {
+    const result = await cancelProjectTask(projectId)
+    message.value = result.cancelled ? '已发送终止指令，正在停止当前阶段…' : '当前没有可终止的生成任务'
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '终止任务失败'
+  } finally {
+    stoppingGeneration.value = false
+  }
 }
 
 function stopPolling() {
@@ -390,9 +413,10 @@ async function runTts() {
     return
   }
   ttsRunning.value = true
-  startPolling()
   try {
     await ensureFilenameSaved()
+    ttsRequestActive.value = true
+    startPolling()
     await startTts(projectId)
     await refreshAfterChange()
     message.value = '分段音频已生成，可以合并完整音频'
@@ -400,6 +424,7 @@ async function runTts() {
     error.value = err instanceof Error ? err.message : 'TTS 启动失败'
     await refreshAfterChange()
   } finally {
+    ttsRequestActive.value = false
     ttsRunning.value = false
     stopPolling()
   }
@@ -475,7 +500,6 @@ async function oneClickGenerate() {
   mergingAudio.value = false
   oneClickStage.value = '保存脚本'
   startOneClickTimer()
-  startPolling()
 
   try {
     await ensureFilenameSaved()
@@ -487,7 +511,11 @@ async function oneClickGenerate() {
 
     message.value = '正在生成分段音频...'
     beginOneClickStage('生成分段音频')
+    ttsRequestActive.value = true
+    startPolling()
     await startTts(projectId)
+    ttsRequestActive.value = false
+    stopPolling()
     await refreshAfterChange()
 
     if (ttsStatus.value.failed > 0) {
@@ -532,6 +560,7 @@ async function oneClickGenerate() {
     timerNow.value = oneClickFinishedAt.value
     stopOneClickTimer()
     oneClickGenerating.value = false
+    ttsRequestActive.value = false
     ttsRunning.value = false
     mergingAudio.value = false
     generatingSubtitles.value = false
@@ -628,6 +657,14 @@ onBeforeUnmount(() => {
           </button>
           <button class="secondary-button" :disabled="composingVideo || oneClickGenerating" @click="composeVideo">
             {{ composingVideo ? '视频生成中' : '生成视频' }}
+          </button>
+          <button
+            v-if="hasRunningGeneration"
+            class="danger-button"
+            :disabled="stoppingGeneration"
+            @click="stopGeneration"
+          >
+            {{ stoppingGeneration ? '正在终止…' : '强制终止当前任务' }}
           </button>
         </div>
 

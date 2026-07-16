@@ -9,6 +9,7 @@ from app.services import (
     project_service,
     srt_service,
     timeline_service,
+    task_control,
     translate_service,
     tts_service,
     video_service,
@@ -36,7 +37,8 @@ def run_project_generation(
         on_stage_changed(stage)
 
     if stage == "tts":
-        segments = tts_service.generate_project_tts(session, project)
+        with task_control.controlled(project.id, "tts"):
+            segments = tts_service.generate_project_tts(session, project)
         failed = [item for item in segments if item.status == "failed"]
         if failed:
             raise RuntimeError(f"TTS 有 {len(failed)} 段生成失败")
@@ -44,18 +46,23 @@ def run_project_generation(
         on_stage_changed(stage)
 
     if stage == "audio_merge":
-        audio_service.merge_project_audio(session, project)
+        with task_control.controlled(project.id, "audio_merge"):
+            audio_service.merge_project_audio(session, project)
         stage = "subtitles"
         on_stage_changed(stage)
 
     if stage == "subtitles":
-        _create_subtitles(session, project)
+        with task_control.controlled(project.id, "translation"):
+            _create_subtitles(session, project)
         stage = "video" if include_video else "completed"
         on_stage_changed(stage)
 
     if stage == "video":
         try:
-            video_service.compose_video(session, project)
+            with task_control.controlled(project.id, "video"):
+                video_service.compose_video(session, project)
+        except task_control.TaskCancelledError:
+            raise
         except (OSError, RuntimeError, ValueError) as exc:
             try:
                 video_service.mark_video_progress_failed(project, str(exc))

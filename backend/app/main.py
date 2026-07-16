@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import batches, exports, projects, segments, settings, subtitles, tts, videos, voices
+from app.api import batches, exports, projects, segments, settings, subtitles, tasks, tts, videos, voices
 from app.database import create_db_and_tables
 from app.services import batch_worker
 
@@ -36,4 +36,5 @@ app.include_router(tts.router, prefix="/api")
 app.include_router(subtitles.router, prefix="/api")
 app.include_router(exports.router, prefix="/api")
 app.include_router(videos.router, prefix="/api")
+app.include_router(tasks.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")

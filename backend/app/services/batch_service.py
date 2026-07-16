@@ -93,11 +93,14 @@ def create_batch(
     session.commit()
 
     used_stems = _existing_output_stems(session, output_root)
+    used_project_names: set[str] = set()
     for order_index, (filename, text) in enumerate(scripts, start=1):
-        stem = _unique_stem(Path(filename).stem, used_stems, output_root)
+        script_stem = safe_filename_stem(Path(filename).stem)
+        project_name = _unique_name(script_stem, used_project_names)
+        stem = _unique_stem(f"{batch.name}_{script_stem}", used_stems, output_root)
         project = project_service.create_project(
             session,
-            stem,
+            project_name,
             {
                 "tts_engine": normalized_tts_engine,
                 "reference_audio_text": reference_audio_text.strip(),
@@ -106,7 +109,7 @@ def create_batch(
         project_service.update_project_settings(
             session,
             project,
-            stem,
+            project_name,
             str(output_root),
             stem,
             str(video_root) if video_root else "",
@@ -241,6 +244,16 @@ def _unique_stem(filename_stem: str, used_stems: set[str], output_root: Path) ->
         candidate = safe_filename_stem(f"{base}-{suffix}")
         suffix += 1
     used_stems.add(candidate.lower())
+    return candidate
+
+
+def _unique_name(name: str, used_names: set[str]) -> str:
+    candidate = name
+    suffix = 2
+    while candidate.lower() in used_names:
+        candidate = safe_filename_stem(f"{name}-{suffix}")
+        suffix += 1
+    used_names.add(candidate.lower())
     return candidate
 
 

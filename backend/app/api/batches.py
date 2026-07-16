@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlmodel import Session
 
 from app.database import get_session
-from app.services import batch_service, batch_worker
+from app.services import batch_service, batch_worker, task_control
 
 
 logger = logging.getLogger(__name__)
@@ -100,6 +100,9 @@ def pause_batch(batch_id: str, session: Session = Depends(get_session)) -> dict:
         batch = batch_service.pause_batch(session, batch)
     except ValueError as exc:
         fail(str(exc))
+    for item in batch_service.get_batch_items(session, batch.id):
+        if item.status == "running":
+            task_control.cancel(item.project_id)
     return {"success": True, "data": batch_service.serialize_batch(session, batch)}
 
 

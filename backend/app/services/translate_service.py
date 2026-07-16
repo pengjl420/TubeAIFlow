@@ -11,6 +11,7 @@ from sqlmodel import Session, select
 from app.config import get_settings
 from app.models.project import Project
 from app.models.segment import Segment
+from app.services import task_control
 from app.utils.project_paths import ensure_project_dirs, get_output_stem, get_project_work_dir
 
 
@@ -64,7 +65,9 @@ def translate_project_to_english(session: Session, project: Project, overwrite: 
         session.add(project)
         session.commit()
 
-        translations = _translate_segments_with_deepseek(missing_segments, _get_translation_log_path(project))
+        translations = _translate_segments_with_deepseek(
+            missing_segments, _get_translation_log_path(project), project.id
+        )
         for segment in missing_segments:
             translated = translations.get(segment.segment_id, "").strip()
             if not translated:
@@ -155,6 +158,7 @@ def translate_subtitle_cues(
         _get_translation_log_path(project),
         source_language,
         resolved_target,
+        project.id,
     )
     missing = [
         str(cue.get("cue_id") or "").strip()
@@ -215,13 +219,16 @@ def load_cue_translation(project: Project) -> dict[str, str]:
 def _translate_segments_with_deepseek(
     segments: list[Segment],
     log_path: Path | None = None,
+    project_id: str | None = None,
 ) -> dict[str, str]:
     settings = get_settings()
     batch_size = max(1, settings.translation_batch_size)
     translations: dict[str, str] = {}
     for batch_index, start in enumerate(range(0, len(segments), batch_size), start=1):
         batch = segments[start:start + batch_size]
-        translations.update(_translate_segment_batch(batch, batch_index, log_path))
+        if project_id:
+            task_control.check_cancelled(project_id)
+        translations.update(_translate_segment_batch(batch, batch_index, log_path, project_id))
     return translations
 
 
@@ -229,6 +236,7 @@ def _translate_segment_batch(
     segments: list[Segment],
     batch_index: int,
     log_path: Path | None,
+    project_id: str | None = None,
 ) -> dict[str, str]:
     settings = get_settings()
     payload = {
@@ -283,6 +291,7 @@ def _translate_segment_batch(
             [segment.segment_id for segment in segments],
             "segment",
         ),
+        project_id,
     )
 
 
@@ -291,14 +300,17 @@ def _translate_cues_with_deepseek(
     log_path: Path | None = None,
     source_language: str = "zh",
     target_language: str = "en",
+    project_id: str | None = None,
 ) -> dict[str, str]:
     settings = get_settings()
     batch_size = max(1, settings.translation_batch_size)
     translations: dict[str, str] = {}
     for batch_index, start in enumerate(range(0, len(zh_cues), batch_size), start=1):
         batch = zh_cues[start:start + batch_size]
+        if project_id:
+            task_control.check_cancelled(project_id)
         translations.update(_translate_cue_batch(
-            batch, batch_index, log_path, source_language, target_language
+            batch, batch_index, log_path, source_language, target_language, project_id
         ))
     return translations
 
@@ -309,6 +321,7 @@ def _translate_cue_batch(
     log_path: Path | None,
     source_language: str = "zh",
     target_language: str = "en",
+    project_id: str | None = None,
 ) -> dict[str, str]:
     settings = get_settings()
     payload = {
@@ -365,7 +378,10 @@ def _translate_cue_batch(
                 [str(cue["cue_id"]) for cue in zh_cues],
                 "subtitle cue",
             ),
+            project_id,
         )
+    except task_control.TaskCancelledError:
+        raise
     except RuntimeError:
         if len(zh_cues) <= 1:
             raise
@@ -382,10 +398,10 @@ def _translate_cue_batch(
             },
         )
         translations = _translate_cue_batch(
-            zh_cues[:midpoint], batch_index, log_path, source_language, target_language
+            zh_cues[:midpoint], batch_index, log_path, source_language, target_language, project_id
         )
         translations.update(_translate_cue_batch(
-            zh_cues[midpoint:], batch_index, log_path, source_language, target_language
+            zh_cues[midpoint:], batch_index, log_path, source_language, target_language, project_id
         ))
         return translations
 
@@ -412,6 +428,7 @@ def _request_deepseek_json(
     item_count: int,
     log_path: Path | None,
     response_parser: Callable[[object], dict[str, str]],
+    project_id: str | None = None,
 ) -> dict[str, str]:
     settings = get_settings()
     url = settings.deepseek_base_url.rstrip("/") + "/chat/completions"
@@ -422,9 +439,15 @@ def _request_deepseek_json(
     attempts = max(1, settings.translation_retry_count + 1)
     last_error: Exception | None = None
     for attempt in range(1, attempts + 1):
+        if project_id:
+            task_control.check_cancelled(project_id)
         request_payload = _payload_for_attempt(payload, attempt)
+        client = httpx.Client() if project_id else None
+        if project_id and client:
+            task_control.register_cancel_callback(project_id, client.close)
         try:
-            response = httpx.post(
+            post = client.post if client else httpx.post
+            response = post(
                 url,
                 headers=headers,
                 json=request_payload,
@@ -449,11 +472,20 @@ def _request_deepseek_json(
             if finish_reason != "stop":
                 raise RuntimeError(f"DeepSeek stopped with finish_reason={finish_reason}")
             return response_parser(parsed)
+        except task_control.TaskCancelledError:
+            raise
         except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
             last_error = exc
             _write_translation_error(log_path, operation, batch_index, item_count, attempt, exc)
+            if project_id:
+                task_control.check_cancelled(project_id)
             if attempt < attempts:
                 continue
+        finally:
+            if project_id:
+                task_control.register_cancel_callback(project_id, None)
+            if client:
+                client.close()
 
     if isinstance(last_error, httpx.HTTPError):
         raise RuntimeError(f"DeepSeek {operation} request failed after {attempts} attempt(s): {last_error}") from last_error

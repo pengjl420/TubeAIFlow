@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { createProject, selectDirectory, type TtsEngine } from '../api/projects'
@@ -17,6 +17,15 @@ const includeVideo = ref(false)
 const saving = ref(false)
 const selectingFolder = ref<'output' | 'video' | null>(null)
 const error = ref('')
+let outputFilenameEdited = false
+
+watch(name, (value) => {
+  if (!outputFilenameEdited) outputFilename.value = value.trim()
+})
+
+function markOutputFilenameEdited() {
+  outputFilenameEdited = true
+}
 
 function selectReferenceAudio(event: Event) {
   referenceAudio.value = (event.target as HTMLInputElement).files?.[0] || null
@@ -134,7 +143,7 @@ async function submit() {
         </label>
         <label class="field reference-field">
           <span>默认输出文件名</span>
-          <input v-model="outputFilename" placeholder="留空则使用当前时间戳" />
+          <input v-model="outputFilename" placeholder="默认使用项目名称" @input="markOutputFilenameEdited" />
           <span class="muted">中间文件写入同名子文件夹，完整音频输出到根目录下的同名 WAV。</span>
         </label>
       </div>

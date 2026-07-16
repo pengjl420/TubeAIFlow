@@ -10,7 +10,7 @@ from sqlmodel import Session, select
 from app.config import get_settings
 from app.models.project import Project
 from app.models.segment import Segment
-from app.services import srt_service
+from app.services import srt_service, task_control
 from app.utils.ffmpeg_utils import probe_duration
 from app.utils.project_paths import ensure_project_dirs, get_project_work_dir, load_project_config
 
@@ -210,7 +210,7 @@ def _run_tts_batch(
     logs_dir: Path,
 ) -> None:
     if engine == "index_tts":
-        _run_index_tts_batch(reference_audio_path, segments, audio_dir, logs_dir)
+        _run_index_tts_batch(project.id, reference_audio_path, segments, audio_dir, logs_dir)
         return
     if engine == "qwen3_tts":
         _run_qwen3_tts_batch(project, reference_audio_path, segments, audio_dir, logs_dir)
@@ -219,6 +219,7 @@ def _run_tts_batch(
 
 
 def _run_index_tts_batch(
+    project_id: str,
     reference_audio_path: Path,
     segments: list[Segment],
     audio_dir: Path,
@@ -271,7 +272,8 @@ def _run_index_tts_batch(
 
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
-    result = subprocess.run(
+    result = _run_controlled_process(
+        project_id,
         command,
         cwd=settings.index_tts_root.resolve(),
         capture_output=True,
@@ -351,7 +353,8 @@ def _run_qwen3_tts_batch(
 
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
-    result = subprocess.run(
+    result = _run_controlled_process(
+        project.id,
         command,
         cwd=settings.qwen_tts_root.resolve(),
         capture_output=True,
@@ -367,6 +370,21 @@ def _run_qwen3_tts_batch(
     if result.returncode != 0 and not result_path.exists():
         message = result.stderr.strip() or result.stdout.strip() or "Qwen3-TTS batch failed"
         raise RuntimeError(message[-4000:])
+
+
+def _run_controlled_process(project_id: str, command: list[str], **kwargs) -> subprocess.CompletedProcess:
+    if not task_control.status(project_id)["running"]:
+        return subprocess.run(command, **kwargs)
+    task_control.check_cancelled(project_id)
+    kwargs.pop("check", None)
+    if kwargs.pop("capture_output", False):
+        kwargs["stdout"] = subprocess.PIPE
+        kwargs["stderr"] = subprocess.PIPE
+    process = subprocess.Popen(command, **kwargs)
+    task_control.register_process(project_id, process)
+    stdout, stderr = process.communicate()
+    task_control.check_cancelled(project_id)
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 
 def _write_initial_progress(progress_path: Path, segments: list[Segment]) -> None:

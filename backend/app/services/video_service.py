@@ -123,7 +123,7 @@ def _compose_video(session: Session, project: Project) -> Path:
         total=len(selected),
         message="Normalizing selected clips",
     )
-    temp_paths = normalize_selected_clips(selected, temp_dir, progress_path)
+    temp_paths = normalize_selected_clips(selected, temp_dir, progress_path, project.id)
     concat_path = video_dir / "concat.txt"
     concat_path.write_text(
         "\n".join(f"file '{path.as_posix()}'" for path in temp_paths),
@@ -141,7 +141,7 @@ def _compose_video(session: Session, project: Project) -> Path:
         completed=len(selected),
         message="Concatenating final video",
     )
-    concatenate_normalized_clips(concat_path, output_path)
+    concatenate_normalized_clips(concat_path, output_path, project_id=project.id)
     video_duration = probe_duration(output_path)
     if video_duration <= target_duration:
         # Frame-rate normalization and imperfect source tails can make the
@@ -158,7 +158,7 @@ def _compose_video(session: Session, project: Project) -> Path:
             target_duration - video_duration,
             retry_padding,
         )
-        concatenate_normalized_clips(concat_path, output_path, retry_padding)
+        concatenate_normalized_clips(concat_path, output_path, retry_padding, project.id)
         video_duration = probe_duration(output_path)
     if video_duration <= target_duration:
         raise RuntimeError(
@@ -186,6 +186,7 @@ def concatenate_normalized_clips(
     concat_path: Path,
     output_path: Path,
     tail_padding: float = VIDEO_TAIL_PADDING,
+    project_id: str | None = None,
 ) -> None:
     # Re-encode the joined stream so every boundary gets a clean timestamp and
     # reference-frame chain. Stream copying can produce a one-frame flash on
@@ -216,7 +217,7 @@ def concatenate_normalized_clips(
         "-movflags",
         "+faststart",
         str(output_path),
-    ])
+    ], project_id)
 
 
 def scan_video_files(media_dir: Path) -> list[Path]:
@@ -285,6 +286,7 @@ def normalize_selected_clips(
     selected: list[SelectedVideo],
     temp_dir: Path,
     progress_path: Path | None = None,
+    project_id: str | None = None,
 ) -> list[Path]:
     temp_paths: list[Path] = []
     for index, item in enumerate(selected, start=1):
@@ -327,7 +329,7 @@ def normalize_selected_clips(
             "-movflags",
             "+faststart",
             str(output_path),
-        ])
+        ], project_id)
         temp_paths.append(output_path)
         if progress_path:
             write_video_progress(

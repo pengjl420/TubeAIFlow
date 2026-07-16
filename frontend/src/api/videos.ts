@@ -12,7 +12,7 @@ export async function composeProjectVideo(projectId: string): Promise<{ path: st
 }
 
 export interface VideoProgress {
-  status: 'running' | 'completed' | 'failed'
+  status: 'running' | 'completed' | 'failed' | 'cancelled'
   stage: string
   percent: number
   total: number

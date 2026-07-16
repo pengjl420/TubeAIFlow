@@ -6,7 +6,7 @@ from sqlmodel import Session, select
 from app.config import get_settings
 from app.database import get_session
 from app.models.segment import Segment
-from app.services import project_service, tts_service
+from app.services import project_service, task_control, tts_service
 from app.utils.project_paths import get_project_work_dir
 
 
@@ -19,7 +19,9 @@ def start_tts(project_id: str, session: Session = Depends(get_session)) -> dict:
     if not project:
         raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
     try:
-        return {"success": True, "data": tts_service.generate_project_tts(session, project)}
+        with task_control.controlled(project_id, "tts"):
+            data = tts_service.generate_project_tts(session, project)
+        return {"success": True, "data": data}
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(
             status_code=400,
@@ -47,7 +49,9 @@ def regenerate_segment(project_id: str, segment_id: str, session: Session = Depe
         raise HTTPException(status_code=404, detail={"success": False, "error": "Segment not found"})
     try:
         project = project_service.ensure_output_filename(session, project)
-        return {"success": True, "data": tts_service.regenerate_segment_tts(session, project, segment)}
+        with task_control.controlled(project_id, "tts"):
+            data = tts_service.regenerate_segment_tts(session, project, segment)
+        return {"success": True, "data": data}
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(
             status_code=400,
@@ -118,6 +122,8 @@ def _build_live_segments(project, segments: list[Segment], progress: dict | None
             if result.get("success"):
                 item["status"] = "completed"
                 item["audio_path"] = str(output_path) if output_path.exists() else segment.audio_path
+                if output_path.exists():
+                    item["updated_at"] = str(output_path.stat().st_mtime_ns)
                 item["error_message"] = None
             else:
                 item["status"] = "failed"

@@ -107,7 +107,7 @@ onBeforeUnmount(() => {
         <span class="muted">创建于 {{ new Date(batch.created_at).toLocaleString() }}</span>
       </div>
       <div class="page-title-actions">
-        <button v-if="canPause" class="secondary-button" :disabled="acting" @click="pause">当前文件完成后暂停</button>
+        <button v-if="canPause" class="danger-button" :disabled="acting" @click="pause">终止当前任务并暂停</button>
         <button v-if="canResume" class="primary-button" :disabled="acting" @click="resume">继续执行</button>
         <RouterLink class="secondary-button" to="/batches">返回批次列表</RouterLink>
       </div>

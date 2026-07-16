@@ -178,7 +178,7 @@ def update_output_settings(
     directory.mkdir(parents=True, exist_ok=True)
 
     config = load_project_config(project)
-    config["output_filename"] = safe_filename_stem(output_filename or _timestamp_stem())
+    config["output_filename"] = safe_filename_stem(output_filename or project.name or _timestamp_stem())
     project.output_dir = str(directory)
     project.config_json = json.dumps(config, ensure_ascii=False)
     ensure_project_dirs(get_project_work_dir(project, get_settings().workspace_dir))
@@ -224,7 +224,7 @@ def update_project_settings(
     config = load_project_config(project)
     previous_tts_engine = str(config.get("tts_engine") or "index_tts").strip().lower()
     previous_reference_audio_text = str(config.get("reference_audio_text") or "").strip()
-    config["output_filename"] = safe_filename_stem(output_filename or _timestamp_stem())
+    config["output_filename"] = safe_filename_stem(output_filename or project_name or _timestamp_stem())
     config["tts_engine"] = normalized_tts_engine
     config["reference_audio_text"] = reference_audio_text.strip()
     config["include_translation"] = include_translation
@@ -256,7 +256,7 @@ def ensure_output_filename(session: Session, project: Project) -> Project:
     config = load_project_config(project)
     if str(config.get("output_filename") or "").strip():
         return project
-    config["output_filename"] = safe_filename_stem(_timestamp_stem())
+    config["output_filename"] = safe_filename_stem(project.name or _timestamp_stem())
     project.config_json = json.dumps(config, ensure_ascii=False)
     project.updated_at = utc_now_iso()
     ensure_project_dirs(get_project_work_dir(project, get_settings().workspace_dir))

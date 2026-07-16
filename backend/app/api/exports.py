@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session
 
 from app.database import get_session
-from app.services import audio_service, export_service, project_service
+from app.services import audio_service, export_service, project_service, task_control
 
 
 router = APIRouter(tags=["exports"])
@@ -15,7 +15,8 @@ def merge_audio(project_id: str, session: Session = Depends(get_session)) -> dic
         raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
     try:
         project = project_service.ensure_output_filename(session, project)
-        path = audio_service.merge_project_audio(session, project)
+        with task_control.controlled(project_id, "audio_merge"):
+            path = audio_service.merge_project_audio(session, project)
         return {"success": True, "data": {"path": str(path)}}
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(

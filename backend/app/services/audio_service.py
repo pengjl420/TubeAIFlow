@@ -65,7 +65,10 @@ def merge_project_audio(session: Session, project: Project) -> Path:
         )
     except OSError as exc:
         raise RuntimeError(f"Cannot write FFmpeg concat list: {list_path}") from exc
-    run_ffmpeg(["-y", "-f", "concat", "-safe", "0", "-i", str(list_path), "-c", "copy", str(full_voice_path)])
+    run_ffmpeg(
+        ["-y", "-f", "concat", "-safe", "0", "-i", str(list_path), "-c", "copy", str(full_voice_path)],
+        project.id,
+    )
     for segment in audio_segments:
         if segment.duration is None:
             segment.duration = probe_duration(Path(segment.audio_path))

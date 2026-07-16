@@ -71,10 +71,14 @@ def get_segment_audio(project_id: str, segment_id: str, session: Session = Depen
             Segment.segment_id == segment_id,
         )
     ).first()
-    if not segment or not segment.audio_path:
+    if not segment:
         raise HTTPException(status_code=404, detail={"success": False, "error": "Segment audio not found"})
 
-    audio_path = Path(segment.audio_path)
+    audio_path = (
+        Path(segment.audio_path)
+        if segment.audio_path
+        else get_project_work_dir(project, get_settings().workspace_dir) / "audio" / "segments" / f"{segment_id}.wav"
+    )
     try:
         audio_path = ensure_inside_any(
             audio_path,

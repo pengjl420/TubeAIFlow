@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from sqlmodel import Session
 
 from app.database import get_session
-from app.services import project_service, video_service
+from app.services import project_service, task_control, video_service
 
 
 router = APIRouter(tags=["videos"])
@@ -38,10 +38,13 @@ def compose_video(project_id: str, session: Session = Depends(get_session)) -> d
         raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
     try:
         project = project_service.ensure_output_filename(session, project)
-        path = video_service.compose_video(session, project)
+        with task_control.controlled(project_id, "video"):
+            path = video_service.compose_video(session, project)
         return {"success": True, "data": {"path": str(path)}}
     except video_service.VideoCompositionRunningError as exc:
         raise HTTPException(status_code=409, detail={"success": False, "error": str(exc)}) from exc
+    except task_control.TaskCancelledError as exc:
+        raise HTTPException(status_code=400, detail={"success": False, "error": str(exc)}) from exc
     except (ValueError, RuntimeError, OSError) as exc:
         try:
             video_service.mark_video_progress_failed(project, str(exc))

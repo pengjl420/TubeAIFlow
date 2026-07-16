@@ -239,7 +239,7 @@ onMounted(load)
             <small>仅对 CosyVoice 3 的 zero-shot 提示生效；系统会自动添加 <code>&lt;|endofprompt|&gt;</code>。</small>
           </label>
         </div>
-        <div class="notice">CosyVoice zero-shot 必须填写与参考音频准确对应的逐字稿；参考音频和逐字稿会在项目或批量任务设置中配置。</div>
+        <div class="notice">CosyVoice zero-shot 必须填写与参考音频准确对应的逐字稿；请在“参考音频”菜单中统一配置，项目和批量任务只需选择音色。</div>
       </div>
 
       <div class="panel">

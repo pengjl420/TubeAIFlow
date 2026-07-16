@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
-import { createProject, selectDirectory, type TtsEngine } from '../../api/projects'
+import { createProject, selectDirectory } from '../../api/projects'
+import { listVoices, type VoiceProfile } from '../../api/voices'
 
 const router = useRouter()
 const name = ref('')
-const referenceAudio = ref<File | null>(null)
-const ttsEngine = ref<TtsEngine>('qwen3_tts')
-const referenceAudioText = ref('')
+const voices = ref<VoiceProfile[]>([])
+const voiceProfileId = ref('')
 const outputDir = ref('D:\\video_darft')
 const outputFilename = ref('')
 const mediaVideoDir = ref('')
@@ -25,10 +25,6 @@ watch(name, (value) => {
 
 function markOutputFilenameEdited() {
   outputFilenameEdited = true
-}
-
-function selectReferenceAudio(event: Event) {
-  referenceAudio.value = (event.target as HTMLInputElement).files?.[0] || null
 }
 
 async function chooseFolder(target: 'output' | 'video') {
@@ -52,16 +48,12 @@ async function submit() {
     error.value = '请输入项目名称'
     return
   }
-  if (!referenceAudio.value) {
-    error.value = '请选择参考音频文件'
+  if (!voiceProfileId.value) {
+    error.value = '请选择系统音色；如尚未配置，请先前往参考音频菜单新增'
     return
   }
   if (!outputDir.value.trim()) {
     error.value = '请选择输出文件夹'
-    return
-  }
-  if (ttsEngine.value === 'cosyvoice' && !referenceAudioText.value.trim()) {
-    error.value = 'CosyVoice 需要填写参考音频逐字稿'
     return
   }
   if (includeVideo.value && !mediaVideoDir.value.trim()) {
@@ -73,14 +65,12 @@ async function submit() {
   try {
     const project = await createProject({
       name: name.value.trim(),
-      reference_audio: referenceAudio.value,
+      voice_profile_id: voiceProfileId.value,
       output_dir: outputDir.value.trim(),
       output_filename: outputFilename.value.trim(),
       media_video_dir: mediaVideoDir.value.trim(),
       include_translation: includeTranslation.value,
       include_video: includeVideo.value,
-      tts_engine: ttsEngine.value,
-      reference_audio_text: referenceAudioText.value.trim(),
     })
     router.push(`/projects/${project.id}`)
   } catch (err) {
@@ -89,6 +79,15 @@ async function submit() {
     saving.value = false
   }
 }
+
+onMounted(async () => {
+  try {
+    voices.value = await listVoices()
+    if (voices.value.length === 1) voiceProfileId.value = voices.value[0].id
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '系统音色加载失败'
+  }
+})
 </script>
 
 <template>
@@ -113,29 +112,18 @@ async function submit() {
           <span>项目名称</span>
           <input v-model="name" placeholder="例如：第一条解说视频" @keyup.enter="submit" />
         </label>
-        <label class="field">
-          <span>TTS 引擎</span>
-          <select v-model="ttsEngine">
-            <option value="qwen3_tts">Qwen3-TTS（默认）</option>
-            <option value="chatterbox">Chatterbox</option>
-            <option value="cosyvoice">CosyVoice</option>
-          </select>
-        </label>
         <label class="field reference-field">
-          <span>参考音频</span>
-          <input
-            type="file"
-            accept="audio/wav,audio/mpeg,audio/flac,audio/mp4,.wav,.mp3,.flac,.m4a"
-            @change="selectReferenceAudio"
-          />
+          <span>系统音色</span>
+          <select v-model="voiceProfileId">
+            <option value="">请选择已配置的参考音频</option>
+            <option v-for="voice in voices" :key="voice.id" :value="voice.id">
+              {{ voice.name }} · {{ voice.tts_engine }}
+            </option>
+          </select>
           <span class="muted">
-            {{ referenceAudio ? `已选择：${referenceAudio.name}` : '创建项目时必须配置参考音频' }}
+            项目直接使用系统音色库，不再单独上传文件。
+            <RouterLink to="/voices">管理参考音频</RouterLink>
           </span>
-        </label>
-        <label v-if="ttsEngine === 'qwen3_tts' || ttsEngine === 'cosyvoice'" class="field reference-field">
-          <span>参考音频逐字稿（{{ ttsEngine === 'cosyvoice' ? '必填' : '推荐' }}）</span>
-          <textarea v-model="referenceAudioText" rows="4" placeholder="填写参考音频中实际说出的文字"></textarea>
-          <span class="muted">{{ ttsEngine === 'cosyvoice' ? 'CosyVoice zero-shot 克隆需要与参考音频完全对应的文字。' : '留空时使用仅声纹模式，克隆质量可能降低。' }}</span>
         </label>
       </div>
 

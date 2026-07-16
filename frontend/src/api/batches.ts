@@ -1,5 +1,4 @@
 import { apiClient, unwrap } from './client'
-import type { TtsEngine } from './projects'
 
 export interface BatchItem {
   id: string
@@ -34,13 +33,11 @@ export interface BatchJob {
 export interface CreateBatchInput {
   name: string
   scripts: File[]
-  referenceAudio: File
+  voiceProfileId: string
   outputDir: string
   mediaVideoDir: string
   includeVideo: boolean
   continueOnError: boolean
-  ttsEngine: TtsEngine
-  referenceAudioText: string
 }
 
 export async function listBatches(): Promise<BatchJob[]> {
@@ -55,13 +52,11 @@ export async function createBatch(input: CreateBatchInput): Promise<BatchJob> {
   const form = new FormData()
   form.append('name', input.name)
   for (const script of input.scripts) form.append('scripts', script)
-  form.append('reference_audio', input.referenceAudio)
+  form.append('voice_profile_id', input.voiceProfileId)
   form.append('output_dir', input.outputDir)
   form.append('media_video_dir', input.mediaVideoDir)
   form.append('include_video', String(input.includeVideo))
   form.append('continue_on_error', String(input.continueOnError))
-  form.append('tts_engine', input.ttsEngine)
-  form.append('reference_audio_text', input.referenceAudioText)
   form.append('auto_start', 'true')
   return unwrap<BatchJob>(await apiClient.post('/batches', form, { timeout: 0 }))
 }

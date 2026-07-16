@@ -5,6 +5,7 @@ import { useRoute } from 'vue-router'
 const route = useRoute()
 
 const sectionTitle = computed(() => {
+  if (route.path.startsWith('/voices')) return '参考音频'
   if (route.path.startsWith('/batches')) return '批量生产'
   if (route.path.startsWith('/settings')) return '系统设置'
   if (route.path.includes('/config')) return '项目设置'
@@ -43,6 +44,10 @@ const sectionTitle = computed(() => {
         <span><strong>本地模式</strong><small>数据仅保存在此设备</small></span>
       </div>
       <nav class="side-nav side-nav-bottom" aria-label="系统导航">
+        <RouterLink to="/voices" active-class="is-active">
+          <span class="nav-icon">声</span>
+          <span>参考音频</span>
+        </RouterLink>
         <RouterLink to="/settings" active-class="is-active">
           <span class="nav-icon">设</span>
           <span>系统设置</span>

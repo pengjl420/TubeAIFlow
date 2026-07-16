@@ -127,7 +127,7 @@ onMounted(loadProjects)
     <div v-else-if="!projects.length" class="empty-state panel">
       <span class="empty-icon">＋</span>
       <h2>从第一个项目开始</h2>
-      <p>准备一段逐字稿和参考音频，即可创建配音、字幕并合成视频。</p>
+      <p>准备一段逐字稿并选择系统音色，即可创建配音、字幕并合成视频。</p>
       <RouterLink class="primary-link" to="/projects/new">创建项目</RouterLink>
     </div>
     <div v-else-if="!filteredProjects.length" class="empty-state panel compact-empty">

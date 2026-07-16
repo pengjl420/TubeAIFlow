@@ -42,6 +42,7 @@ class ProjectSettingsRequest(BaseModel):
     include_video: bool = False
     tts_engine: str = project_service.DEFAULT_TTS_ENGINE
     reference_audio_text: str = ""
+    voice_profile_id: str = ""
 
 
 class DirectoryPickerRequest(BaseModel):
@@ -65,7 +66,7 @@ def list_projects(session: Session = Depends(get_session)) -> dict:
 @router.post("/projects")
 def create_project(
     name: str = Form(...),
-    reference_audio: UploadFile = File(...),
+    reference_audio: UploadFile | None = File(None),
     output_dir: str = Form(r"D:\video_darft"),
     output_filename: str = Form(""),
     media_video_dir: str = Form(""),
@@ -73,10 +74,13 @@ def create_project(
     include_video: bool = Form(False),
     tts_engine: str = Form(project_service.DEFAULT_TTS_ENGINE),
     reference_audio_text: str = Form(""),
+    voice_profile_id: str = Form(""),
     session: Session = Depends(get_session),
 ) -> dict:
     if not name.strip():
         fail("Project name is required")
+    if not voice_profile_id.strip() and reference_audio is None:
+        fail("请选择已配置的系统音色")
     try:
         normalized_tts_engine = tts_engine.strip().lower()
         if normalized_tts_engine not in project_service.SUPPORTED_TTS_ENGINES:
@@ -96,15 +100,16 @@ def create_project(
             reference_audio_text,
             include_translation,
             include_video,
+            voice_profile_id,
         )
-        return ok(
-            project_service.save_reference_audio(
+        if voice_profile_id.strip():
+            return ok(project)
+        return ok(project_service.save_reference_audio(
                 session,
                 project,
                 reference_audio.file,
                 reference_audio.filename or "reference.wav",
-            )
-        )
+            ))
     except (OSError, ValueError) as exc:
         if "project" in locals():
             session.delete(project)
@@ -240,6 +245,7 @@ def save_project_settings(
             payload.reference_audio_text,
             payload.include_translation,
             payload.include_video,
+            payload.voice_profile_id,
         ))
     except (OSError, ValueError) as exc:
         logger.exception("Failed to save settings for project %s", project_id)
@@ -269,6 +275,7 @@ def get_reference_audio(project_id: str, session: Session = Depends(get_session)
             [
                 get_project_work_dir(project, get_settings().workspace_dir),
                 project_dir(get_settings().workspace_dir, project_id),
+                get_settings().workspace_dir / "voices",
             ],
         )
     except ValueError as exc:

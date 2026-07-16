@@ -8,6 +8,7 @@ import ProjectCreate from './pages/projects/ProjectCreate.vue'
 import ProjectShell from './pages/projects/ProjectShell.vue'
 import ProjectList from './pages/projects/ProjectList.vue'
 import SystemSettings from './pages/settings/SystemSettings.vue'
+import VoiceProfiles from './pages/settings/VoiceProfiles.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -20,20 +21,23 @@ const router = createRouter({
     { path: '/projects/new', component: ProjectCreate },
     { path: '/projects/:id', component: ProjectShell },
     { path: '/projects/:id/config', component: ProjectConfig },
+    { path: '/voices', component: VoiceProfiles },
     { path: '/settings', component: SystemSettings },
   ],
 })
 
 router.afterEach((to) => {
-  const section = to.path.startsWith('/batches')
-    ? '批量生产'
-    : to.path.startsWith('/settings')
-      ? '系统设置'
-      : to.path.startsWith('/projects/new')
-        ? '创建项目'
-        : to.path.startsWith('/projects/')
-          ? '项目工作台'
-          : '项目总览'
+  const section = to.path.startsWith('/voices')
+    ? '参考音频'
+    : to.path.startsWith('/batches')
+      ? '批量生产'
+      : to.path.startsWith('/settings')
+        ? '系统设置'
+        : to.path.startsWith('/projects/new')
+          ? '创建项目'
+          : to.path.startsWith('/projects/')
+            ? '项目工作台'
+            : '项目总览'
   document.title = `${section} · TubeAIFlow`
 })
 

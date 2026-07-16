@@ -1,17 +1,16 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { createBatch } from '../../api/batches'
 import { selectDirectory } from '../../api/projects'
-import type { TtsEngine } from '../../api/projects'
+import { listVoices, type VoiceProfile } from '../../api/voices'
 
 const router = useRouter()
 const name = ref(`批量生成 ${new Date().toLocaleDateString()}`)
 const scripts = ref<File[]>([])
-const referenceAudio = ref<File | null>(null)
-const ttsEngine = ref<TtsEngine>('qwen3_tts')
-const referenceAudioText = ref('')
+const voices = ref<VoiceProfile[]>([])
+const voiceProfileId = ref('')
 const outputDir = ref('')
 const mediaVideoDir = ref('')
 const includeVideo = ref(true)
@@ -22,10 +21,6 @@ const error = ref('')
 
 function selectScripts(event: Event) {
   scripts.value = Array.from((event.target as HTMLInputElement).files || [])
-}
-
-function selectReferenceAudio(event: Event) {
-  referenceAudio.value = (event.target as HTMLInputElement).files?.[0] || null
 }
 
 function moveScript(index: number, offset: number) {
@@ -62,16 +57,12 @@ async function submit() {
     error.value = '请至少选择一份逐字稿'
     return
   }
-  if (!referenceAudio.value) {
-    error.value = '请选择参考音频'
+  if (!voiceProfileId.value) {
+    error.value = '请选择系统音色'
     return
   }
   if (!outputDir.value.trim()) {
     error.value = '请选择输出目录'
-    return
-  }
-  if (ttsEngine.value === 'cosyvoice' && !referenceAudioText.value.trim()) {
-    error.value = 'CosyVoice 需要填写参考音频逐字稿'
     return
   }
   if (includeVideo.value && !mediaVideoDir.value.trim()) {
@@ -85,13 +76,11 @@ async function submit() {
     const batch = await createBatch({
       name: name.value.trim() || '批量生成',
       scripts: scripts.value,
-      referenceAudio: referenceAudio.value,
+      voiceProfileId: voiceProfileId.value,
       outputDir: outputDir.value.trim(),
       mediaVideoDir: mediaVideoDir.value.trim(),
       includeVideo: includeVideo.value,
       continueOnError: continueOnError.value,
-      ttsEngine: ttsEngine.value,
-      referenceAudioText: referenceAudioText.value.trim(),
     })
     router.push(`/batches/${batch.id}`)
   } catch (err) {
@@ -100,6 +89,15 @@ async function submit() {
     saving.value = false
   }
 }
+
+onMounted(async () => {
+  try {
+    voices.value = await listVoices()
+    if (voices.value.length === 1) voiceProfileId.value = voices.value[0].id
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '系统音色加载失败'
+  }
+})
 </script>
 
 <template>
@@ -136,24 +134,14 @@ async function submit() {
         </div>
 
         <label class="field">
-          <span>TTS 引擎</span>
-          <select v-model="ttsEngine">
-            <option value="qwen3_tts">Qwen3-TTS（默认）</option>
-            <option value="chatterbox">Chatterbox</option>
-            <option value="cosyvoice">CosyVoice</option>
+          <span>公共系统音色</span>
+          <select v-model="voiceProfileId">
+            <option value="">请选择已配置的参考音频</option>
+            <option v-for="voice in voices" :key="voice.id" :value="voice.id">
+              {{ voice.name }} · {{ voice.tts_engine }}
+            </option>
           </select>
-          <small>本批次中的所有项目都会使用该引擎。</small>
-        </label>
-
-        <label class="field">
-          <span>公共参考音频</span>
-          <input type="file" accept="audio/wav,audio/mpeg,audio/flac,audio/mp4,.wav,.mp3,.flac,.m4a" @change="selectReferenceAudio" />
-          <small>{{ referenceAudio ? `已选择：${referenceAudio.name}` : '该音色会用于本批次内的所有逐字稿。' }}</small>
-        </label>
-        <label v-if="ttsEngine === 'qwen3_tts' || ttsEngine === 'cosyvoice'" class="field">
-          <span>参考音频逐字稿（{{ ttsEngine === 'cosyvoice' ? '必填' : '推荐' }}）</span>
-          <textarea v-model="referenceAudioText" rows="4" placeholder="填写公共参考音频中实际说出的文字"></textarea>
-          <small>{{ ttsEngine === 'cosyvoice' ? 'CosyVoice zero-shot 克隆需要与参考音频完全对应的文字。' : '留空时使用仅声纹模式，克隆质量可能降低。' }}</small>
+          <small>该音色会用于本批次内的所有项目。<RouterLink to="/voices">管理参考音频</RouterLink></small>
         </label>
       </div>
 

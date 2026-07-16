@@ -44,7 +44,7 @@ def create_batch(
     *,
     name: str,
     scripts: list[tuple[str, str]],
-    reference_audio: BinaryIO,
+    reference_audio: BinaryIO | None,
     reference_audio_filename: str,
     output_dir: str,
     media_video_dir: str,
@@ -52,12 +52,26 @@ def create_batch(
     continue_on_error: bool,
     tts_engine: str = DEFAULT_TTS_ENGINE,
     reference_audio_text: str = "",
+    voice_profile_id: str = "",
 ) -> BatchJob:
     if not scripts:
         raise ValueError("请至少上传一份逐字稿")
     if len(scripts) > MAX_SCRIPT_FILES:
         raise ValueError(f"一次最多上传 {MAX_SCRIPT_FILES} 份逐字稿")
-    if Path(reference_audio_filename).suffix.lower() not in {".wav", ".mp3", ".flac", ".m4a"}:
+    selected_profile = None
+    if voice_profile_id.strip():
+        from app.services.narration import voice_profile_service
+
+        selected_profile = voice_profile_service.get_profile(session, voice_profile_id.strip())
+        if not selected_profile:
+            raise ValueError("请选择有效的系统音色")
+        profile_config = voice_profile_service.load_profile_config(selected_profile)
+        tts_engine = str(profile_config.get("tts_engine") or DEFAULT_TTS_ENGINE)
+        reference_audio_text = str(profile_config.get("reference_audio_text") or "")
+        reference_audio_filename = str(profile_config.get("original_filename") or "reference.wav")
+    elif reference_audio is None:
+        raise ValueError("请选择已配置的系统音色")
+    elif Path(reference_audio_filename).suffix.lower() not in {".wav", ".mp3", ".flac", ".m4a"}:
         raise ValueError("参考音频必须是 WAV、MP3、FLAC 或 M4A")
     normalized_tts_engine = tts_engine.strip().lower()
     if normalized_tts_engine not in project_service.SUPPORTED_TTS_ENGINES:
@@ -86,6 +100,7 @@ def create_batch(
                 "reference_audio_filename": reference_audio_filename,
                 "tts_engine": normalized_tts_engine,
                 "reference_audio_text": normalized_reference_audio_text,
+                "voice_profile_id": selected_profile.id if selected_profile else "",
             },
             ensure_ascii=False,
         ),
@@ -107,6 +122,7 @@ def create_batch(
             {
                 "tts_engine": normalized_tts_engine,
                 "reference_audio_text": normalized_reference_audio_text,
+                "voice_profile_id": selected_profile.id if selected_profile else "",
             },
         )
         project_service.update_project_settings(
@@ -118,14 +134,18 @@ def create_batch(
             str(video_root) if video_root else "",
             normalized_tts_engine,
             normalized_reference_audio_text,
+            False,
+            include_video,
+            voice_profile_id=selected_profile.id if selected_profile else "",
         )
-        reference_audio.seek(0)
-        project_service.save_reference_audio(
-            session,
-            project,
-            reference_audio,
-            reference_audio_filename,
-        )
+        if not selected_profile:
+            reference_audio.seek(0)
+            project_service.save_reference_audio(
+                session,
+                project,
+                reference_audio,
+                reference_audio_filename,
+            )
         project_service.save_script(session, project, text)
         session.add(
             BatchItem(

@@ -201,6 +201,7 @@ def update_project_settings(
     reference_audio_text: str = "",
     include_translation: bool = False,
     include_video: bool = False,
+    voice_profile_id: str = "",
 ) -> Project:
     project_name = name.strip()
     if not project_name:
@@ -208,9 +209,18 @@ def update_project_settings(
     if not output_dir.strip():
         raise ValueError("Output directory is required")
     normalized_tts_engine = tts_engine.strip().lower()
+    normalized_reference_audio_text = reference_audio_text.strip()
+    if voice_profile_id.strip():
+        from app.services.narration import voice_profile_service
+
+        selected_profile = voice_profile_service.get_profile(session, voice_profile_id.strip())
+        if not selected_profile:
+            raise ValueError("请选择有效的系统音色")
+        profile_config = voice_profile_service.load_profile_config(selected_profile)
+        normalized_tts_engine = str(profile_config.get("tts_engine") or DEFAULT_TTS_ENGINE)
+        normalized_reference_audio_text = str(profile_config.get("reference_audio_text") or "").strip()
     if normalized_tts_engine not in SUPPORTED_TTS_ENGINES:
         raise ValueError("Unsupported TTS engine")
-    normalized_reference_audio_text = reference_audio_text.strip()
     if normalized_tts_engine == "cosyvoice" and not normalized_reference_audio_text:
         raise ValueError("CosyVoice requires the reference audio transcript")
 
@@ -228,6 +238,7 @@ def update_project_settings(
     config = load_project_config(project)
     previous_tts_engine = str(config.get("tts_engine") or DEFAULT_TTS_ENGINE).strip().lower()
     previous_reference_audio_text = str(config.get("reference_audio_text") or "").strip()
+    previous_voice_profile_id = str(config.get("voice_profile_id") or "")
     config["output_filename"] = safe_filename_stem(output_filename or project_name or _timestamp_stem())
     config["tts_engine"] = normalized_tts_engine
     config["reference_audio_text"] = normalized_reference_audio_text
@@ -238,9 +249,24 @@ def update_project_settings(
     else:
         config.pop("media_video_dir", None)
 
+    if voice_profile_id.strip():
+        audio_path = Path(selected_profile.reference_audio_path).resolve()
+        if not audio_path.is_file():
+            raise ValueError("所选系统音色的参考音频文件不存在")
+        config["voice_profile_id"] = selected_profile.id
+        config["voice_profile_name"] = selected_profile.name
+        config["tts_engine"] = normalized_tts_engine
+        config["reference_audio_text"] = normalized_reference_audio_text
+        config["reference_audio_filename"] = str(
+            profile_config.get("original_filename") or audio_path.name
+        )
+        config["reference_audio_path"] = str(audio_path)
+        project.reference_audio_path = str(audio_path)
+
     if (
         previous_tts_engine != normalized_tts_engine
         or previous_reference_audio_text != normalized_reference_audio_text
+        or previous_voice_profile_id != str(config.get("voice_profile_id") or "")
     ):
         if _reset_tts_segments(session, project.id):
             project.status = "segmented"

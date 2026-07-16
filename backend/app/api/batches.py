@@ -27,7 +27,7 @@ def list_batches(session: Session = Depends(get_session)) -> dict:
 @router.post("/batches")
 def create_batch(
     scripts: list[UploadFile] = File(...),
-    reference_audio: UploadFile = File(...),
+    reference_audio: UploadFile | None = File(None),
     name: str = Form("批量生成"),
     output_dir: str = Form(...),
     media_video_dir: str = Form(""),
@@ -35,6 +35,7 @@ def create_batch(
     continue_on_error: bool = Form(True),
     tts_engine: str = Form(batch_service.DEFAULT_TTS_ENGINE),
     reference_audio_text: str = Form(""),
+    voice_profile_id: str = Form(""),
     auto_start: bool = Form(True),
     session: Session = Depends(get_session),
 ) -> dict:
@@ -53,14 +54,15 @@ def create_batch(
             session,
             name=name,
             scripts=decoded_scripts,
-            reference_audio=reference_audio.file,
-            reference_audio_filename=reference_audio.filename or "reference.wav",
+            reference_audio=reference_audio.file if reference_audio else None,
+            reference_audio_filename=(reference_audio.filename or "reference.wav") if reference_audio else "",
             output_dir=output_dir,
             media_video_dir=media_video_dir,
             include_video=include_video,
             continue_on_error=continue_on_error,
             tts_engine=tts_engine,
             reference_audio_text=reference_audio_text,
+            voice_profile_id=voice_profile_id,
         )
         if auto_start:
             batch = batch_service.start_batch(session, batch)

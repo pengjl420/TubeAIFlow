@@ -1398,6 +1398,29 @@ main {
   grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
 }
 
+.voice-settings-grid {
+  align-items: start;
+  grid-template-columns: minmax(320px, 0.8fr) minmax(0, 1.2fr);
+}
+
+.voice-profile-list {
+  display: grid;
+}
+
+.voice-profile-row {
+  align-items: center;
+  border-bottom: 1px solid #e7e9e3;
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 16px 0;
+}
+
+.voice-profile-row:first-child { padding-top: 0; }
+.voice-profile-row:last-child { border-bottom: 0; padding-bottom: 0; }
+.voice-profile-row p { margin: 4px 0 10px; }
+.voice-profile-row audio { max-width: 100%; width: 360px; }
+
 .upload-file-list {
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -1516,6 +1539,7 @@ main {
   .workflow-rail { grid-template-columns: repeat(5, minmax(105px, 1fr)); overflow-x: auto; }
   .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .batch-create-grid { grid-template-columns: 1fr; }
+  .voice-settings-grid { grid-template-columns: 1fr; }
   .create-form-grid { grid-template-columns: 1fr; }
   .create-form-grid .form-section-card:first-child { grid-row: auto; }
 }

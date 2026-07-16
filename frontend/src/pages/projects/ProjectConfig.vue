@@ -2,14 +2,13 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import { API_BASE_URL } from '../../api/client'
 import {
   getProject,
   saveProjectSettings,
   selectDirectory,
-  type TtsEngine,
-  uploadReferenceAudio,
 } from '../../api/projects'
+import { API_BASE_URL } from '../../api/client'
+import { listVoices, type VoiceProfile } from '../../api/voices'
 import AudioPlayer from '../../components/common/AudioPlayer.vue'
 import type { Project } from '../../types/project'
 
@@ -18,14 +17,13 @@ const router = useRouter()
 const projectId = String(route.params.id)
 const project = ref<Project | null>(null)
 const projectName = ref('')
-const referenceAudio = ref<File | null>(null)
+const voices = ref<VoiceProfile[]>([])
+const voiceProfileId = ref('')
 const outputDir = ref('')
 const outputFilename = ref('')
 const mediaVideoDir = ref('')
 const includeTranslation = ref(false)
 const includeVideo = ref(false)
-const ttsEngine = ref<TtsEngine>('qwen3_tts')
-const referenceAudioText = ref('')
 const loading = ref(false)
 const saving = ref(false)
 const selectingFolder = ref<'output' | 'video' | null>(null)
@@ -42,14 +40,11 @@ const projectConfig = computed(() => {
   }
 })
 
-const referenceAudioName = computed(() => {
-  const filename = projectConfig.value.reference_audio_filename
-  return typeof filename === 'string' ? filename : ''
-})
+const selectedVoice = computed(() => voices.value.find((item) => item.id === voiceProfileId.value) || null)
 
 const referenceAudioUrl = computed(() => {
-  if (!project.value?.reference_audio_path) return ''
-  return `${API_BASE_URL}/projects/${projectId}/reference-audio?v=${encodeURIComponent(project.value.updated_at)}`
+  if (!selectedVoice.value) return ''
+  return `${API_BASE_URL}/voices/${selectedVoice.value.id}/audio?v=${encodeURIComponent(selectedVoice.value.updated_at)}`
 })
 
 function fillForm() {
@@ -58,33 +53,28 @@ function fillForm() {
   outputDir.value = project.value.output_dir || ''
   const filename = projectConfig.value.output_filename
   const videoDir = projectConfig.value.media_video_dir
-  const configuredTtsEngine = projectConfig.value.tts_engine
-  const configuredReferenceText = projectConfig.value.reference_audio_text
   includeTranslation.value = projectConfig.value.include_translation === true
   includeVideo.value = projectConfig.value.include_video === true
   outputFilename.value = typeof filename === 'string' ? filename : ''
   mediaVideoDir.value = typeof videoDir === 'string' ? videoDir : ''
-  ttsEngine.value = configuredTtsEngine === 'chatterbox' || configuredTtsEngine === 'cosyvoice'
-    ? configuredTtsEngine
-    : 'qwen3_tts'
-  referenceAudioText.value = typeof configuredReferenceText === 'string' ? configuredReferenceText : ''
+  voiceProfileId.value = typeof projectConfig.value.voice_profile_id === 'string'
+    ? projectConfig.value.voice_profile_id
+    : ''
 }
 
 async function load() {
   loading.value = true
   error.value = ''
   try {
-    project.value = await getProject(projectId)
+    const [loadedProject, loadedVoices] = await Promise.all([getProject(projectId), listVoices()])
+    project.value = loadedProject
+    voices.value = loadedVoices
     fillForm()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '项目设置加载失败'
   } finally {
     loading.value = false
   }
-}
-
-function selectReferenceAudio(event: Event) {
-  referenceAudio.value = (event.target as HTMLInputElement).files?.[0] || null
 }
 
 async function chooseFolder(target: 'output' | 'video') {
@@ -112,8 +102,8 @@ async function save() {
     error.value = '请选择输出文件夹'
     return
   }
-  if (ttsEngine.value === 'cosyvoice' && !referenceAudioText.value.trim()) {
-    error.value = 'CosyVoice 需要填写参考音频逐字稿'
+  if (!voiceProfileId.value) {
+    error.value = '请选择系统音色'
     return
   }
   if (includeVideo.value && !mediaVideoDir.value.trim()) {
@@ -132,13 +122,8 @@ async function save() {
       media_video_dir: mediaVideoDir.value.trim(),
       include_translation: includeTranslation.value,
       include_video: includeVideo.value,
-      tts_engine: ttsEngine.value,
-      reference_audio_text: referenceAudioText.value.trim(),
+      voice_profile_id: voiceProfileId.value,
     })
-    if (referenceAudio.value) {
-      project.value = await uploadReferenceAudio(projectId, referenceAudio.value)
-      referenceAudio.value = null
-    }
     fillForm()
     message.value = '项目设置已保存'
   } catch (err) {
@@ -228,42 +213,25 @@ onMounted(load)
       </div>
 
       <div class="panel">
-        <div class="section-head"><h2>参考音频</h2></div>
+        <div class="section-head"><h2>参考音频</h2><RouterLink to="/voices">管理系统音色</RouterLink></div>
         <label class="field reference-field">
-          <span>TTS 引擎</span>
-          <select v-model="ttsEngine">
-            <option value="qwen3_tts">Qwen3-TTS（默认）</option>
-            <option value="chatterbox">Chatterbox</option>
-            <option value="cosyvoice">CosyVoice</option>
+          <span>系统音色</span>
+          <select v-model="voiceProfileId">
+            <option value="">请选择已配置的参考音频</option>
+            <option v-for="voice in voices" :key="voice.id" :value="voice.id">
+              {{ voice.name }} · {{ voice.tts_engine }}
+            </option>
           </select>
-          <span class="muted">切换引擎后，现有分段会标记为待重新生成。</span>
+          <span class="muted">切换音色后，现有分段会标记为待重新生成。</span>
         </label>
-        <div class="reference-box">
+        <div v-if="selectedVoice" class="reference-box">
           <div>
             <strong>当前参考音频</strong>
-            <p class="muted">
-              {{ project.reference_audio_path ? referenceAudioName || '参考音频' : '未配置参考音频' }}
-            </p>
+            <p class="muted">{{ selectedVoice.name }} · {{ selectedVoice.original_filename }}</p>
           </div>
           <AudioPlayer v-if="referenceAudioUrl" :src="referenceAudioUrl" />
         </div>
-
-        <label class="field reference-field">
-          <span>更换参考音频</span>
-          <input
-            type="file"
-            accept="audio/wav,audio/mpeg,audio/flac,audio/mp4,.wav,.mp3,.flac,.m4a"
-            @change="selectReferenceAudio"
-          />
-          <span class="muted">
-            {{ referenceAudio ? `已选择：${referenceAudio.name}` : '不更换可留空；支持 WAV、MP3、FLAC、M4A' }}
-          </span>
-        </label>
-        <label v-if="ttsEngine === 'qwen3_tts' || ttsEngine === 'cosyvoice'" class="field reference-field">
-          <span>参考音频逐字稿（{{ ttsEngine === 'cosyvoice' ? '必填' : '推荐' }}）</span>
-          <textarea v-model="referenceAudioText" rows="4" placeholder="填写当前参考音频中实际说出的文字"></textarea>
-          <span class="muted">{{ ttsEngine === 'cosyvoice' ? 'CosyVoice zero-shot 克隆需要与参考音频完全对应的文字。' : '留空时 Qwen3-TTS 使用仅声纹模式；填写准确文字可以提高克隆质量。' }}</span>
-        </label>
+        <p v-else class="notice">当前项目尚未选择系统音色，请从上方列表选择。</p>
       </div>
     </div>
 

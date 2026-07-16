@@ -11,6 +11,11 @@ from app.services.narration import tts_service
 
 
 class TtsEngineTests(unittest.TestCase):
+    def test_missing_project_engine_defaults_to_qwen3_tts(self) -> None:
+        project = Project(id="p1", name="Qwen default", config_json="{}")
+
+        self.assertEqual(tts_service._project_tts_engine(project), "qwen3_tts")
+
     def test_qwen_configuration_accepts_local_base_model(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

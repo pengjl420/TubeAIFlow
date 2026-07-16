@@ -7,7 +7,7 @@ import { createProject, selectDirectory, type TtsEngine } from '../../api/projec
 const router = useRouter()
 const name = ref('')
 const referenceAudio = ref<File | null>(null)
-const ttsEngine = ref<TtsEngine>('index_tts')
+const ttsEngine = ref<TtsEngine>('qwen3_tts')
 const referenceAudioText = ref('')
 const outputDir = ref('D:\\video_darft')
 const outputFilename = ref('')

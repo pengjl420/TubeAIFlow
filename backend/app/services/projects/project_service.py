@@ -21,7 +21,8 @@ from app.services.narration.text_cleaner import clean_script
 from app.shared.time import utc_now_iso
 
 
-SUPPORTED_TTS_ENGINES = {"index_tts", "qwen3_tts"}
+DEFAULT_TTS_ENGINE = "qwen3_tts"
+SUPPORTED_TTS_ENGINES = {"index_tts", DEFAULT_TTS_ENGINE}
 
 
 def create_project(session: Session, name: str, config: dict | None = None) -> Project:
@@ -33,7 +34,7 @@ def create_project(session: Session, name: str, config: dict | None = None) -> P
         name=name,
         output_dir=str(output_dir),
         status="created",
-        config_json=json.dumps(config or {}, ensure_ascii=False),
+        config_json=json.dumps({"tts_engine": DEFAULT_TTS_ENGINE, **(config or {})}, ensure_ascii=False),
     )
     session.add(project)
     session.commit()
@@ -196,7 +197,7 @@ def update_project_settings(
     output_dir: str,
     output_filename: str,
     media_video_dir: str,
-    tts_engine: str = "index_tts",
+    tts_engine: str = DEFAULT_TTS_ENGINE,
     reference_audio_text: str = "",
     include_translation: bool = False,
     include_video: bool = False,
@@ -222,7 +223,7 @@ def update_project_settings(
     output_directory.mkdir(parents=True, exist_ok=True)
 
     config = load_project_config(project)
-    previous_tts_engine = str(config.get("tts_engine") or "index_tts").strip().lower()
+    previous_tts_engine = str(config.get("tts_engine") or DEFAULT_TTS_ENGINE).strip().lower()
     previous_reference_audio_text = str(config.get("reference_audio_text") or "").strip()
     config["output_filename"] = safe_filename_stem(output_filename or project_name or _timestamp_stem())
     config["tts_engine"] = normalized_tts_engine

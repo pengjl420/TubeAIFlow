@@ -33,7 +33,7 @@ def create_batch(
     media_video_dir: str = Form(""),
     include_video: bool = Form(True),
     continue_on_error: bool = Form(True),
-    tts_engine: str = Form("index_tts"),
+    tts_engine: str = Form(batch_service.DEFAULT_TTS_ENGINE),
     reference_audio_text: str = Form(""),
     auto_start: bool = Form(True),
     session: Session = Depends(get_session),

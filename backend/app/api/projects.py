@@ -40,7 +40,7 @@ class ProjectSettingsRequest(BaseModel):
     media_video_dir: str = ""
     include_translation: bool = False
     include_video: bool = False
-    tts_engine: str = "index_tts"
+    tts_engine: str = project_service.DEFAULT_TTS_ENGINE
     reference_audio_text: str = ""
 
 
@@ -71,7 +71,7 @@ def create_project(
     media_video_dir: str = Form(""),
     include_translation: bool = Form(False),
     include_video: bool = Form(False),
-    tts_engine: str = Form("index_tts"),
+    tts_engine: str = Form(project_service.DEFAULT_TTS_ENGINE),
     reference_audio_text: str = Form(""),
     session: Session = Depends(get_session),
 ) -> dict:

@@ -15,6 +15,7 @@ from app.shared.time import utc_now_iso
 MAX_SCRIPT_FILES = 100
 MAX_SCRIPT_BYTES = 5 * 1024 * 1024
 SUPPORTED_SCRIPT_EXTENSIONS = {".txt", ".md"}
+DEFAULT_TTS_ENGINE = project_service.DEFAULT_TTS_ENGINE
 
 
 def decode_script_file(filename: str, content: bytes) -> str:
@@ -49,7 +50,7 @@ def create_batch(
     media_video_dir: str,
     include_video: bool,
     continue_on_error: bool,
-    tts_engine: str = "index_tts",
+    tts_engine: str = DEFAULT_TTS_ENGINE,
     reference_audio_text: str = "",
 ) -> BatchJob:
     if not scripts:

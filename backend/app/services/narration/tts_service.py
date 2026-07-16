@@ -178,7 +178,7 @@ def _validate_configuration(project: Project, segments: list[Segment]) -> tuple[
 
 
 def _project_tts_engine(project: Project) -> str:
-    return str(load_project_config(project).get("tts_engine") or "index_tts").strip().lower()
+    return str(load_project_config(project).get("tts_engine") or "qwen3_tts").strip().lower()
 
 
 def _project_reference_audio_text(project: Project) -> str:

@@ -24,7 +24,7 @@ const outputFilename = ref('')
 const mediaVideoDir = ref('')
 const includeTranslation = ref(false)
 const includeVideo = ref(false)
-const ttsEngine = ref<TtsEngine>('index_tts')
+const ttsEngine = ref<TtsEngine>('qwen3_tts')
 const referenceAudioText = ref('')
 const loading = ref(false)
 const saving = ref(false)
@@ -64,7 +64,7 @@ function fillForm() {
   includeVideo.value = projectConfig.value.include_video === true
   outputFilename.value = typeof filename === 'string' ? filename : ''
   mediaVideoDir.value = typeof videoDir === 'string' ? videoDir : ''
-  ttsEngine.value = configuredTtsEngine === 'qwen3_tts' ? 'qwen3_tts' : 'index_tts'
+  ttsEngine.value = configuredTtsEngine === 'index_tts' ? 'index_tts' : 'qwen3_tts'
   referenceAudioText.value = typeof configuredReferenceText === 'string' ? configuredReferenceText : ''
 }
 

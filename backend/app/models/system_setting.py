@@ -1,11 +1,5 @@
-from sqlmodel import Field, SQLModel
+"""Compatibility import for the former model module."""
 
-from app.utils.time_utils import utc_now_iso
+from app.models.settings import SystemSetting
 
-
-class SystemSetting(SQLModel, table=True):
-    __tablename__ = "system_settings"
-
-    id: int = Field(default=1, primary_key=True)
-    config_json: str
-    updated_at: str = Field(default_factory=utc_now_iso)
+__all__ = ["SystemSetting"]

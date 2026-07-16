@@ -4,7 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session
 
 from app.database import get_session
-from app.services import project_service, srt_service, task_control, timeline_service, translate_service
+from app.infrastructure import process_runner as task_control
+from app.services.narration import srt_service, timeline_service, translation_service
+from app.services.projects import project_service
 
 
 router = APIRouter(tags=["subtitles"])
@@ -36,7 +38,7 @@ def create_zh_srt(
             translated_path = None
             target_language = None
             if include_translation:
-                translation_path, translations, target_language = translate_service.translate_subtitle_cues(project, zh_cues)
+                translation_path, translations, target_language = translation_service.translate_subtitle_cues(project, zh_cues)
                 translated_path = srt_service.create_translated_srt(
                     project, zh_cues, translations, target_language
                 )
@@ -71,7 +73,7 @@ def create_en_srt(project_id: str, session: Session = Depends(get_session)) -> d
             project = project_service.ensure_output_filename(session, project)
             timeline_service.build_timeline(session, project)
             zh_path, zh_cues = srt_service.create_full_srt_with_cues(project, _load_segments_for_srt(session, project.id))
-            translation_path, translations = translate_service.translate_subtitle_cues_to_english(project, zh_cues)
+            translation_path, translations = translation_service.translate_subtitle_cues_to_english(project, zh_cues)
             srt_path = srt_service.create_english_srt_from_chinese_cues(project, zh_cues, translations)
             project.status = "en_subtitle_created"
             project.updated_at = datetime.utcnow().isoformat()
@@ -91,7 +93,7 @@ def create_en_srt(project_id: str, session: Session = Depends(get_session)) -> d
 def _load_segments_for_srt(session: Session, project_id: str):
     from sqlmodel import select
 
-    from app.models.segment import Segment
+    from app.models.narration import Segment
 
     return session.exec(
         select(Segment)

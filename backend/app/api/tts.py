@@ -5,9 +5,11 @@ from sqlmodel import Session, select
 
 from app.config import get_settings
 from app.database import get_session
-from app.models.segment import Segment
-from app.services import project_service, task_control, tts_service
-from app.utils.project_paths import get_project_work_dir
+from app.models.narration import Segment
+from app.infrastructure import process_runner as task_control
+from app.infrastructure.project_layout import get_project_work_dir
+from app.services.narration import tts_service
+from app.services.projects import project_service
 
 
 router = APIRouter(tags=["tts"])

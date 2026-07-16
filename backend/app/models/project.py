@@ -1,6 +1,6 @@
 from sqlmodel import Field, SQLModel
 
-from app.utils.time_utils import utc_now_iso
+from app.shared.time import utc_now_iso
 
 
 class Project(SQLModel, table=True):

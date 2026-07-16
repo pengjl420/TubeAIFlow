@@ -5,9 +5,10 @@ from sqlmodel import Session
 
 from app.database import get_session
 from app.config import get_settings
-from app.services import project_service, task_control
-from app.utils.project_paths import get_project_work_dir
-from app.utils.time_utils import utc_now_iso
+from app.infrastructure import process_runner as task_control
+from app.infrastructure.project_layout import get_project_work_dir
+from app.services.projects import project_service
+from app.shared.time import utc_now_iso
 
 
 router = APIRouter(tags=["tasks"])

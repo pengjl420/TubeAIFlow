@@ -1,12 +1,7 @@
-def split_script(text: str) -> list[dict]:
-    segments = [line.strip() for line in text.splitlines() if line.strip()]
+"""Compatibility alias for the narration segmenter."""
 
-    return [
-        {
-            "segment_id": f"{index:04d}",
-            "index": index,
-            "text_zh": segment,
-            "status": "pending",
-        }
-        for index, segment in enumerate(segments, start=1)
-    ]
+import sys
+
+from app.services.narration import segmenter as _implementation
+
+sys.modules[__name__] = _implementation

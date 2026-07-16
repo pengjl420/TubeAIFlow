@@ -1,9 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import batches, exports, projects, segments, settings, subtitles, tasks, tts, videos, voices
+from app.api import batches, exports, projects, renders, segments, settings, subtitles, tasks, tts, voices
 from app.database import create_db_and_tables
-from app.services import batch_worker
+from app.services.batches import batch_worker
 
 
 app = FastAPI(title="TubeAIFlow", version="0.1.0")
@@ -35,6 +35,6 @@ app.include_router(segments.router, prefix="/api")
 app.include_router(tts.router, prefix="/api")
 app.include_router(subtitles.router, prefix="/api")
 app.include_router(exports.router, prefix="/api")
-app.include_router(videos.router, prefix="/api")
+app.include_router(renders.router, prefix="/api")
 app.include_router(tasks.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")

@@ -110,7 +110,7 @@ def get_settings() -> Settings:
         from sqlmodel import Session
 
         from app.database import engine
-        from app.models.system_setting import SystemSetting
+        from app.models.settings import SystemSetting
 
         with Session(engine) as session:
             record = session.get(SystemSetting, 1)

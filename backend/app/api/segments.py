@@ -7,11 +7,11 @@ from sqlmodel import Session, select
 
 from app.config import get_settings
 from app.database import get_session
-from app.models.segment import Segment
-from app.services import project_service
-from app.utils.file_utils import ensure_inside_any, project_dir
-from app.utils.project_paths import get_project_output_dir, get_project_work_dir
-from app.utils.time_utils import utc_now_iso
+from app.models.narration import Segment
+from app.infrastructure.file_storage import ensure_inside_any, project_dir
+from app.infrastructure.project_layout import get_project_output_dir, get_project_work_dir
+from app.services.projects import project_service
+from app.shared.time import utc_now_iso
 
 
 router = APIRouter(tags=["segments"])

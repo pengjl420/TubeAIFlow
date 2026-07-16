@@ -8,9 +8,8 @@ from sqlmodel import Session
 
 from app.config import get_settings
 from app.database import get_session
-from app.services import native_dialog_service, project_service
-from app.utils.file_utils import ensure_inside_any, project_dir
-from app.utils.project_paths import (
+from app.infrastructure.file_storage import ensure_inside_any, project_dir
+from app.infrastructure.project_layout import (
     get_final_audio_path,
     get_final_en_srt_path,
     get_final_video_path,
@@ -18,6 +17,7 @@ from app.utils.project_paths import (
     get_project_output_dir,
     get_project_work_dir,
 )
+from app.services.projects import native_dialog_service, project_service
 
 
 logger = logging.getLogger(__name__)

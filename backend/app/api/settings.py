@@ -4,7 +4,7 @@ from sqlmodel import Session
 
 from app.config import Settings
 from app.database import get_session
-from app.services import system_settings_service
+from app.services.settings import system_settings_service
 
 
 router = APIRouter(tags=["settings"])

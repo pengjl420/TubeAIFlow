@@ -2,7 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session
 
 from app.database import get_session
-from app.services import audio_service, export_service, project_service, task_control
+from app.infrastructure import process_runner as task_control
+from app.services.narration import audio_service
+from app.services.projects import manifest_service, project_service
 
 
 router = APIRouter(tags=["exports"])
@@ -40,5 +42,5 @@ def export_project(project_id: str, session: Session = Depends(get_session)) -> 
     if not project:
         raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
     project = project_service.ensure_output_filename(session, project)
-    path = export_service.create_manifest(project)
+    path = manifest_service.create_manifest(project)
     return {"success": True, "data": {"path": str(path)}}

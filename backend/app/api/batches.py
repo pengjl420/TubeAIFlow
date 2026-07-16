@@ -4,7 +4,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlmodel import Session
 
 from app.database import get_session
-from app.services import batch_service, batch_worker, task_control
+from app.infrastructure import process_runner as task_control
+from app.services.batches import batch_service, batch_worker
 
 
 logger = logging.getLogger(__name__)

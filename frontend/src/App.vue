@@ -2,6 +2,8 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 
+import AppFeedback from './components/common/AppFeedback.vue'
+
 const route = useRoute()
 
 const sectionTitle = computed(() => {
@@ -68,5 +70,6 @@ const sectionTitle = computed(() => {
       </header>
       <main><RouterView /></main>
     </div>
+    <AppFeedback />
   </div>
 </template>

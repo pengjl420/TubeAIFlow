@@ -8,10 +8,19 @@ from sqlmodel import Session, select
 from app.config import get_settings
 from app.models.project import Project
 from app.models.narration import Segment
+from app.models.batch import BatchItem, BatchJob
+from app.models.task import TaskRun
 from app.infrastructure.file_storage import ensure_inside_any, project_dir
+from app.infrastructure.recycle_bin import move_existing_to_recycle_bin
 from app.infrastructure.project_layout import (
     ensure_project_dirs,
+    get_final_audio_path,
+    get_final_en_srt_path,
+    get_final_srt_path,
+    get_final_translated_srt_path,
+    get_final_video_path,
     get_output_stem,
+    get_project_output_dir,
     get_project_work_dir,
     load_project_config,
     safe_filename_stem,
@@ -23,6 +32,20 @@ from app.shared.time import utc_now_iso
 
 DEFAULT_TTS_ENGINE = "qwen3_tts"
 SUPPORTED_TTS_ENGINES = {DEFAULT_TTS_ENGINE, "chatterbox", "cosyvoice"}
+EDITABLE_STATUSES = {"created", "script_imported", "segmented"}
+GENERATING_STATUSES = {
+    "narration_in_progress",
+    "video_in_progress",
+    "segmenting",
+    "tts",
+    "tts_running",
+    "translation",
+    "translating",
+    "audio_merge",
+    "subtitles",
+    "rendering",
+    "video_composing",
+}
 
 
 def create_project(session: Session, name: str, config: dict | None = None) -> Project:
@@ -48,6 +71,73 @@ def list_projects(session: Session) -> list[Project]:
 
 def get_project(session: Session, project_id: str) -> Project | None:
     return session.get(Project, project_id)
+
+
+def is_project_editable(project: Project) -> bool:
+    return project.status in EDITABLE_STATUSES
+
+
+def delete_project(session: Session, project: Project) -> dict:
+    active_task = session.exec(
+        select(TaskRun).where(
+            TaskRun.project_id == project.id,
+            TaskRun.status.in_({"queued", "running", "paused"}),
+        )
+    ).first()
+    if active_task or project.status in GENERATING_STATUSES:
+        raise ValueError("生成中的项目请先强制停止，确认停止后再删除")
+
+    artifact_paths = _project_artifact_paths(project)
+    recycled_paths = move_existing_to_recycle_bin(artifact_paths)
+
+    batch_items = list(
+        session.exec(select(BatchItem).where(BatchItem.project_id == project.id)).all()
+    )
+    affected_batch_ids = {item.batch_id for item in batch_items}
+    for task in session.exec(select(TaskRun).where(TaskRun.project_id == project.id)).all():
+        session.delete(task)
+    for segment in session.exec(select(Segment).where(Segment.project_id == project.id)).all():
+        session.delete(segment)
+    for item in batch_items:
+        session.delete(item)
+    session.delete(project)
+    session.flush()
+
+    for batch_id in affected_batch_ids:
+        batch = session.get(BatchJob, batch_id)
+        if not batch:
+            continue
+        remaining = list(
+            session.exec(select(BatchItem).where(BatchItem.batch_id == batch_id)).all()
+        )
+        batch.total = len(remaining)
+        batch.completed = sum(item.status == "completed" for item in remaining)
+        batch.failed = sum(item.status == "failed" for item in remaining)
+        batch.updated_at = utc_now_iso()
+        session.add(batch)
+
+    session.commit()
+    return {"project_id": project.id, "recycled_paths": recycled_paths}
+
+
+def _project_artifact_paths(project: Project) -> list[Path]:
+    settings = get_settings()
+    output_root = get_project_output_dir(project, settings.workspace_dir)
+    stem = get_output_stem(project)
+    paths = [
+        project_dir(settings.workspace_dir, project.id),
+        get_project_work_dir(project, settings.workspace_dir),
+        get_final_audio_path(project, settings.workspace_dir),
+        output_root / f"{stem}.mp3",
+        get_final_srt_path(project, settings.workspace_dir),
+        get_final_en_srt_path(project, settings.workspace_dir),
+        get_final_translated_srt_path(project, settings.workspace_dir, "zh"),
+        output_root / f"{stem}.ass",
+        output_root / f"{stem}_zh.ass",
+        output_root / f"{stem}_en.ass",
+        get_final_video_path(project, settings.workspace_dir),
+    ]
+    return paths
 
 
 def save_script(session: Session, project: Project, raw_text: str) -> Project:

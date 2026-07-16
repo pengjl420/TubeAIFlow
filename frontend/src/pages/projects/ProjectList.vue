@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 
-import { listProjects } from '../../api/projects'
+import { deleteProject, listProjects } from '../../api/projects'
+import { cancelProjectTask } from '../../api/tasks'
+import { confirmAction, showToast } from '../../services/feedback'
 import type { Project } from '../../types/project'
 
 const projects = ref<Project[]>([])
@@ -9,42 +11,220 @@ const loading = ref(false)
 const error = ref('')
 const query = ref('')
 const statusFilter = ref('all')
+const actingProjectId = ref('')
+const batchDeleting = ref(false)
+const selectedProjectIds = ref<Set<string>>(new Set())
+const message = ref('')
 
 const statusLabels: Record<string, string> = {
   created: '待开始',
+  script_imported: '逐字稿已导入',
+  segmented: '文本已分段',
+  segmenting: '文本分段中',
   narration_in_progress: '配音生成中',
-  narration_ready: '配音已就绪',
-  video_in_progress: '视频合成中',
+  tts: '配音生成中',
+  tts_running: '配音生成中',
+  tts_completed: '配音已生成',
+  audio_merge: '音频合并中',
+  audio_merged: '音频已合并',
+  translation: '字幕翻译中',
+  translating: '字幕翻译中',
+  subtitles: '字幕生成中',
+  zh_subtitle_created: '中文字幕已生成',
+  en_subtitle_created: '英文字幕已生成',
+  narration_ready: '配音已完成',
+  video_in_progress: '视频生成中',
+  video_composing: '视频合成中',
+  rendering: '视频渲染中',
+  video_completed: '视频已生成',
   review_required: '等待复核',
   completed: '已完成',
-  failed: '执行失败',
+  failed: '生成失败',
+  cancelled: '已停止',
 }
+
+const editableStatuses = new Set(['created', 'script_imported', 'segmented'])
+const generatingStatuses = new Set([
+  'narration_in_progress', 'video_in_progress', 'segmenting', 'tts', 'tts_running',
+  'translation', 'translating', 'audio_merge', 'subtitles', 'rendering', 'video_composing',
+])
 
 const filteredProjects = computed(() => {
   const keyword = query.value.trim().toLocaleLowerCase()
   return projects.value.filter((project) => {
     const matchesQuery = !keyword || project.name.toLocaleLowerCase().includes(keyword)
-    const matchesStatus = statusFilter.value === 'all' || project.status === statusFilter.value
+    const matchesStatus = statusFilter.value === 'all'
+      || (statusFilter.value === 'generating' ? isGenerating(project) : project.status === statusFilter.value)
     return matchesQuery && matchesStatus
   })
 })
 
-const activeCount = computed(() => projects.value.filter((item) => (
-  item.status.includes('progress') || ['segmenting', 'tts', 'translation', 'rendering'].includes(item.status)
-)).length)
+const activeCount = computed(() => projects.value.filter((item) => isGenerating(item)).length)
 const readyCount = computed(() => projects.value.filter((item) => ['narration_ready', 'review_required'].includes(item.status)).length)
 const completedCount = computed(() => projects.value.filter((item) => item.status === 'completed').length)
+const selectableProjects = computed(() => filteredProjects.value.filter((project) => !isGenerating(project)))
+const selectedProjects = computed(() => projects.value.filter((project) => (
+  selectedProjectIds.value.has(project.id) && !isGenerating(project)
+)))
+const allVisibleSelected = computed(() => (
+  selectableProjects.value.length > 0
+  && selectableProjects.value.every((project) => selectedProjectIds.value.has(project.id))
+))
+const someVisibleSelected = computed(() => (
+  !allVisibleSelected.value
+  && selectableProjects.value.some((project) => selectedProjectIds.value.has(project.id))
+))
 
 function statusLabel(status: string) {
-  return statusLabels[status] || status.split('_').join(' ')
+  return statusLabels[status] || '待处理'
 }
 
 function statusTone(status: string) {
   if (status === 'failed') return 'is-danger'
   if (status === 'completed') return 'is-success'
-  if (status.includes('progress')) return 'is-running'
+  if (status === 'cancelled') return 'is-warning'
+  if (generatingStatuses.has(status)) return 'is-running'
   if (status === 'review_required') return 'is-warning'
   return 'is-neutral'
+}
+
+function isEditable(project: Project) {
+  return editableStatuses.has(project.status)
+}
+
+function isGenerating(project: Project) {
+  return generatingStatuses.has(project.status)
+}
+
+function toggleProjectSelection(projectId: string) {
+  const next = new Set(selectedProjectIds.value)
+  if (next.has(projectId)) next.delete(projectId)
+  else next.add(projectId)
+  selectedProjectIds.value = next
+}
+
+function toggleAllVisible() {
+  const next = new Set(selectedProjectIds.value)
+  if (allVisibleSelected.value) {
+    selectableProjects.value.forEach((project) => next.delete(project.id))
+  } else {
+    selectableProjects.value.forEach((project) => next.add(project.id))
+  }
+  selectedProjectIds.value = next
+}
+
+async function stopProject(project: Project) {
+  const confirmed = await confirmAction({
+    eyebrow: '停止生成任务',
+    title: `强制停止“${project.name}”？`,
+    description: '当前正在执行的生成进程会被终止，尚未完成的步骤将停止。',
+    detail: '已经生成并保存的文件不会被删除，之后可重新发起生成。',
+    confirmText: '确认停止',
+    tone: 'warning',
+  })
+  if (!confirmed) return
+  actingProjectId.value = project.id
+  error.value = ''
+  message.value = ''
+  try {
+    const result = await cancelProjectTask(project.id)
+    message.value = result.cancelled ? `已向“${project.name}”发送停止指令` : '当前没有可停止的生成任务'
+    showToast({
+      title: result.cancelled ? '停止指令已发送' : '没有运行中的任务',
+      description: result.cancelled ? `“${project.name}”正在安全停止。` : '项目当前无需停止。',
+      tone: result.cancelled ? 'warning' : 'info',
+    })
+    await loadProjects()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '项目停止失败'
+    showToast({ title: '项目停止失败', description: error.value, tone: 'danger' })
+  } finally {
+    actingProjectId.value = ''
+  }
+}
+
+async function removeProject(project: Project) {
+  const confirmed = await confirmAction({
+    eyebrow: '删除项目',
+    title: `删除“${project.name}”？`,
+    description: '项目将从工作台移除，当前配置、生成记录和输出文件将无法继续在这里访问。',
+    detail: '项目记录和对应生成文件会被移入系统回收站。',
+    confirmText: '移入回收站',
+    tone: 'danger',
+  })
+  if (!confirmed) return
+  actingProjectId.value = project.id
+  try {
+    await deleteProject(project.id)
+    projects.value = projects.value.filter((item) => item.id !== project.id)
+    const next = new Set(selectedProjectIds.value)
+    next.delete(project.id)
+    selectedProjectIds.value = next
+    const refreshed = await loadProjects()
+    showToast({
+      title: refreshed ? '项目已移入回收站' : '项目已删除，列表同步失败',
+      description: refreshed ? `“${project.name}”已从工作台移除。` : '请稍后手动刷新项目列表。',
+      tone: refreshed ? 'success' : 'warning',
+    })
+  } catch (err) {
+    showToast({
+      title: '项目删除失败',
+      description: err instanceof Error ? err.message : '请稍后重试。',
+      tone: 'danger',
+    })
+  } finally {
+    actingProjectId.value = ''
+  }
+}
+
+async function removeSelectedProjects() {
+  const targets = [...selectedProjects.value]
+  if (!targets.length) return
+  const confirmed = await confirmAction({
+    eyebrow: '批量删除项目',
+    title: `删除已选中的 ${targets.length} 个项目？`,
+    description: '这些项目将从工作台中移除，删除过程开始后不能在本页撤销。',
+    detail: '对应的项目记录和生成文件会被移入系统回收站。',
+    confirmText: `删除 ${targets.length} 个项目`,
+    tone: 'danger',
+  })
+  if (!confirmed) return
+
+  batchDeleting.value = true
+  const deletedIds = new Set<string>()
+  const failed: string[] = []
+  for (const project of targets) {
+    actingProjectId.value = project.id
+    try {
+      await deleteProject(project.id)
+      deletedIds.add(project.id)
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : '删除失败'
+      failed.push(`${project.name}：${reason}`)
+    }
+  }
+
+  projects.value = projects.value.filter((project) => !deletedIds.has(project.id))
+  selectedProjectIds.value = new Set(
+    [...selectedProjectIds.value].filter((projectId) => !deletedIds.has(projectId)),
+  )
+  const refreshed = await loadProjects()
+  if (failed.length || !refreshed) {
+    showToast({
+      title: `已删除 ${deletedIds.size} 个，${failed.length} 个未删除`,
+      description: [failed.join('；'), refreshed ? '' : '项目列表同步失败'].filter(Boolean).join('；'),
+      tone: 'warning',
+      duration: 6000,
+    })
+  } else {
+    showToast({
+      title: `已删除 ${deletedIds.size} 个项目`,
+      description: '项目列表已刷新，相关文件已移入系统回收站。',
+      tone: 'success',
+    })
+  }
+  actingProjectId.value = ''
+  batchDeleting.value = false
 }
 
 function formatDate(value: string) {
@@ -58,8 +238,16 @@ async function loadProjects() {
   error.value = ''
   try {
     projects.value = await listProjects()
+    const availableIds = new Set(
+      projects.value.filter((project) => !isGenerating(project)).map((project) => project.id),
+    )
+    selectedProjectIds.value = new Set(
+      [...selectedProjectIds.value].filter((projectId) => availableIds.has(projectId)),
+    )
+    return true
   } catch (err) {
     error.value = err instanceof Error ? err.message : '项目列表加载失败'
+    return false
   } finally {
     loading.value = false
   }
@@ -111,7 +299,7 @@ onMounted(loadProjects)
         <select v-model="statusFilter" class="filter-select" aria-label="按状态筛选">
           <option value="all">全部状态</option>
           <option value="created">待开始</option>
-          <option value="narration_in_progress">生成中</option>
+          <option value="generating">生成中</option>
           <option value="narration_ready">配音已就绪</option>
           <option value="review_required">等待复核</option>
           <option value="completed">已完成</option>
@@ -120,8 +308,31 @@ onMounted(loadProjects)
       </div>
     </div>
 
-    <div v-if="error" class="alert alert-danger"><strong>项目加载失败</strong><span>{{ error }}</span></div>
-    <div v-else-if="loading" class="project-grid" aria-label="正在加载">
+    <div v-if="filteredProjects.length" class="project-bulk-toolbar">
+      <label class="project-bulk-select">
+        <input
+          type="checkbox"
+          :checked="allVisibleSelected"
+          :indeterminate="someVisibleSelected"
+          :disabled="batchDeleting || !selectableProjects.length"
+          @change="toggleAllVisible"
+        />
+        <span>全选当前可删除项目</span>
+      </label>
+      <span class="muted">已选 {{ selectedProjects.length }} 项</span>
+      <button
+        class="danger-button"
+        type="button"
+        :disabled="batchDeleting || !selectedProjects.length"
+        @click="removeSelectedProjects"
+      >
+        {{ batchDeleting ? '批量删除中…' : '删除已选' }}
+      </button>
+    </div>
+
+    <div v-if="error" class="alert alert-danger"><strong>操作失败</strong><span>{{ error }}</span></div>
+    <div v-if="message" class="alert alert-success"><strong>操作完成</strong><span>{{ message }}</span></div>
+    <div v-if="loading" class="project-grid" aria-label="正在加载">
       <div v-for="index in 3" :key="index" class="project-card skeleton-card"></div>
     </div>
     <div v-else-if="!projects.length" class="empty-state panel">
@@ -136,20 +347,54 @@ onMounted(loadProjects)
       <button class="secondary-button" @click="query = ''; statusFilter = 'all'">清除筛选</button>
     </div>
     <div v-else class="project-grid">
-      <RouterLink v-for="project in filteredProjects" :key="project.id" class="project-card" :to="`/projects/${project.id}`">
+      <article
+        v-for="project in filteredProjects"
+        :key="project.id"
+        class="project-card"
+        :class="{ 'is-selected': selectedProjectIds.has(project.id) }"
+      >
         <div class="project-card-top">
-          <span class="project-avatar">{{ project.name.slice(0, 1).toUpperCase() }}</span>
+          <div class="project-card-leading">
+            <input
+              type="checkbox"
+              :checked="selectedProjectIds.has(project.id)"
+              :disabled="isGenerating(project) || batchDeleting"
+              :aria-label="isGenerating(project) ? `${project.name} 生成中，不能删除` : `选择 ${project.name}`"
+              @change="toggleProjectSelection(project.id)"
+            />
+            <span class="project-avatar">{{ project.name.slice(0, 1).toUpperCase() }}</span>
+          </div>
           <span class="status-pill" :class="statusTone(project.status)"><i></i>{{ statusLabel(project.status) }}</span>
         </div>
         <div class="project-card-body">
-          <h3>{{ project.name }}</h3>
+          <h3><RouterLink :to="`/projects/${project.id}`">{{ project.name }}</RouterLink></h3>
           <p>{{ project.output_dir || '尚未配置输出目录' }}</p>
         </div>
         <div class="project-card-footer">
           <span>更新于 {{ formatDate(project.updated_at || project.created_at) }}</span>
-          <strong>进入工作台 →</strong>
+          <div class="project-card-actions">
+            <RouterLink v-if="isEditable(project)" class="text-button" :to="`/projects/${project.id}/config`">修改</RouterLink>
+            <button
+              v-if="isGenerating(project)"
+              class="danger-button"
+              type="button"
+              :disabled="batchDeleting || actingProjectId === project.id"
+              @click="stopProject(project)"
+            >
+              {{ actingProjectId === project.id ? '停止中…' : '强制停止' }}
+            </button>
+            <button
+              v-else
+              class="danger-button"
+              type="button"
+              :disabled="batchDeleting || actingProjectId === project.id"
+              @click="removeProject(project)"
+            >
+              {{ actingProjectId === project.id ? '删除中…' : '删除' }}
+            </button>
+          </div>
         </div>
-      </RouterLink>
+      </article>
     </div>
   </section>
 </template>

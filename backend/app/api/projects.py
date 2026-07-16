@@ -126,6 +126,20 @@ def get_project(project_id: str, session: Session = Depends(get_session)) -> dic
     return ok(project)
 
 
+@router.delete("/projects/{project_id}")
+def delete_project(project_id: str, session: Session = Depends(get_session)) -> dict:
+    project = project_service.get_project(session, project_id)
+    if not project:
+        fail("项目不存在", 404)
+    try:
+        return ok(project_service.delete_project(session, project))
+    except ValueError as exc:
+        fail(str(exc), 409)
+    except OSError as exc:
+        logger.exception("Failed to recycle files for project %s", project_id)
+        fail(f"项目文件移入回收站失败：{exc}", 500)
+
+
 @router.get("/projects/{project_id}/outputs")
 def get_project_outputs(project_id: str, session: Session = Depends(get_session)) -> dict:
     project = project_service.get_project(session, project_id)
@@ -212,6 +226,8 @@ def save_output_settings(
     project = project_service.get_project(session, project_id)
     if not project:
         fail("Project not found", 404)
+    if not project_service.is_project_editable(project):
+        fail("只有未开始生成的项目可以修改", 409)
     try:
         return ok(project_service.update_output_settings(
             session,
@@ -233,6 +249,8 @@ def save_project_settings(
     project = project_service.get_project(session, project_id)
     if not project:
         fail("Project not found", 404)
+    if not project_service.is_project_editable(project):
+        fail("只有未开始生成的项目可以修改", 409)
     try:
         return ok(project_service.update_project_settings(
             session,

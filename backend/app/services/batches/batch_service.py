@@ -192,6 +192,38 @@ def get_batch_items(session: Session, batch_id: str) -> list[BatchItem]:
     )
 
 
+def delete_batch(session: Session, batch: BatchJob) -> dict:
+    tasks = task_service.list_batch_tasks(session, batch.id)
+    if batch.status in {"queued", "running"} or any(
+        task.status in {"queued", "running"} for task in tasks
+    ):
+        raise ValueError("批次正在执行，请先暂停并等待当前任务停止后再删除")
+
+    project_ids = [item.project_id for item in get_batch_items(session, batch.id)]
+    for task in tasks:
+        if task.status == "paused":
+            task_service.request_cancel(session, task)
+            project = session.get(Project, task.project_id)
+            if project and project.status in project_service.GENERATING_STATUSES:
+                project.status = "cancelled"
+                project.updated_at = utc_now_iso()
+                session.add(project)
+        task.batch_id = None
+        task.batch_item_id = None
+        session.add(task)
+
+    for item in get_batch_items(session, batch.id):
+        session.delete(item)
+    batch_id = batch.id
+    session.delete(batch)
+    session.commit()
+    return {
+        "batch_id": batch_id,
+        "project_ids": project_ids,
+        "projects_preserved": True,
+    }
+
+
 def serialize_batch(session: Session, batch: BatchJob, include_items: bool = True) -> dict:
     data = batch.model_dump()
     if not include_items:

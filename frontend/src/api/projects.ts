@@ -31,6 +31,10 @@ export async function getProject(id: string): Promise<Project> {
   return unwrap<Project>(await apiClient.get(`/projects/${id}`))
 }
 
+export async function deleteProject(id: string): Promise<{ project_id: string; recycled_paths: string[] }> {
+  return unwrap(await apiClient.delete(`/projects/${id}`))
+}
+
 export interface ProjectOutputFile {
   name: string
   path: string

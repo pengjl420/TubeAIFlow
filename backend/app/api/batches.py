@@ -82,6 +82,18 @@ def get_batch(batch_id: str, session: Session = Depends(get_session)) -> dict:
     return {"success": True, "data": batch_service.serialize_batch(session, batch)}
 
 
+@router.delete("/batches/{batch_id}")
+def delete_batch(batch_id: str, session: Session = Depends(get_session)) -> dict:
+    batch = batch_service.get_batch(session, batch_id)
+    if not batch:
+        fail("Batch not found", 404)
+    try:
+        result = batch_service.delete_batch(session, batch)
+    except ValueError as exc:
+        fail(str(exc), 409)
+    return {"success": True, "data": result}
+
+
 @router.post("/batches/{batch_id}/start")
 def start_batch(batch_id: str, session: Session = Depends(get_session)) -> dict:
     batch = batch_service.get_batch(session, batch_id)

@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 
-import { listBatches, type BatchJob } from '../../api/batches'
+import { deleteBatch, listBatches, type BatchJob } from '../../api/batches'
+import { confirmAction, showToast } from '../../services/feedback'
 
 const batches = ref<BatchJob[]>([])
 const loading = ref(false)
 const error = ref('')
 const query = ref('')
+const deletingBatchId = ref('')
 
 const filteredBatches = computed(() => {
   const keyword = query.value.trim().toLocaleLowerCase()
@@ -36,10 +38,43 @@ async function load() {
   error.value = ''
   try {
     batches.value = await listBatches()
+    return true
   } catch (err) {
     error.value = err instanceof Error ? err.message : '批次列表加载失败'
+    return false
   } finally {
     loading.value = false
+  }
+}
+
+async function removeBatch(batch: BatchJob) {
+  const confirmed = await confirmAction({
+    eyebrow: '删除批次记录',
+    title: `删除批次“${batch.name}”？`,
+    description: '该批次会从生产记录中移除，之后无法再查看它的汇总进度。',
+    detail: '批次创建的项目和已生成文件仍会保留在项目工作台。',
+    confirmText: '删除批次',
+    tone: 'danger',
+  })
+  if (!confirmed) return
+  deletingBatchId.value = batch.id
+  try {
+    await deleteBatch(batch.id)
+    batches.value = batches.value.filter((item) => item.id !== batch.id)
+    const refreshed = await load()
+    showToast({
+      title: refreshed ? '批次记录已删除' : '批次已删除，列表同步失败',
+      description: refreshed ? `“${batch.name}”创建的项目与文件均已保留。` : '请稍后手动刷新批次列表。',
+      tone: refreshed ? 'success' : 'warning',
+    })
+  } catch (err) {
+    showToast({
+      title: '批次删除失败',
+      description: err instanceof Error ? err.message : '请稍后重试。',
+      tone: 'danger',
+    })
+  } finally {
+    deletingBatchId.value = ''
   }
 }
 
@@ -70,18 +105,29 @@ onMounted(load)
 
     <div class="panel">
       <p v-if="error" class="error">{{ error }}</p>
-      <p v-else-if="!batches.length" class="muted">还没有批量任务。</p>
+      <p v-if="!batches.length" class="muted">还没有批量任务。</p>
       <div v-else-if="filteredBatches.length">
-        <RouterLink v-for="batch in filteredBatches" :key="batch.id" class="batch-row" :to="`/batches/${batch.id}`">
-          <div>
-            <strong>{{ batch.name }}</strong>
-            <p class="muted">{{ new Date(batch.created_at).toLocaleString() }}</p>
-          </div>
-          <span>{{ batch.completed }}/{{ batch.total }}</span>
-          <span v-if="batch.failed" class="error-count">失败 {{ batch.failed }}</span>
-          <span v-else class="muted">无失败</span>
-          <span class="status-pill" :class="statusTone(batch.status)"><i></i>{{ statusLabel(batch.status) }}</span>
-        </RouterLink>
+        <div v-for="batch in filteredBatches" :key="batch.id" class="batch-row">
+          <RouterLink class="batch-row-link" :to="`/batches/${batch.id}`">
+            <div>
+              <strong>{{ batch.name }}</strong>
+              <p class="muted">{{ new Date(batch.created_at).toLocaleString() }}</p>
+            </div>
+            <span>{{ batch.completed }}/{{ batch.total }}</span>
+            <span v-if="batch.failed" class="error-count">失败 {{ batch.failed }}</span>
+            <span v-else class="muted">无失败</span>
+            <span class="status-pill" :class="statusTone(batch.status)"><i></i>{{ statusLabel(batch.status) }}</span>
+          </RouterLink>
+          <button
+            class="danger-button batch-delete-button"
+            type="button"
+            :disabled="deletingBatchId === batch.id || ['queued', 'running'].includes(batch.status)"
+            :title="['queued', 'running'].includes(batch.status) ? '请先暂停批次再删除' : '删除批次记录并保留项目'"
+            @click="removeBatch(batch)"
+          >
+            {{ deletingBatchId === batch.id ? '删除中…' : '删除' }}
+          </button>
+        </div>
       </div>
       <div v-else class="empty-state compact-empty"><h2>没有匹配的批次</h2><p>换一个关键词再试试。</p></div>
     </div>

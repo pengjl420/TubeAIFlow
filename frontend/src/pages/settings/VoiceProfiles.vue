@@ -11,6 +11,7 @@ import {
   type VoiceTtsEngine,
 } from '../../api/voices'
 import AudioPlayer from '../../components/common/AudioPlayer.vue'
+import { confirmAction, showToast } from '../../services/feedback'
 
 const voices = ref<VoiceProfile[]>([])
 const editingId = ref('')
@@ -104,7 +105,15 @@ async function save() {
 }
 
 async function remove(voice: VoiceProfile) {
-  if (!window.confirm(`确定删除音色“${voice.name}”吗？`)) return
+  const confirmed = await confirmAction({
+    eyebrow: '删除参考音色',
+    title: `删除音色“${voice.name}”？`,
+    description: '删除后，新项目和批量任务将无法再选择这份参考音色。',
+    detail: '已经生成的配音与项目输出不会受到影响。',
+    confirmText: '删除音色',
+    tone: 'danger',
+  })
+  if (!confirmed) return
   error.value = ''
   message.value = ''
   try {
@@ -112,8 +121,10 @@ async function remove(voice: VoiceProfile) {
     if (editingId.value === voice.id) resetForm()
     message.value = '音色已删除'
     await load()
+    showToast({ title: '参考音色已删除', description: `“${voice.name}”已从音色库移除。`, tone: 'success' })
   } catch (err) {
     error.value = err instanceof Error ? err.message : '音色删除失败'
+    showToast({ title: '音色删除失败', description: error.value, tone: 'danger' })
   }
 }
 

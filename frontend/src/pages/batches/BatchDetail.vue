@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
-import { getBatch, pauseBatch, retryBatchItem, startBatch, type BatchJob } from '../../api/batches'
+import { deleteBatch, getBatch, pauseBatch, retryBatchItem, startBatch, type BatchJob } from '../../api/batches'
+import { confirmAction, showToast } from '../../services/feedback'
 
 const route = useRoute()
+const router = useRouter()
 const batchId = String(route.params.id)
 const batch = ref<BatchJob | null>(null)
 const loading = ref(false)
@@ -98,6 +100,37 @@ async function retry(itemId: string) {
   }
 }
 
+async function removeBatch() {
+  if (!batch.value) return
+  const batchName = batch.value.name
+  const confirmed = await confirmAction({
+    eyebrow: '删除批次记录',
+    title: `删除批次“${batchName}”？`,
+    description: '该批次会从生产记录中移除，之后无法再查看它的汇总进度。',
+    detail: '批次创建的项目和已生成文件仍会保留在项目工作台。',
+    confirmText: '删除批次',
+    tone: 'danger',
+  })
+  if (!confirmed) return
+  acting.value = true
+  error.value = ''
+  try {
+    await deleteBatch(batchId)
+    stopPolling()
+    await router.push('/batches')
+    showToast({
+      title: '批次记录已删除',
+      description: `“${batchName}”创建的项目与文件均已保留。`,
+      tone: 'success',
+    })
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '批次删除失败'
+    showToast({ title: '批次删除失败', description: error.value, tone: 'danger' })
+  } finally {
+    acting.value = false
+  }
+}
+
 onMounted(async () => {
   await load()
   pollTimer = window.setInterval(() => load(true), 1500)
@@ -119,6 +152,12 @@ onBeforeUnmount(() => {
       <div class="page-title-actions">
         <button v-if="canPause" class="danger-button" :disabled="acting" @click="pause">终止当前任务并暂停</button>
         <button v-if="canResume" class="primary-button" :disabled="acting" @click="resume">继续执行</button>
+        <button
+          class="danger-button"
+          :disabled="acting || canPause"
+          :title="canPause ? '请先暂停批次再删除' : '删除批次记录并保留项目'"
+          @click="removeBatch"
+        >删除批次</button>
         <RouterLink class="secondary-button" to="/batches">返回批次列表</RouterLink>
       </div>
     </div>

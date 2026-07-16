@@ -48,6 +48,14 @@ export async function getBatch(id: string): Promise<BatchJob> {
   return unwrap<BatchJob>(await apiClient.get(`/batches/${id}`))
 }
 
+export async function deleteBatch(id: string): Promise<{
+  batch_id: string
+  project_ids: string[]
+  projects_preserved: boolean
+}> {
+  return unwrap(await apiClient.delete(`/batches/${id}`))
+}
+
 export async function createBatch(input: CreateBatchInput): Promise<BatchJob> {
   const form = new FormData()
   form.append('name', input.name)

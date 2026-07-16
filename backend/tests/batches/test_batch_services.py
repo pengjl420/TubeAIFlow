@@ -125,12 +125,62 @@ class BatchApiTests(unittest.TestCase):
             self.assertEqual([item["project_name"] for item in payload["items"]], ["same", "same-2"])
             with Session(engine) as session:
                 tasks = list(session.exec(select(TaskRun).order_by(TaskRun.queue_sequence)).all())
+                projects = list(session.exec(select(Project).order_by(Project.created_at)).all())
                 self.assertEqual(len(tasks), 2)
+                self.assertEqual([project.id for project in projects], [item["project_id"] for item in payload["items"]])
                 self.assertEqual([task.status for task in tasks], ["paused", "paused"])
                 self.assertEqual(
                     [task.batch_item_id for task in tasks],
                     [item["id"] for item in payload["items"]],
                 )
+            engine.dispose()
+
+    def test_delete_batch_preserves_projects_and_detaches_task_history(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            engine = create_engine(
+                f"sqlite:///{Path(directory) / 'delete.db'}",
+                connect_args={"check_same_thread": False},
+            )
+            SQLModel.metadata.create_all(engine)
+            with Session(engine) as session:
+                session.add(BatchJob(id="batch", name="Batch", status="completed", total=1, completed=1))
+                session.add(Project(id="p1", name="One", status="completed"))
+                session.add(BatchItem(id="i1", batch_id="batch", project_id="p1", order_index=1, original_filename="1.txt", status="completed"))
+                session.add(TaskRun(id="t1", project_id="p1", batch_id="batch", batch_item_id="i1", status="completed", queue_sequence=1))
+                session.commit()
+
+                result = batch_service.delete_batch(session, session.get(BatchJob, "batch"))
+
+                self.assertTrue(result["projects_preserved"])
+                self.assertIsNone(session.get(BatchJob, "batch"))
+                self.assertIsNone(session.get(BatchItem, "i1"))
+                self.assertIsNotNone(session.get(Project, "p1"))
+                task = session.get(TaskRun, "t1")
+                self.assertIsNotNone(task)
+                self.assertIsNone(task.batch_id)
+                self.assertIsNone(task.batch_item_id)
+            engine.dispose()
+
+    def test_delete_batch_rejects_running_work(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            engine = create_engine(
+                f"sqlite:///{Path(directory) / 'running.db'}",
+                connect_args={"check_same_thread": False},
+            )
+            SQLModel.metadata.create_all(engine)
+            with Session(engine) as session:
+                batch = BatchJob(id="batch", name="Batch", status="running", total=1)
+                session.add(batch)
+                session.add(Project(id="p1", name="One", status="narration_in_progress"))
+                session.add(BatchItem(id="i1", batch_id="batch", project_id="p1", order_index=1, original_filename="1.txt", status="running"))
+                session.add(TaskRun(id="t1", project_id="p1", batch_id="batch", batch_item_id="i1", status="running", queue_sequence=1))
+                session.commit()
+
+                with self.assertRaisesRegex(ValueError, "先暂停"):
+                    batch_service.delete_batch(session, batch)
+
+                self.assertIsNotNone(session.get(BatchJob, "batch"))
+                self.assertIsNotNone(session.get(Project, "p1"))
             engine.dispose()
 
 

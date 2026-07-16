@@ -25,7 +25,7 @@
 输入：
 
 - 原始逐字稿文本
-- index-tts 参考音频
+- TTS 参考音频
 - 基础生成配置，例如项目名称、音色配置、字幕样式、输出目录
 - 本地素材库与可选在线素材源
 - 视频尺寸、画面节奏、素材偏好、渲染与质量检查配置
@@ -51,7 +51,7 @@
 逐字稿
 → 文本清洗
 → 自动切段
-→ index-tts 批量生成分段音频
+→ 默认使用 Qwen3-TTS 批量生成分段音频
 → 音频后处理
 → 拼接完整配音
 → 读取每段音频时长
@@ -99,8 +99,8 @@
 - Pydantic
 - FFmpeg
 - ffprobe
-- index-tts
-- 可选 Qwen3-TTS
+- Qwen3-TTS（默认）
+- 可选 Chatterbox、CosyVoice
 - httpx
 - python-dotenv
 - PySceneDetect
@@ -112,7 +112,7 @@
 - 管理本地项目
 - 管理参考音频与音色档案
 - 清洗和切分逐字稿
-- 调用 index-tts 生成音频
+- 调用 Qwen3-TTS、Chatterbox 或 CosyVoice 生成音频
 - 调用 FFmpeg 处理音频
 - 生成时间轴
 - 生成 ASS 字幕
@@ -273,8 +273,9 @@ backend/
 
     integrations/
       tts/
-        index_tts.py
         qwen_tts.py
+        chatterbox.py
+        cosyvoice.py
       llm/
         deepseek.py
       media_providers/
@@ -559,7 +560,7 @@ WAV
 
 职责：
 
-- 调用 index-tts 或项目已支持的其他本地 TTS 引擎生成每段音频
+- 调用 Qwen3-TTS（默认）、Chatterbox 或 CosyVoice 生成每段音频
 - 支持按 segment 单独生成
 - 支持失败重试
 - 支持跳过已生成音频
@@ -571,7 +572,7 @@ WAV
 - 业务入口集中放在 `services/narration/tts_service.py`，引擎适配放在 `integrations/tts/`。
 - 不要把具体 TTS 引擎调用散落到 API、workflow、字幕或渲染模块中。
 - 第一版可以使用 subprocess 调用 CLI。
-- 如果后续直接 import index-tts Python API，也应保持调用入口清晰。
+- 各 TTS 引擎使用独立 Python 环境时，也应保持统一且清晰的业务调用入口。
 - 每段音频独立生成，避免整篇长稿失败后全部重跑。
 
 配音字幕基础输出结构如下，完整项目目录以第 8 节为准：

@@ -8,6 +8,7 @@ from unittest.mock import patch
 from app.models.project import Project
 from app.models.narration import Segment
 from app.services.narration import tts_service
+from app.integrations.tts.cosyvoice_runner import cosyvoice_prompt_text
 
 
 class TtsEngineTests(unittest.TestCase):
@@ -115,6 +116,189 @@ class TtsEngineTests(unittest.TestCase):
             self.assertEqual(command[command.index("--dtype") + 1], "bfloat16")
             batch = json.loads((logs_dir / "tts_batch.json").read_text(encoding="utf-8"))
             self.assertEqual(batch[0]["text"], "需要合成的文本")
+
+    def test_removed_index_engine_is_migrated_to_qwen(self) -> None:
+        project = Project(id="p1", name="Legacy", config_json='{"tts_engine": "index_tts"}')
+
+        self.assertEqual(tts_service._project_tts_engine(project), "qwen3_tts")
+
+    def test_chatterbox_configuration_accepts_local_multilingual_v3_model(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            model_dir = root / "model"
+            model_dir.mkdir()
+            for filename in (
+                "ve.pt",
+                "s3gen.pt",
+                "grapheme_mtl_merged_expanded_v1.json",
+                "t3_mtl23ls_v3.safetensors",
+                "Cangjie5_TC.json",
+            ):
+                (model_dir / filename).touch()
+            python_path = root / "python.exe"
+            reference_audio = root / "reference.wav"
+            python_path.touch()
+            reference_audio.touch()
+            settings = SimpleNamespace(
+                chatterbox_python=python_path,
+                chatterbox_model_dir=model_dir,
+                chatterbox_t3_model="v3",
+                chatterbox_language="zh",
+            )
+            project = Project(
+                id="p1",
+                name="Chatterbox",
+                reference_audio_path=str(reference_audio),
+                config_json='{"tts_engine": "chatterbox"}',
+            )
+            segment = Segment(
+                id="p1_0001",
+                project_id="p1",
+                segment_id="0001",
+                segment_index=1,
+                text_zh="测试",
+            )
+
+            with patch.object(tts_service, "get_settings", return_value=settings):
+                engine, audio_path = tts_service._validate_configuration(project, [segment])
+
+            self.assertEqual(engine, "chatterbox")
+            self.assertEqual(audio_path, reference_audio.resolve())
+
+    def test_chatterbox_runner_command_contains_multilingual_controls(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            model_dir = root / "model"
+            python_path = root / "python.exe"
+            reference_audio = root / "reference.wav"
+            model_dir.mkdir()
+            python_path.touch()
+            reference_audio.touch()
+            settings = SimpleNamespace(
+                chatterbox_root=None,
+                chatterbox_python=python_path,
+                chatterbox_model_dir=model_dir,
+                chatterbox_device="cuda",
+                chatterbox_language="zh",
+                chatterbox_t3_model="v3",
+                chatterbox_exaggeration=0.6,
+                chatterbox_cfg_weight=0.4,
+                chatterbox_temperature=0.8,
+            )
+            project = Project(id="chatterbox-project", name="Chatterbox")
+            segment = Segment(
+                id="chatterbox-project_0001",
+                project_id="chatterbox-project",
+                segment_id="0001",
+                segment_index=1,
+                text_zh="需要合成的文本",
+            )
+            completed = SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+            with (
+                patch.object(tts_service, "get_settings", return_value=settings),
+                patch.object(tts_service.subprocess, "run", return_value=completed) as run,
+            ):
+                tts_service._run_chatterbox_batch(
+                    project, reference_audio, [segment], root / "audio", root / "logs"
+                )
+
+            command = run.call_args.args[0]
+            self.assertEqual(command[command.index("--language") + 1], "zh")
+            self.assertEqual(command[command.index("--t3-model") + 1], "v3")
+            self.assertEqual(command[command.index("--cfg-weight") + 1], "0.4")
+
+    def test_cosyvoice_requires_reference_transcript(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cosyvoice_root = root / "CosyVoice"
+            model_dir = root / "model"
+            python_path = root / "python.exe"
+            reference_audio = root / "reference.wav"
+            (cosyvoice_root / "cosyvoice").mkdir(parents=True)
+            model_dir.mkdir()
+            (model_dir / "cosyvoice3.yaml").touch()
+            python_path.touch()
+            reference_audio.touch()
+            settings = SimpleNamespace(
+                cosyvoice_root=cosyvoice_root,
+                cosyvoice_python=python_path,
+                cosyvoice_model_dir=model_dir,
+            )
+            project = Project(
+                id="p1",
+                name="CosyVoice",
+                reference_audio_path=str(reference_audio),
+                config_json='{"tts_engine": "cosyvoice"}',
+            )
+            segment = Segment(
+                id="p1_0001",
+                project_id="p1",
+                segment_id="0001",
+                segment_index=1,
+                text_zh="测试",
+            )
+
+            with (
+                patch.object(tts_service, "get_settings", return_value=settings),
+                self.assertRaisesRegex(ValueError, "requires the reference audio transcript"),
+            ):
+                tts_service._validate_configuration(project, [segment])
+
+    def test_cosyvoice_runner_command_contains_zero_shot_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cosyvoice_root = root / "CosyVoice"
+            model_dir = root / "model"
+            python_path = root / "python.exe"
+            reference_audio = root / "reference.wav"
+            cosyvoice_root.mkdir()
+            model_dir.mkdir()
+            python_path.touch()
+            reference_audio.touch()
+            settings = SimpleNamespace(
+                cosyvoice_root=cosyvoice_root,
+                cosyvoice_python=python_path,
+                cosyvoice_model_dir=model_dir,
+                cosyvoice_speed=1.1,
+                cosyvoice_instruction="You are helpful.",
+                cosyvoice_fp16=True,
+            )
+            project = Project(
+                id="cosyvoice-project",
+                name="CosyVoice",
+                config_json=json.dumps({"reference_audio_text": "参考文本"}, ensure_ascii=False),
+            )
+            segment = Segment(
+                id="cosyvoice-project_0001",
+                project_id="cosyvoice-project",
+                segment_id="0001",
+                segment_index=1,
+                text_zh="需要合成的文本",
+            )
+            completed = SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+            with (
+                patch.object(tts_service, "get_settings", return_value=settings),
+                patch.object(tts_service.subprocess, "run", return_value=completed) as run,
+            ):
+                tts_service._run_cosyvoice_batch(
+                    project, reference_audio, [segment], root / "audio", root / "logs"
+                )
+
+            command = run.call_args.args[0]
+            self.assertEqual(command[command.index("--reference-text") + 1], "参考文本")
+            self.assertEqual(command[command.index("--speed") + 1], "1.1")
+            self.assertIn("--fp16", command)
+
+    def test_cosyvoice3_prompt_includes_instruction_separator(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            model_dir = Path(directory)
+            (model_dir / "cosyvoice3.yaml").touch()
+
+            prompt = cosyvoice_prompt_text(model_dir, "参考文字", "You are helpful.")
+
+            self.assertEqual(prompt, "You are helpful.<|endofprompt|>参考文字")
 
 
 if __name__ == "__main__":

@@ -22,7 +22,7 @@ from app.shared.time import utc_now_iso
 
 
 DEFAULT_TTS_ENGINE = "qwen3_tts"
-SUPPORTED_TTS_ENGINES = {"index_tts", DEFAULT_TTS_ENGINE}
+SUPPORTED_TTS_ENGINES = {DEFAULT_TTS_ENGINE, "chatterbox", "cosyvoice"}
 
 
 def create_project(session: Session, name: str, config: dict | None = None) -> Project:
@@ -210,6 +210,9 @@ def update_project_settings(
     normalized_tts_engine = tts_engine.strip().lower()
     if normalized_tts_engine not in SUPPORTED_TTS_ENGINES:
         raise ValueError("Unsupported TTS engine")
+    normalized_reference_audio_text = reference_audio_text.strip()
+    if normalized_tts_engine == "cosyvoice" and not normalized_reference_audio_text:
+        raise ValueError("CosyVoice requires the reference audio transcript")
 
     video_directory: Path | None = None
     if include_video and not media_video_dir.strip():
@@ -227,7 +230,7 @@ def update_project_settings(
     previous_reference_audio_text = str(config.get("reference_audio_text") or "").strip()
     config["output_filename"] = safe_filename_stem(output_filename or project_name or _timestamp_stem())
     config["tts_engine"] = normalized_tts_engine
-    config["reference_audio_text"] = reference_audio_text.strip()
+    config["reference_audio_text"] = normalized_reference_audio_text
     config["include_translation"] = include_translation
     config["include_video"] = include_video
     if video_directory:
@@ -237,7 +240,7 @@ def update_project_settings(
 
     if (
         previous_tts_engine != normalized_tts_engine
-        or previous_reference_audio_text != reference_audio_text.strip()
+        or previous_reference_audio_text != normalized_reference_audio_text
     ):
         if _reset_tts_segments(session, project.id):
             project.status = "segmented"

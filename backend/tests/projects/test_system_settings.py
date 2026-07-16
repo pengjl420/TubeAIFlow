@@ -9,23 +9,33 @@ from unittest.mock import patch
 class SettingsModelTests(unittest.TestCase):
     def test_empty_optional_paths_become_none(self) -> None:
         settings = Settings(
-            index_tts_root="",
-            index_tts_python="  ",
-            index_tts_model_dir=None,
             qwen_tts_root="",
             qwen_tts_python="  ",
             qwen_tts_model_dir=None,
+            chatterbox_root="",
+            chatterbox_python="  ",
+            chatterbox_model_dir=None,
+            cosyvoice_root="",
+            cosyvoice_python="  ",
+            cosyvoice_model_dir=None,
         )
-        self.assertIsNone(settings.index_tts_root)
-        self.assertIsNone(settings.index_tts_python)
-        self.assertIsNone(settings.index_tts_model_dir)
         self.assertIsNone(settings.qwen_tts_root)
         self.assertIsNone(settings.qwen_tts_python)
         self.assertIsNone(settings.qwen_tts_model_dir)
+        self.assertIsNone(settings.chatterbox_root)
+        self.assertIsNone(settings.chatterbox_python)
+        self.assertIsNone(settings.chatterbox_model_dir)
+        self.assertIsNone(settings.cosyvoice_root)
+        self.assertIsNone(settings.cosyvoice_python)
+        self.assertIsNone(settings.cosyvoice_model_dir)
 
     def test_qwen_dtype_is_validated(self) -> None:
         with self.assertRaisesRegex(ValueError, "Unsupported Qwen3-TTS dtype"):
             Settings(qwen_tts_dtype="int8")
+
+    def test_chatterbox_model_version_is_validated(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Unsupported Chatterbox"):
+            Settings(chatterbox_t3_model="v4")
 
     def test_public_settings_never_expose_secret_values(self) -> None:
         configured = Settings(deepseek_api_key="secret", workspace_dir=Path("workspace"))

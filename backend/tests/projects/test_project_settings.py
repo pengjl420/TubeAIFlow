@@ -129,7 +129,7 @@ class ProjectSettingsTests(unittest.TestCase):
                 id="project-id",
                 name="Name",
                 status="tts_completed",
-                config_json='{"tts_engine": "index_tts"}',
+                config_json='{"tts_engine": "chatterbox"}',
             )
             session = FakeSession([segment])
 

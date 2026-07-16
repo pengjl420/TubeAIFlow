@@ -70,6 +70,10 @@ async function submit() {
     error.value = '请选择输出目录'
     return
   }
+  if (ttsEngine.value === 'cosyvoice' && !referenceAudioText.value.trim()) {
+    error.value = 'CosyVoice 需要填写参考音频逐字稿'
+    return
+  }
   if (includeVideo.value && !mediaVideoDir.value.trim()) {
     error.value = '生成视频时必须选择素材视频目录'
     return
@@ -134,8 +138,9 @@ async function submit() {
         <label class="field">
           <span>TTS 引擎</span>
           <select v-model="ttsEngine">
-            <option value="index_tts">Index-TTS</option>
-            <option value="qwen3_tts">Qwen3-TTS</option>
+            <option value="qwen3_tts">Qwen3-TTS（默认）</option>
+            <option value="chatterbox">Chatterbox</option>
+            <option value="cosyvoice">CosyVoice</option>
           </select>
           <small>本批次中的所有项目都会使用该引擎。</small>
         </label>
@@ -145,10 +150,10 @@ async function submit() {
           <input type="file" accept="audio/wav,audio/mpeg,audio/flac,audio/mp4,.wav,.mp3,.flac,.m4a" @change="selectReferenceAudio" />
           <small>{{ referenceAudio ? `已选择：${referenceAudio.name}` : '该音色会用于本批次内的所有逐字稿。' }}</small>
         </label>
-        <label v-if="ttsEngine === 'qwen3_tts'" class="field">
-          <span>参考音频逐字稿（推荐）</span>
+        <label v-if="ttsEngine === 'qwen3_tts' || ttsEngine === 'cosyvoice'" class="field">
+          <span>参考音频逐字稿（{{ ttsEngine === 'cosyvoice' ? '必填' : '推荐' }}）</span>
           <textarea v-model="referenceAudioText" rows="4" placeholder="填写公共参考音频中实际说出的文字"></textarea>
-          <small>留空时使用仅声纹模式，克隆质量可能降低。</small>
+          <small>{{ ttsEngine === 'cosyvoice' ? 'CosyVoice zero-shot 克隆需要与参考音频完全对应的文字。' : '留空时使用仅声纹模式，克隆质量可能降低。' }}</small>
         </label>
       </div>
 

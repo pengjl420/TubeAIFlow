@@ -62,6 +62,9 @@ def create_batch(
     normalized_tts_engine = tts_engine.strip().lower()
     if normalized_tts_engine not in project_service.SUPPORTED_TTS_ENGINES:
         raise ValueError("不支持的 TTS 引擎")
+    normalized_reference_audio_text = reference_audio_text.strip()
+    if normalized_tts_engine == "cosyvoice" and not normalized_reference_audio_text:
+        raise ValueError("CosyVoice 需要填写参考音频逐字稿")
 
     output_root = Path(output_dir).expanduser().resolve()
     output_root.mkdir(parents=True, exist_ok=True)
@@ -82,7 +85,7 @@ def create_batch(
                 "continue_on_error": continue_on_error,
                 "reference_audio_filename": reference_audio_filename,
                 "tts_engine": normalized_tts_engine,
-                "reference_audio_text": reference_audio_text.strip(),
+                "reference_audio_text": normalized_reference_audio_text,
             },
             ensure_ascii=False,
         ),
@@ -103,7 +106,7 @@ def create_batch(
             project_name,
             {
                 "tts_engine": normalized_tts_engine,
-                "reference_audio_text": reference_audio_text.strip(),
+                "reference_audio_text": normalized_reference_audio_text,
             },
         )
         project_service.update_project_settings(
@@ -114,7 +117,7 @@ def create_batch(
             stem,
             str(video_root) if video_root else "",
             normalized_tts_engine,
-            reference_audio_text,
+            normalized_reference_audio_text,
         )
         reference_audio.seek(0)
         project_service.save_reference_audio(

@@ -1,7 +1,7 @@
 import { apiClient, unwrap } from './client'
 import type { Project } from '../types/project'
 
-export type TtsEngine = 'index_tts' | 'qwen3_tts'
+export type TtsEngine = 'qwen3_tts' | 'chatterbox' | 'cosyvoice'
 
 export interface CreateProjectInput {
   name: string

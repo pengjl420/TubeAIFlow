@@ -68,15 +68,19 @@ def _validate_paths(settings: Settings) -> None:
     if not workspace.is_dir():
         raise ValueError("Workspace path is not a directory")
     for field_name in (
-        "index_tts_root",
-        "index_tts_model_dir",
         "qwen_tts_root",
         "qwen_tts_model_dir",
+        "chatterbox_root",
+        "chatterbox_model_dir",
+        "cosyvoice_root",
+        "cosyvoice_model_dir",
     ):
         path: Path | None = getattr(settings, field_name)
         if path is not None and not path.is_dir():
             raise ValueError(f"{field_name} must be an existing directory")
-    if settings.index_tts_python is not None and not settings.index_tts_python.is_file():
-        raise ValueError("index_tts_python must be an existing file")
     if settings.qwen_tts_python is not None and not settings.qwen_tts_python.is_file():
         raise ValueError("qwen_tts_python must be an existing file")
+    if settings.chatterbox_python is not None and not settings.chatterbox_python.is_file():
+        raise ValueError("chatterbox_python must be an existing file")
+    if settings.cosyvoice_python is not None and not settings.cosyvoice_python.is_file():
+        raise ValueError("cosyvoice_python must be an existing file")

@@ -1,4 +1,4 @@
-"""Run an IndexTTS1 batch inside its own Python environment."""
+"""Run a Chatterbox multilingual voice-clone batch in its own Python environment."""
 
 import argparse
 import json
@@ -13,14 +13,7 @@ def write_json(path: Path, data) -> None:
     temp_path.replace(path)
 
 
-def progress_payload(
-    total: int,
-    segment_ids: list[str],
-    results: list[dict],
-    current_segment_id: str | None,
-    current_index: int | None,
-    status: str,
-) -> dict:
+def progress_payload(total, segment_ids, results, current_segment_id, current_index, status) -> dict:
     payload = {
         "total": total,
         "completed": sum(1 for item in results if item["success"]),
@@ -37,32 +30,41 @@ def progress_payload(
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--index-root", required=True)
+    parser.add_argument("--chatterbox-root")
     parser.add_argument("--model-dir", required=True)
     parser.add_argument("--batch-file", required=True)
     parser.add_argument("--voice", required=True)
     parser.add_argument("--result-file", required=True)
     parser.add_argument("--progress-file", required=True)
-    parser.add_argument("--fp16", action="store_true")
+    parser.add_argument("--device", default="cuda")
+    parser.add_argument("--language", default="zh")
+    parser.add_argument("--t3-model", choices=("v2", "v3"), default="v3")
+    parser.add_argument("--exaggeration", type=float, default=0.5)
+    parser.add_argument("--cfg-weight", type=float, default=0.5)
+    parser.add_argument("--temperature", type=float, default=0.8)
     args = parser.parse_args()
 
-    index_root = Path(args.index_root).resolve()
-    sys.path.insert(0, str(index_root))
+    if args.chatterbox_root:
+        root = Path(args.chatterbox_root).resolve()
+        sys.path.insert(0, str(root / "src"))
+        sys.path.insert(0, str(root))
 
-    from indextts.infer import IndexTTS
+    import torchaudio
+    from chatterbox.mtl_tts import ChatterboxMultilingualTTS
 
-    model_dir = Path(args.model_dir).resolve()
-    tts = IndexTTS(
-        cfg_path=str(model_dir / "config.yaml"),
-        model_dir=str(model_dir),
-        is_fp16=args.fp16,
+    model = ChatterboxMultilingualTTS.from_local(
+        Path(args.model_dir).resolve(),
+        device=args.device,
+        t3_model=args.t3_model,
     )
-    batch_file = Path(args.batch_file).resolve()
-    voice_path = Path(args.voice).resolve()
+    model.prepare_conditionals(
+        str(Path(args.voice).resolve()),
+        exaggeration=args.exaggeration,
+    )
+
+    tasks = json.loads(Path(args.batch_file).resolve().read_text(encoding="utf-8"))
     result_file = Path(args.result_file).resolve()
     progress_file = Path(args.progress_file).resolve()
-
-    tasks = json.loads(batch_file.read_text(encoding="utf-8"))
     results = []
     total = len(tasks)
     segment_ids = [task["segment_id"] for task in tasks]
@@ -71,19 +73,27 @@ def main() -> int:
     for index, task in enumerate(tasks, start=1):
         output_path = Path(task["output_path"]).resolve()
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        write_json(progress_file, progress_payload(total, segment_ids, results, task["segment_id"], index, "running"))
+        write_json(
+            progress_file,
+            progress_payload(total, segment_ids, results, task["segment_id"], index, "running"),
+        )
         try:
-            tts.infer(
-                audio_prompt=str(voice_path),
-                text=task["text"],
-                output_path=str(output_path),
+            wav = model.generate(
+                task["text"],
+                language_id=args.language,
+                exaggeration=args.exaggeration,
+                cfg_weight=args.cfg_weight,
+                temperature=args.temperature,
             )
+            torchaudio.save(str(output_path), wav.cpu(), model.sr)
             results.append({"segment_id": task["segment_id"], "success": True})
         except Exception as exc:
-            results.append(
-                {"segment_id": task["segment_id"], "success": False, "error": str(exc)}
-            )
-        write_json(progress_file, progress_payload(total, segment_ids, results, task["segment_id"], index, "running"))
+            output_path.unlink(missing_ok=True)
+            results.append({"segment_id": task["segment_id"], "success": False, "error": str(exc)})
+        write_json(
+            progress_file,
+            progress_payload(total, segment_ids, results, task["segment_id"], index, "running"),
+        )
 
     write_json(result_file, results)
     write_json(

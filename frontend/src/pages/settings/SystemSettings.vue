@@ -104,32 +104,6 @@ onMounted(load)
       </div>
 
       <div class="panel">
-        <div class="section-head"><h2>IndexTTS</h2></div>
-        <p class="section-description">这里填写已安装好的 IndexTTS 环境位置。三个路径必须真实存在，系统会使用指定的 Python 运行项目内的批量生成脚本。</p>
-        <div class="form-grid">
-          <label class="field full-width">
-            <span>IndexTTS 根目录</span>
-            <input v-model="settings.index_tts_root" placeholder="例如 D:\IndexTTS" />
-            <small>填写 IndexTTS 项目的顶层文件夹，即包含 IndexTTS 源码、配置或运行文件的目录。运行 TTS 时会把它作为工作目录。</small>
-          </label>
-          <label class="field full-width">
-            <span>Python 可执行文件</span>
-            <input v-model="settings.index_tts_python" placeholder="例如 D:\IndexTTS\.venv\Scripts\python.exe" />
-            <small>填写已经安装 IndexTTS 依赖的 Python，不要填写 TubeAIFlow 自己的 Python。Windows 虚拟环境通常位于 <code>.venv\Scripts\python.exe</code>。</small>
-          </label>
-          <label class="field full-width">
-            <span>模型目录</span>
-            <input v-model="settings.index_tts_model_dir" placeholder="例如 D:\IndexTTS\checkpoints" />
-            <small>填写下载好的 IndexTTS 模型文件夹。该目录必须包含 <code>config.yaml</code>，并同时放有模型运行所需的权重文件。</small>
-          </label>
-          <label class="checkbox-field">
-            <input v-model="settings.index_tts_fp16" type="checkbox" />
-            <span><strong>使用 FP16</strong><small>显卡支持半精度时建议勾选，可降低显存占用并加快生成；遇到兼容性或音频异常时取消勾选。</small></span>
-          </label>
-        </div>
-      </div>
-
-      <div class="panel">
         <div class="section-head"><h2>Qwen3-TTS</h2></div>
         <p class="section-description">配置本地 Qwen3-TTS 源码、独立 Python 环境和 Base 声音克隆模型。模型会在每次项目生成任务开始时加载一次。</p>
         <div class="form-grid">
@@ -174,6 +148,98 @@ onMounted(load)
           </label>
         </div>
         <div class="notice">未填写参考音频逐字稿时会自动使用仅声纹模式；填写准确逐字稿可获得更好的声音克隆效果。</div>
+      </div>
+
+      <div class="panel">
+        <div class="section-head"><h2>Chatterbox</h2></div>
+        <p class="section-description">配置 Chatterbox Multilingual 本地环境。中文配音默认使用 V3 模型，参考音频只用于声音条件，不要求填写逐字稿。</p>
+        <div class="form-grid">
+          <label class="field full-width">
+            <span>Chatterbox 源码目录（可选）</span>
+            <input v-model="settings.chatterbox_root" placeholder="例如 D:\chatterbox" />
+            <small>使用源码安装时填写项目根目录；如果 Python 环境已经通过 pip 安装 <code>chatterbox-tts</code>，可以留空。</small>
+          </label>
+          <label class="field full-width">
+            <span>Python 可执行文件</span>
+            <input v-model="settings.chatterbox_python" placeholder="例如 D:\chatterbox\.venv\Scripts\python.exe" />
+            <small>填写已安装 Chatterbox、PyTorch 和 torchaudio 的独立 Python 3.11 环境。</small>
+          </label>
+          <label class="field full-width">
+            <span>本地模型目录</span>
+            <input v-model="settings.chatterbox_model_dir" placeholder="例如 D:\models\chatterbox" />
+            <small>使用完整的 Multilingual 模型快照，避免生成任务运行时联网下载模型。</small>
+          </label>
+          <label class="field">
+            <span>运行设备</span>
+            <input v-model="settings.chatterbox_device" placeholder="cuda" />
+            <small>可填写 <code>cuda</code>、<code>cpu</code> 或 <code>mps</code>。</small>
+          </label>
+          <label class="field">
+            <span>模型版本</span>
+            <select v-model="settings.chatterbox_t3_model">
+              <option value="v3">Multilingual V3（推荐）</option>
+              <option value="v2">Multilingual V2</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>语言代码</span>
+            <input v-model="settings.chatterbox_language" placeholder="zh" />
+            <small>中文使用 <code>zh</code>；每次生成只能指定一种语言。</small>
+          </label>
+          <label class="field">
+            <span>表达强度</span>
+            <input v-model.number="settings.chatterbox_exaggeration" type="number" min="0" max="2" step="0.1" />
+            <small>默认 0.5；数值越高通常越有表现力，也可能加快语速。</small>
+          </label>
+          <label class="field">
+            <span>CFG 权重</span>
+            <input v-model.number="settings.chatterbox_cfg_weight" type="number" min="0" max="1" step="0.1" />
+            <small>默认 0.5；参考说话人语速较快时可尝试 0.3。</small>
+          </label>
+          <label class="field">
+            <span>采样温度</span>
+            <input v-model.number="settings.chatterbox_temperature" type="number" min="0.1" max="5" step="0.1" />
+            <small>默认 0.8；提高会增加变化，同时降低稳定性。</small>
+          </label>
+        </div>
+        <div class="notice">Chatterbox 生成的音频包含模型内置的不可感知水印。参考音频语言应与这里的语言代码一致，以减少口音迁移。</div>
+      </div>
+
+      <div class="panel">
+        <div class="section-head"><h2>CosyVoice</h2></div>
+        <p class="section-description">配置 CosyVoice 源码、独立 Python 环境和本地 zero-shot 模型。支持 CosyVoice 1、2 与 Fun-CosyVoice 3 的本地模型目录。</p>
+        <div class="form-grid">
+          <label class="field full-width">
+            <span>CosyVoice 根目录</span>
+            <input v-model="settings.cosyvoice_root" placeholder="例如 D:\CosyVoice" />
+            <small>应包含 <code>cosyvoice</code> 与 <code>third_party\Matcha-TTS</code>，克隆仓库时需要同时初始化子模块。</small>
+          </label>
+          <label class="field full-width">
+            <span>Python 可执行文件</span>
+            <input v-model="settings.cosyvoice_python" placeholder="例如 D:\CosyVoice\.venv\Scripts\python.exe" />
+            <small>填写已安装 CosyVoice 依赖、PyTorch 和 torchaudio 的独立 Python 3.10 环境。</small>
+          </label>
+          <label class="field full-width">
+            <span>zero-shot 模型目录</span>
+            <input v-model="settings.cosyvoice_model_dir" placeholder="例如 D:\CosyVoice\pretrained_models\Fun-CosyVoice3-0.5B" />
+            <small>推荐使用 Fun-CosyVoice3-0.5B；不要选择仅支持预置音色的 SFT 模型。</small>
+          </label>
+          <label class="field">
+            <span>语速</span>
+            <input v-model.number="settings.cosyvoice_speed" type="number" min="0.5" max="2" step="0.05" />
+            <small>默认 1.0；所有分段使用相同语速。</small>
+          </label>
+          <label class="checkbox-field">
+            <input v-model="settings.cosyvoice_fp16" type="checkbox" />
+            <span><strong>使用 FP16</strong><small>使用 CUDA 时可降低显存占用；CPU 环境请取消勾选。</small></span>
+          </label>
+          <label class="field full-width">
+            <span>CosyVoice 3 系统指令</span>
+            <input v-model="settings.cosyvoice_instruction" placeholder="You are a helpful assistant." />
+            <small>仅对 CosyVoice 3 的 zero-shot 提示生效；系统会自动添加 <code>&lt;|endofprompt|&gt;</code>。</small>
+          </label>
+        </div>
+        <div class="notice">CosyVoice zero-shot 必须填写与参考音频准确对应的逐字稿；参考音频和逐字稿会在项目或批量任务设置中配置。</div>
       </div>
 
       <div class="panel">

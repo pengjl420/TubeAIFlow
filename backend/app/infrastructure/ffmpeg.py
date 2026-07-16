@@ -85,10 +85,4 @@ def _resolve_tool(configured: str, executable_name: str) -> str:
     if found:
         return found
 
-    settings = get_settings()
-    if settings.index_tts_root:
-        bundled = settings.index_tts_root / "python310" / "ffmpeg" / "bin" / executable_name
-        if bundled.is_file():
-            return str(bundled)
-
     return configured

@@ -64,7 +64,9 @@ function fillForm() {
   includeVideo.value = projectConfig.value.include_video === true
   outputFilename.value = typeof filename === 'string' ? filename : ''
   mediaVideoDir.value = typeof videoDir === 'string' ? videoDir : ''
-  ttsEngine.value = configuredTtsEngine === 'index_tts' ? 'index_tts' : 'qwen3_tts'
+  ttsEngine.value = configuredTtsEngine === 'chatterbox' || configuredTtsEngine === 'cosyvoice'
+    ? configuredTtsEngine
+    : 'qwen3_tts'
   referenceAudioText.value = typeof configuredReferenceText === 'string' ? configuredReferenceText : ''
 }
 
@@ -108,6 +110,10 @@ async function save() {
   }
   if (!outputDir.value.trim()) {
     error.value = '请选择输出文件夹'
+    return
+  }
+  if (ttsEngine.value === 'cosyvoice' && !referenceAudioText.value.trim()) {
+    error.value = 'CosyVoice 需要填写参考音频逐字稿'
     return
   }
   if (includeVideo.value && !mediaVideoDir.value.trim()) {
@@ -226,8 +232,9 @@ onMounted(load)
         <label class="field reference-field">
           <span>TTS 引擎</span>
           <select v-model="ttsEngine">
-            <option value="index_tts">Index-TTS</option>
-            <option value="qwen3_tts">Qwen3-TTS</option>
+            <option value="qwen3_tts">Qwen3-TTS（默认）</option>
+            <option value="chatterbox">Chatterbox</option>
+            <option value="cosyvoice">CosyVoice</option>
           </select>
           <span class="muted">切换引擎后，现有分段会标记为待重新生成。</span>
         </label>
@@ -252,10 +259,10 @@ onMounted(load)
             {{ referenceAudio ? `已选择：${referenceAudio.name}` : '不更换可留空；支持 WAV、MP3、FLAC、M4A' }}
           </span>
         </label>
-        <label v-if="ttsEngine === 'qwen3_tts'" class="field reference-field">
-          <span>参考音频逐字稿（推荐）</span>
+        <label v-if="ttsEngine === 'qwen3_tts' || ttsEngine === 'cosyvoice'" class="field reference-field">
+          <span>参考音频逐字稿（{{ ttsEngine === 'cosyvoice' ? '必填' : '推荐' }}）</span>
           <textarea v-model="referenceAudioText" rows="4" placeholder="填写当前参考音频中实际说出的文字"></textarea>
-          <span class="muted">留空时 Qwen3-TTS 使用仅声纹模式；填写准确文字可以提高克隆质量。</span>
+          <span class="muted">{{ ttsEngine === 'cosyvoice' ? 'CosyVoice zero-shot 克隆需要与参考音频完全对应的文字。' : '留空时 Qwen3-TTS 使用仅声纹模式；填写准确文字可以提高克隆质量。' }}</span>
         </label>
       </div>
     </div>

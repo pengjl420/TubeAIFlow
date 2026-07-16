@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import batches, exports, projects, renders, segments, settings, subtitles, tasks, tts, voices
 from app.database import create_db_and_tables
-from app.services.batches import batch_worker
+from app.services.tasks import task_worker
 
 
 app = FastAPI(title="TubeAIFlow", version="0.1.0")
@@ -20,7 +20,7 @@ app.add_middleware(
 @app.on_event("startup")
 def on_startup() -> None:
     create_db_and_tables()
-    batch_worker.recover_and_start_worker()
+    task_worker.recover_and_start_worker()
 
 
 @app.get("/api/health")

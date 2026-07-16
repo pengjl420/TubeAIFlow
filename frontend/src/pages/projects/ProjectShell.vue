@@ -22,7 +22,12 @@ import {
   saveScript,
   type ProjectOutputs,
 } from '../../api/projects'
-import { cancelProjectTask } from '../../api/tasks'
+import {
+  cancelProjectTask,
+  getProjectTaskStatus,
+  startProjectWorkflow,
+  type ProjectTaskStatus,
+} from '../../api/tasks'
 import AudioPlayer from '../../components/common/AudioPlayer.vue'
 import type { Segment } from '../../types/narration'
 import type { Project } from '../../types/project'
@@ -52,6 +57,7 @@ const message = ref('')
 let pollTimer: number | undefined
 let videoPollTimer: number | undefined
 let oneClickTimer: number | undefined
+let taskPollTimer: number | undefined
 
 const oneClickStage = ref('')
 const oneClickStartedAt = ref(0)
@@ -61,6 +67,7 @@ const timerNow = ref(Date.now())
 
 const ttsStatus = ref<TtsStatus>({ total: 0, completed: 0, failed: 0, pending: 0 })
 const videoProgress = ref<VideoProgress | null>(null)
+const projectTask = ref<ProjectTaskStatus | null>(null)
 const hasRunningGeneration = computed(() => (
   ttsRunning.value || mergingAudio.value || generatingSubtitles.value
   || composingVideo.value || oneClickGenerating.value
@@ -234,6 +241,10 @@ async function load() {
     fillOutputFilename()
     await refreshSegments()
     await Promise.all([refreshTtsStatus(), refreshOutputs()])
+    await refreshProjectTaskStatus()
+    if (projectTask.value && ['queued', 'running'].includes(projectTask.value.status)) {
+      startTaskPolling()
+    }
     if (ttsRunning.value) startPolling()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '项目加载失败'
@@ -338,6 +349,91 @@ async function refreshAfterChange() {
   await Promise.all([refreshTtsStatus(), refreshOutputs()])
 }
 
+function taskStageLabel(task: ProjectTaskStatus) {
+  if (task.status === 'queued') {
+    return task.queue_position ? `排队中（第 ${task.queue_position} 位）` : '排队中'
+  }
+  const labels: Record<string, string> = {
+    segmenting: '生成切段',
+    tts: '生成分段音频',
+    audio_merge: '合并完整音频',
+    subtitles: '生成字幕',
+    video: '生成视频',
+    completed: '生成完成',
+  }
+  return labels[task.stage || ''] || task.stage || '准备执行'
+}
+
+function applyProjectTaskStatus(task: ProjectTaskStatus) {
+  projectTask.value = task
+  const active = task.status === 'queued' || task.status === 'running'
+  oneClickGenerating.value = active
+  ttsRunning.value = task.status === 'running' && task.stage === 'tts'
+  mergingAudio.value = task.status === 'running' && task.stage === 'audio_merge'
+  generatingSubtitles.value = task.status === 'running' && task.stage === 'subtitles'
+  composingVideo.value = task.status === 'running' && task.stage === 'video'
+
+  if (active) {
+    const label = taskStageLabel(task)
+    const recoveryNotice = task.compensation_count
+      ? `（已自动恢复 ${task.compensation_count} 次）`
+      : ''
+    if (!oneClickStartedAt.value) {
+      const started = Date.parse(task.started_at || task.created_at || '')
+      oneClickStartedAt.value = Number.isFinite(started) ? started : Date.now()
+      oneClickStageStartedAt.value = Date.now()
+      oneClickFinishedAt.value = 0
+      startOneClickTimer()
+      oneClickStartedAt.value = Number.isFinite(started) ? started : oneClickStartedAt.value
+    }
+    if (oneClickStage.value !== label) beginOneClickStage(label)
+    message.value = task.status === 'queued'
+      ? `任务已创建，${label}${recoveryNotice}。你可以继续创建其他项目或批次。`
+      : `后台任务正在${label}${recoveryNotice}`
+    return
+  }
+
+  if (oneClickGenerating.value || oneClickStartedAt.value) {
+    oneClickFinishedAt.value = Date.now()
+    timerNow.value = oneClickFinishedAt.value
+  }
+  stopOneClickTimer()
+  if (task.status === 'completed') message.value = '一键生成完成'
+  if (task.status === 'failed') error.value = task.error_message || '一键生成失败'
+  if (task.status === 'cancelled') message.value = '任务已取消'
+  if (task.status === 'paused') message.value = '任务已暂停；如果它属于批次，请从批次详情页恢复执行。'
+}
+
+async function refreshProjectTaskStatus() {
+  const task = await getProjectTaskStatus(projectId)
+  applyProjectTaskStatus(task)
+  return task
+}
+
+function startTaskPolling() {
+  stopTaskPolling()
+  taskPollTimer = window.setInterval(async () => {
+    try {
+      const task = await refreshProjectTaskStatus()
+      if (task.status === 'running' && task.stage === 'tts') await refreshTtsStatus()
+      if (task.status === 'running' && task.stage === 'video') videoProgress.value = await getVideoStatus(projectId)
+      if (!['queued', 'running'].includes(task.status)) {
+        stopTaskPolling()
+        await refreshAfterChange()
+      }
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : '刷新任务状态失败'
+    }
+  }, 1500)
+}
+
+function stopTaskPolling() {
+  if (taskPollTimer !== undefined) {
+    window.clearInterval(taskPollTimer)
+    taskPollTimer = undefined
+  }
+}
+
 function startPolling() {
   stopPolling()
   pollTimer = window.setInterval(async () => {
@@ -359,6 +455,7 @@ async function stopGeneration() {
   try {
     const result = await cancelProjectTask(projectId)
     message.value = result.cancelled ? '已发送终止指令，正在停止当前阶段…' : '当前没有可终止的生成任务'
+    await refreshProjectTaskStatus()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '终止任务失败'
   } finally {
@@ -536,79 +633,24 @@ async function oneClickGenerate() {
   }
 
   error.value = ''
-  message.value = '正在保存脚本...'
+  message.value = '正在保存脚本并创建后台任务...'
   oneClickGenerating.value = true
-  ttsRunning.value = true
-  mergingAudio.value = false
-  oneClickStage.value = '保存脚本'
+  beginOneClickStage('创建任务')
   startOneClickTimer()
 
   try {
     await ensureFilenameSaved()
     project.value = await saveScript(projectId, scriptText.value)
-    message.value = '正在生成切段...'
-    beginOneClickStage('生成切段')
-    await createSegments(projectId)
+    const task = await startProjectWorkflow(projectId)
+    applyProjectTaskStatus(task)
+    startTaskPolling()
     await refreshAfterChange()
-
-    message.value = '正在生成分段音频...'
-    beginOneClickStage('生成分段音频')
-    ttsRequestActive.value = true
-    startPolling()
-    await startTts(projectId)
-    ttsRequestActive.value = false
-    stopPolling()
-    await refreshAfterChange()
-
-    if (ttsStatus.value.failed > 0) {
-      throw new Error(`TTS 有 ${ttsStatus.value.failed} 段生成失败，请处理失败段后再合并完整音频`)
-    }
-
-    message.value = '正在合并完整音频...'
-    beginOneClickStage('合并完整音频')
-    mergingAudio.value = true
-    await mergeProjectAudio(projectId)
-    await refreshAfterChange()
-
-    message.value = includeTranslation.value ? '正在生成原文和翻译字幕...' : '正在生成原文字幕...'
-    beginOneClickStage(includeTranslation.value ? '生成原文和翻译字幕' : '生成原文字幕')
-    mergingAudio.value = false
-    generatingSubtitles.value = true
-    await createZhSrt(projectId, includeTranslation.value)
-    generatingSubtitles.value = false
-    await refreshAfterChange()
-
-    if (includeVideo.value) {
-      message.value = '正在生成视频...'
-      beginOneClickStage('生成视频')
-      mergingAudio.value = false
-      composingVideo.value = true
-      videoProgress.value = {
-        status: 'running', stage: 'preparing', percent: 0, total: 0, completed: 0, message: '正在准备视频生成',
-      }
-      startVideoPolling()
-      const result = await composeProjectVideo(projectId)
-      videoProgress.value = await getVideoStatus(projectId)
-      await refreshAfterChange()
-      message.value = `一键生成完成：${result.path}`
-    } else {
-      message.value = '一键生成完成'
-    }
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '一键生成失败'
-    await refreshAfterChange()
-  } finally {
+    error.value = err instanceof Error ? err.message : '任务创建失败'
     oneClickFinishedAt.value = Date.now()
     timerNow.value = oneClickFinishedAt.value
-    stopOneClickTimer()
     oneClickGenerating.value = false
-    ttsRequestActive.value = false
-    ttsRunning.value = false
-    mergingAudio.value = false
-    generatingSubtitles.value = false
-    composingVideo.value = false
-    stopPolling()
-    stopVideoPolling()
+    stopOneClickTimer()
   }
 }
 
@@ -648,6 +690,7 @@ onBeforeUnmount(() => {
   stopPolling()
   stopVideoPolling()
   stopOneClickTimer()
+  stopTaskPolling()
 })
 </script>
 

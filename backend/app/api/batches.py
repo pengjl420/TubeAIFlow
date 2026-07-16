@@ -5,7 +5,8 @@ from sqlmodel import Session
 
 from app.database import get_session
 from app.infrastructure import process_runner as task_control
-from app.services.batches import batch_service, batch_worker
+from app.services.batches import batch_service
+from app.services.tasks import task_worker
 
 
 logger = logging.getLogger(__name__)
@@ -66,7 +67,7 @@ def create_batch(
         )
         if auto_start:
             batch = batch_service.start_batch(session, batch)
-            batch_worker.wake_worker()
+            task_worker.wake_worker()
         return {"success": True, "data": batch_service.serialize_batch(session, batch)}
     except (OSError, ValueError) as exc:
         logger.exception("Failed to create batch")
@@ -90,7 +91,7 @@ def start_batch(batch_id: str, session: Session = Depends(get_session)) -> dict:
         batch = batch_service.start_batch(session, batch)
     except ValueError as exc:
         fail(str(exc))
-    batch_worker.wake_worker()
+    task_worker.wake_worker()
     return {"success": True, "data": batch_service.serialize_batch(session, batch)}
 
 
@@ -118,5 +119,5 @@ def retry_batch_item(batch_id: str, item_id: str, session: Session = Depends(get
         item = batch_service.retry_item(session, batch, item_id)
     except ValueError as exc:
         fail(str(exc))
-    batch_worker.wake_worker()
+    task_worker.wake_worker()
     return {"success": True, "data": item}

@@ -1,9 +1,18 @@
 import { apiClient, unwrap } from './client'
 
 export interface ProjectTaskStatus {
+  id: string | null
+  status: 'idle' | 'queued' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled'
   running: boolean
+  queued: boolean
   stage: string | null
   cancelled: boolean
+  queue_position: number | null
+  error_message?: string | null
+  created_at?: string
+  started_at?: string | null
+  finished_at?: string | null
+  compensation_count?: number
 }
 
 export async function cancelProjectTask(projectId: string) {
@@ -14,4 +23,10 @@ export async function cancelProjectTask(projectId: string) {
 
 export async function getProjectTaskStatus(projectId: string) {
   return unwrap<ProjectTaskStatus>(await apiClient.get(`/projects/${projectId}/tasks/status`))
+}
+
+export async function startProjectWorkflow(projectId: string) {
+  return unwrap<ProjectTaskStatus>(
+    await apiClient.post(`/projects/${projectId}/workflows/narration/start`),
+  )
 }

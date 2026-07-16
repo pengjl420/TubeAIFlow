@@ -9,6 +9,7 @@ from app.models.batch import BatchItem, BatchJob
 from app.models.project import Project
 from app.infrastructure.project_layout import get_output_stem, safe_filename_stem
 from app.services.projects import project_service
+from app.services.tasks import task_service
 from app.shared.time import utc_now_iso
 
 
@@ -134,7 +135,7 @@ def create_batch(
             str(video_root) if video_root else "",
             normalized_tts_engine,
             normalized_reference_audio_text,
-            False,
+            True,
             include_video,
             voice_profile_id=selected_profile.id if selected_profile else "",
         )
@@ -147,15 +148,26 @@ def create_batch(
                 reference_audio_filename,
             )
         project_service.save_script(session, project, text)
-        session.add(
-            BatchItem(
-                id=uuid.uuid4().hex[:12],
-                batch_id=batch.id,
-                project_id=project.id,
-                order_index=order_index,
-                original_filename=filename,
-                current_stage="segmenting",
-            )
+        item = BatchItem(
+            id=uuid.uuid4().hex[:12],
+            batch_id=batch.id,
+            project_id=project.id,
+            order_index=order_index,
+            original_filename=filename,
+            current_stage="segmenting",
+        )
+        session.add(item)
+        session.flush()
+        task_service.enqueue_project_task(
+            session,
+            project,
+            include_video=include_video,
+            current_stage="segmenting",
+            batch_id=batch.id,
+            batch_item_id=item.id,
+            initial_status="paused",
+            reuse_active=False,
+            commit=False,
         )
         session.commit()
 
@@ -196,11 +208,36 @@ def serialize_batch(session: Session, batch: BatchJob, include_items: bool = Tru
 
 
 def start_batch(session: Session, batch: BatchJob) -> BatchJob:
-    if batch.status == "running":
+    if batch.status in {"queued", "running"}:
         return batch
     pending = get_batch_items(session, batch.id)
     if not any(item.status == "pending" for item in pending):
         raise ValueError("批次中没有等待执行的文件")
+    config = _load_config(batch)
+    for item in (item for item in pending if item.status == "pending"):
+        task = task_service.get_latest_batch_item_task(session, item.id)
+        if task is None:
+            project = session.get(Project, item.project_id)
+            if not project:
+                continue
+            task = task_service.enqueue_project_task(
+                session,
+                project,
+                include_video=bool(config.get("include_video", True)),
+                current_stage=item.current_stage or "segmenting",
+                batch_id=batch.id,
+                batch_item_id=item.id,
+                initial_status="paused",
+                reuse_active=False,
+                commit=False,
+            )
+        if task.status == "paused":
+            task_service.queue_paused_task(session, task)
+        project = session.get(Project, item.project_id)
+        if project:
+            project.status = "narration_in_progress"
+            project.updated_at = utc_now_iso()
+            session.add(project)
     batch.status = "queued"
     batch.finished_at = None
     batch.updated_at = utc_now_iso()
@@ -216,6 +253,11 @@ def pause_batch(session: Session, batch: BatchJob) -> BatchJob:
     batch.status = "paused"
     batch.updated_at = utc_now_iso()
     session.add(batch)
+    for task in task_service.list_batch_tasks(session, batch.id):
+        if task.status == "queued":
+            task_service.pause_queued_task(session, task)
+        elif task.status == "running":
+            task_service.request_cancel(session, task)
     session.commit()
     session.refresh(batch)
     return batch
@@ -233,6 +275,24 @@ def retry_item(session: Session, batch: BatchJob, item_id: str) -> BatchItem:
     item.finished_at = None
     item.updated_at = utc_now_iso()
     session.add(item)
+    project = session.get(Project, item.project_id)
+    if not project:
+        raise ValueError("Project not found")
+    config = _load_config(batch)
+    task_service.enqueue_project_task(
+        session,
+        project,
+        include_video=bool(config.get("include_video", True)),
+        current_stage=item.current_stage or "segmenting",
+        batch_id=batch.id,
+        batch_item_id=item.id,
+        initial_status="queued",
+        reuse_active=False,
+        commit=False,
+    )
+    for pending_task in task_service.list_batch_tasks(session, batch.id):
+        if pending_task.status == "paused":
+            task_service.queue_paused_task(session, pending_task)
     refresh_counts(session, batch)
     batch.status = "queued"
     batch.finished_at = None
@@ -247,6 +307,14 @@ def refresh_counts(session: Session, batch: BatchJob) -> None:
     items = get_batch_items(session, batch.id)
     batch.completed = sum(item.status == "completed" for item in items)
     batch.failed = sum(item.status == "failed" for item in items)
+
+
+def _load_config(batch: BatchJob) -> dict:
+    try:
+        data = json.loads(batch.config_json)
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _existing_output_stems(session: Session, output_root: Path) -> set[str]:

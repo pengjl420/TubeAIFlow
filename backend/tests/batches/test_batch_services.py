@@ -6,13 +6,15 @@ from unittest.mock import MagicMock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.api import batches
 from app.database import get_session
 from app.models.batch import BatchItem, BatchJob
 from app.models.project import Project
-from app.services.batches import batch_service, batch_worker
+from app.models.task import TaskRun
+from app.services.batches import batch_service
+from app.services.tasks import task_service, task_worker
 from app.workflows import narration_generation
 
 
@@ -60,6 +62,27 @@ class GenerationCheckpointTests(unittest.TestCase):
         compose_video.assert_not_called()
         self.assertEqual(stages, ["subtitles", "completed"])
 
+    def test_workflow_skips_translation_when_project_disables_it(self) -> None:
+        session = MagicMock()
+        session.exec.return_value.all.return_value = []
+        project = Project(id="p1", name="Project", config_json='{"include_translation":false}')
+        with (
+            patch.object(narration_generation.timeline_service, "build_timeline"),
+            patch.object(
+                narration_generation.srt_service,
+                "create_full_srt_with_cues",
+                return_value=(Path("zh.srt"), []),
+            ),
+            patch.object(
+                narration_generation.translation_service,
+                "translate_subtitle_cues",
+            ) as translate,
+        ):
+            narration_generation._create_subtitles(session, project)
+
+        translate.assert_not_called()
+        self.assertEqual(project.status, "zh_subtitle_created")
+
 
 class BatchApiTests(unittest.TestCase):
     def test_create_batch_preserves_file_order_and_avoids_duplicate_output_names(self) -> None:
@@ -100,6 +123,14 @@ class BatchApiTests(unittest.TestCase):
             self.assertEqual(payload["status"], "draft")
             self.assertEqual([item["order_index"] for item in payload["items"]], [1, 2])
             self.assertEqual([item["project_name"] for item in payload["items"]], ["same", "same-2"])
+            with Session(engine) as session:
+                tasks = list(session.exec(select(TaskRun).order_by(TaskRun.queue_sequence)).all())
+                self.assertEqual(len(tasks), 2)
+                self.assertEqual([task.status for task in tasks], ["paused", "paused"])
+                self.assertEqual(
+                    [task.batch_item_id for task in tasks],
+                    [item["id"] for item in payload["items"]],
+                )
             engine.dispose()
 
 
@@ -112,7 +143,7 @@ class BatchWorkerTests(unittest.TestCase):
             connect_args={"check_same_thread": False},
         )
         SQLModel.metadata.create_all(self.engine)
-        self.engine_patch = patch.object(batch_worker, "engine", self.engine)
+        self.engine_patch = patch.object(task_worker, "engine", self.engine)
         self.engine_patch.start()
 
     def tearDown(self) -> None:
@@ -136,6 +167,8 @@ class BatchWorkerTests(unittest.TestCase):
             # Insert in reverse to prove that order_index drives execution.
             session.add(BatchItem(id="i2", batch_id="batch", project_id="p2", order_index=2, original_filename="2.txt", current_stage="segmenting"))
             session.add(BatchItem(id="i1", batch_id="batch", project_id="p1", order_index=1, original_filename="1.txt", current_stage="segmenting"))
+            session.add(TaskRun(id="t2", project_id="p2", batch_id="batch", batch_item_id="i2", queue_sequence=2))
+            session.add(TaskRun(id="t1", project_id="p1", batch_id="batch", batch_item_id="i1", queue_sequence=1))
             session.commit()
 
         calls: list[str] = []
@@ -148,12 +181,12 @@ class BatchWorkerTests(unittest.TestCase):
             update_stage("completed")
 
         with patch.object(
-            batch_worker.narration_generation,
+            task_worker.narration_generation,
             "run_project_generation",
             side_effect=fake_generation,
         ):
-            self.assertTrue(batch_worker.process_next_item())
-            self.assertTrue(batch_worker.process_next_item())
+            self.assertTrue(task_worker.process_next_task())
+            self.assertTrue(task_worker.process_next_task())
 
         with Session(self.engine) as session:
             batch = session.get(BatchJob, "batch")
@@ -183,20 +216,28 @@ class BatchWorkerTests(unittest.TestCase):
             session.add(Project(id="p2", name="Two"))
             session.add(BatchItem(id="i1", batch_id="batch", project_id="p1", order_index=1, original_filename="1.txt", current_stage="segmenting"))
             session.add(BatchItem(id="i2", batch_id="batch", project_id="p2", order_index=2, original_filename="2.txt", current_stage="segmenting"))
+            session.add(TaskRun(id="t1", project_id="p1", batch_id="batch", batch_item_id="i1", queue_sequence=1))
+            session.add(TaskRun(id="t2", project_id="p2", batch_id="batch", batch_item_id="i2", queue_sequence=2))
             session.commit()
 
         with patch.object(
-            batch_worker.narration_generation,
+            task_worker.narration_generation,
             "run_project_generation",
             side_effect=RuntimeError("stop here"),
         ):
-            self.assertTrue(batch_worker.process_next_item())
+            self.assertTrue(task_worker.process_next_task())
 
         with Session(self.engine) as session:
             batch = session.get(BatchJob, "batch")
             second = session.get(BatchItem, "i2")
             self.assertEqual(batch.status, "paused")
             self.assertEqual(second.status, "pending")
+            batch_service.retry_item(session, batch, "i1")
+            first_retry = task_service.get_latest_batch_item_task(session, "i1")
+            second_task = task_service.get_latest_batch_item_task(session, "i2")
+            self.assertEqual(first_retry.status, "queued")
+            self.assertEqual(second_task.status, "queued")
+            self.assertEqual(session.get(BatchJob, "batch").status, "queued")
 
     def test_recovery_requeues_interrupted_work_without_losing_stage(self) -> None:
         with Session(self.engine) as session:
@@ -213,19 +254,33 @@ class BatchWorkerTests(unittest.TestCase):
                     current_stage="subtitles",
                 )
             )
+            session.add(
+                TaskRun(
+                    id="t1",
+                    project_id="p1",
+                    batch_id="batch",
+                    batch_item_id="i1",
+                    status="running",
+                    current_stage="subtitles",
+                    queue_sequence=1,
+                )
+            )
             session.commit()
 
-        with patch.object(batch_worker, "start_worker") as start_worker:
-            batch_worker.recover_and_start_worker()
+        with Session(self.engine) as session:
+            recovered = task_worker.recover_interrupted_tasks(session)
 
         with Session(self.engine) as session:
             batch = session.get(BatchJob, "batch")
             item = session.get(BatchItem, "i1")
+            task = session.get(TaskRun, "t1")
             self.assertEqual(batch.status, "queued")
             self.assertEqual(item.status, "pending")
             self.assertEqual(item.current_stage, "subtitles")
-            self.assertIn("后端重启", item.error_message or "")
-        start_worker.assert_called_once_with()
+            self.assertEqual(task.status, "queued")
+            self.assertEqual(task.compensation_count, 1)
+            self.assertIn("自动补偿", item.error_message or "")
+        self.assertEqual(recovered, 1)
 
 
 if __name__ == "__main__":

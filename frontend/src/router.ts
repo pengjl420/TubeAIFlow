@@ -11,6 +11,7 @@ import SystemSettings from './pages/settings/SystemSettings.vue'
 
 const router = createRouter({
   history: createWebHistory(),
+  scrollBehavior: () => ({ top: 0 }),
   routes: [
     { path: '/', component: ProjectList },
     { path: '/batches', component: BatchList },
@@ -21,6 +22,19 @@ const router = createRouter({
     { path: '/projects/:id/config', component: ProjectConfig },
     { path: '/settings', component: SystemSettings },
   ],
+})
+
+router.afterEach((to) => {
+  const section = to.path.startsWith('/batches')
+    ? '批量生产'
+    : to.path.startsWith('/settings')
+      ? '系统设置'
+      : to.path.startsWith('/projects/new')
+        ? '创建项目'
+        : to.path.startsWith('/projects/')
+          ? '项目工作台'
+          : '项目总览'
+  document.title = `${section} · TubeAIFlow`
 })
 
 export default router

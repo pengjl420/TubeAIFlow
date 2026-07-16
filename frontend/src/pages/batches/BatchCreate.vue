@@ -100,7 +100,14 @@ async function submit() {
 
 <template>
   <section>
-    <div class="page-title"><h1>新建批量任务</h1></div>
+    <div class="page-title create-page-title">
+      <div>
+        <span class="page-kicker">NEW BATCH</span>
+        <h1>新建批量任务</h1>
+        <p class="muted">逐字稿将按照下方顺序创建项目，并共享同一份参考音频与输出配置。</p>
+      </div>
+      <RouterLink class="secondary-button" to="/batches">取消并返回</RouterLink>
+    </div>
     <div class="grid batch-create-grid">
       <div class="panel grid">
         <label class="field">

@@ -184,6 +184,42 @@ const finalVideoPath = computed(() => {
   return outputs.value?.final_video_path || `${dir.replace(/[\\/]$/, '')}\\${outputFilename.value.trim()}.mp4`
 })
 
+const projectStatusLabel = computed(() => {
+  const labels: Record<string, string> = {
+    created: '待开始',
+    narration_in_progress: '配音生成中',
+    narration_ready: '配音已就绪',
+    video_in_progress: '视频合成中',
+    review_required: '等待复核',
+    completed: '已完成',
+    failed: '执行失败',
+  }
+  return labels[project.value?.status || ''] || (project.value?.status || '未知状态').split('_').join(' ')
+})
+
+const scriptCharacterCount = computed(() => scriptText.value.trim().length)
+const projectStatusTone = computed(() => {
+  if (project.value?.status === 'failed') return 'is-danger'
+  if (project.value?.status === 'completed') return 'is-success'
+  if (project.value?.status === 'review_required') return 'is-warning'
+  if (project.value?.status?.includes('progress')) return 'is-running'
+  return 'is-neutral'
+})
+const workflowSteps = computed(() => {
+  const segmentReady = segments.value.length > 0
+  const scriptReady = scriptCharacterCount.value > 0 || segmentReady
+  const voiceReady = ttsStatus.value.total > 0 && ttsStatus.value.completed >= ttsStatus.value.total
+  const audioReady = Boolean(finalAudioPath.value && outputs.value?.final_audio_path)
+  const videoReady = Boolean(finalVideoPath.value && outputs.value?.final_video_path)
+  return [
+    { label: '脚本', caption: scriptCharacterCount.value ? `${scriptCharacterCount.value} 字` : scriptReady ? '已保存' : '等待输入', state: scriptReady ? 'done' : 'current' },
+    { label: '切段', caption: segmentReady ? `${segments.value.length} 段` : '尚未生成', state: segmentReady ? 'done' : scriptCharacterCount.value ? 'current' : 'pending' },
+    { label: '配音', caption: voiceReady ? '音频已就绪' : ttsRunning.value ? '正在生成' : '等待生成', state: voiceReady ? 'done' : ttsRunning.value ? 'current' : 'pending' },
+    { label: '字幕', caption: audioReady ? '已生成' : '等待合并', state: audioReady ? 'done' : mergingAudio.value || generatingSubtitles.value ? 'current' : 'pending' },
+    { label: '成片', caption: includeVideo.value ? (videoReady ? '已输出' : '等待合成') : '未启用', state: videoReady ? 'done' : composingVideo.value ? 'current' : 'pending' },
+  ]
+})
+
 function segmentAudioUrl(segment: Segment) {
   if (!segment.audio_path) return ''
   const version = encodeURIComponent(segment.updated_at || segment.audio_path)
@@ -617,13 +653,34 @@ onBeforeUnmount(() => {
 
 <template>
   <section v-if="project">
-    <div class="page-title">
-      <h1>{{ project.name }}</h1>
-      <span class="status-pill">{{ project.status }}</span>
+    <div class="project-hero">
+      <div>
+        <RouterLink class="breadcrumb-link" to="/">← 返回项目</RouterLink>
+        <div class="project-title-row">
+          <h1>{{ project.name }}</h1>
+          <span class="status-pill" :class="projectStatusTone"><i></i>{{ projectStatusLabel }}</span>
+        </div>
+        <p>在同一条生产线上编辑脚本、生成配音字幕并输出成片。</p>
+      </div>
+      <RouterLink class="secondary-button" :to="`/projects/${project.id}/config`">项目设置</RouterLink>
     </div>
 
-    <div class="grid two-column">
-      <div class="panel">
+    <div class="workflow-rail" aria-label="项目生产阶段">
+      <div v-for="(step, index) in workflowSteps" :key="step.label" class="workflow-step" :class="`is-${step.state}`">
+        <span class="step-index">{{ step.state === 'done' ? '✓' : index + 1 }}</span>
+        <span><strong>{{ step.label }}</strong><small>{{ step.caption }}</small></span>
+      </div>
+    </div>
+
+    <div class="studio-grid">
+      <div class="panel script-panel">
+        <div class="section-head script-section-head">
+          <div>
+            <span class="section-eyebrow">01 · CONTENT</span>
+            <h2>逐字稿编辑</h2>
+          </div>
+          <span class="muted">{{ scriptCharacterCount.toLocaleString() }} 字</span>
+        </div>
         <div class="reference-box">
           <div>
             <strong>参考音频</strong>
@@ -632,7 +689,9 @@ onBeforeUnmount(() => {
             </p>
           </div>
           <AudioPlayer v-if="referenceAudioUrl" :src="referenceAudioUrl" />
-          <RouterLink class="secondary-button" :to="`/projects/${project.id}/config`">项目设置</RouterLink>
+          <span class="status-pill" :class="project.reference_audio_path ? 'is-success' : 'is-warning'">
+            {{ project.reference_audio_path ? '已配置' : '需配置' }}
+          </span>
         </div>
 
         <label class="field">
@@ -646,27 +705,19 @@ onBeforeUnmount(() => {
             @dragleave.prevent="scriptDragActive = false"
             @drop.prevent="handleScriptDrop"
           ></textarea>
-          <span class="muted">拖入文本文件后会自动读取内容，并用文件名保存当前生成文件名。</span>
+          <span class="field-hint">支持粘贴或拖入 TXT / Markdown 文件；文件名会自动作为当前输出名称。</span>
         </label>
 
-        <div class="actions">
-          <button class="primary-button" :disabled="oneClickGenerating || readingScriptFile" @click="oneClickGenerate">
-            {{ oneClickGenerating ? '一键生成中' : '一键生成' }}
-          </button>
-          <button class="primary-button" :disabled="oneClickGenerating" @click="submitScript">保存脚本</button>
-          <button class="secondary-button" :disabled="oneClickGenerating" @click="splitSegments">生成切段</button>
-          <button class="secondary-button" :disabled="ttsRunning || oneClickGenerating" @click="runTts">
-            {{ ttsRunning ? 'TTS 生成中' : '开始 TTS' }}
-          </button>
-          <button class="secondary-button" :disabled="mergingAudio || generatingSubtitles || oneClickGenerating" @click="mergeAudio">
-            {{ generatingSubtitles ? '字幕生成中' : mergingAudio ? '合并中' : '合并完整音频' }}
-          </button>
-          <button class="secondary-button" :disabled="composingVideo || oneClickGenerating" @click="composeVideo">
-            {{ composingVideo ? '视频生成中' : '生成视频' }}
-          </button>
+        <div class="manual-actions">
+          <span>手动控制</span>
+          <button class="text-button" :disabled="oneClickGenerating" @click="submitScript">保存脚本</button>
+          <button class="text-button" :disabled="oneClickGenerating" @click="splitSegments">生成切段</button>
+          <button class="text-button" :disabled="ttsRunning || oneClickGenerating" @click="runTts">{{ ttsRunning ? 'TTS 生成中' : '开始 TTS' }}</button>
+          <button class="text-button" :disabled="mergingAudio || generatingSubtitles || oneClickGenerating" @click="mergeAudio">{{ generatingSubtitles ? '字幕生成中' : mergingAudio ? '合并中' : '合并音频字幕' }}</button>
+          <button v-if="includeVideo" class="text-button" :disabled="composingVideo || oneClickGenerating" @click="composeVideo">{{ composingVideo ? '视频生成中' : '单独生成视频' }}</button>
           <button
             v-if="hasRunningGeneration"
-            class="danger-button"
+            class="text-button danger-text"
             :disabled="stoppingGeneration"
             @click="stopGeneration"
           >
@@ -674,8 +725,8 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <p v-if="error" class="error">{{ error }}</p>
-        <p v-if="message" class="success">{{ message }}</p>
+        <div v-if="error" class="alert alert-danger"><strong>操作未完成</strong><span>{{ error }}</span></div>
+        <div v-if="message" class="alert alert-success"><strong>操作成功</strong><span>{{ message }}</span></div>
         <div v-if="oneClickStartedAt" class="generation-timing">
           <div>
             <span class="muted">当前阶段</span>
@@ -707,56 +758,75 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div class="panel">
+      <aside class="panel execution-panel">
+        <div class="execution-intro">
+          <span class="section-eyebrow">PRODUCTION</span>
+          <h2>{{ hasRunningGeneration ? '正在执行生产任务' : '准备开始生成' }}</h2>
+          <p>{{ includeVideo ? '将依次完成切段、配音、字幕与视频合成。' : '将依次完成切段、配音与字幕生成。' }}</p>
+          <button class="primary-button primary-action" :disabled="oneClickGenerating || readingScriptFile" @click="oneClickGenerate">
+            <span>{{ oneClickGenerating ? '●' : '▶' }}</span>
+            {{ oneClickGenerating ? '正在一键生成' : '开始一键生成' }}
+          </button>
+        </div>
+
         <div class="section-head">
-          <h2>TTS 进度</h2>
-          <span class="muted">{{ ttsPercent }}%</span>
+          <h3>配音进度</h3>
+          <strong>{{ ttsPercent }}%</strong>
         </div>
         <div class="progress-bar">
           <div class="progress-fill" :style="{ width: `${ttsPercent}%` }"></div>
         </div>
         <div class="stats-row">
-          <span>总数 {{ ttsStatus.total }}</span>
-          <span>完成 {{ ttsStatus.completed }}</span>
-          <span>失败 {{ ttsStatus.failed }}</span>
-          <span>等待 {{ ttsStatus.pending }}</span>
+          <span><strong>{{ ttsStatus.total }}</strong><small>总段数</small></span>
+          <span><strong>{{ ttsStatus.completed }}</strong><small>已完成</small></span>
+          <span><strong>{{ ttsStatus.failed }}</strong><small>失败</small></span>
+          <span><strong>{{ ttsStatus.pending }}</strong><small>等待</small></span>
         </div>
         <p v-if="currentSegmentText" class="muted current-segment">当前生成：{{ currentSegmentText }}</p>
 
         <div class="outputs-panel embedded-outputs">
           <div class="section-head">
-            <h2>输出文件</h2>
-            <button class="secondary-button" @click="refreshOutputs">刷新</button>
+            <h3>输出位置</h3>
+            <button class="mini-button" @click="refreshOutputs">刷新</button>
           </div>
           <div class="inline-form">
             <label class="field">
               <span>当前生成文件名</span>
               <input v-model="outputFilename" placeholder="留空则使用当前时间戳" />
             </label>
-            <button class="primary-button" :disabled="savingFilename" @click="saveCurrentFilename">
+            <button class="secondary-button" :disabled="savingFilename" @click="saveCurrentFilename">
               {{ savingFilename ? '保存中' : '保存文件名' }}
             </button>
           </div>
-          <p class="path-line"><strong>输出根目录：</strong>{{ outputs?.output_dir || project.output_dir || '暂无输出目录' }}</p>
-          <p class="path-line"><strong>本次生成目录：</strong>{{ hasOutputFilename ? outputs?.work_dir : '保存或生成后自动创建' }}</p>
-          <p class="path-line"><strong>最终完整音频：</strong>{{ finalAudioPath || '保存或生成后自动创建' }}</p>
-          <p class="path-line"><strong>翻译字幕：</strong>{{ includeTranslation ? finalTranslatedSrtPath || '生成后自动创建' : '未启用' }}</p>
-          <p class="path-line"><strong>素材视频目录：</strong>{{ mediaVideoDir || '未配置' }}</p>
-          <p class="path-line"><strong>最终视频：</strong>{{ finalVideoPath || '生成后自动创建' }}</p>
+          <dl class="output-path-list">
+            <div><dt>根目录</dt><dd>{{ outputs?.output_dir || project.output_dir || '暂无输出目录' }}</dd></div>
+            <div><dt>完整音频</dt><dd>{{ finalAudioPath || '生成后自动创建' }}</dd></div>
+            <div><dt>翻译字幕</dt><dd>{{ includeTranslation ? finalTranslatedSrtPath || '生成后自动创建' : '未启用' }}</dd></div>
+            <div v-if="includeVideo"><dt>最终视频</dt><dd>{{ finalVideoPath || '生成后自动创建' }}</dd></div>
+          </dl>
         </div>
-      </div>
+      </aside>
     </div>
 
-    <div>
-      <div class="page-title compact-title">
-        <h1>切段结果</h1>
-        <span class="muted">{{ loading ? '加载中' : `${segments.length} 段` }}</span>
+    <div class="segments-section">
+      <div class="section-toolbar compact-title">
+        <div>
+          <span class="section-eyebrow">02 · SEGMENTS</span>
+          <h2>配音分段</h2>
+          <p>逐段检查文案和音频；修改后可以只重新生成当前分段。</p>
+        </div>
+        <span class="status-pill is-neutral">{{ loading ? '加载中' : `${segments.length} 段` }}</span>
+      </div>
+      <div v-if="!loading && !segments.length" class="empty-state panel compact-empty">
+        <h2>尚未生成分段</h2>
+        <p>保存逐字稿后点击“生成切段”，或直接使用一键生成。</p>
       </div>
       <div class="segments">
         <article v-for="segment in segments" :key="segment.id" class="segment-item">
           <div class="segment-head">
-            #{{ segment.segment_id }} · {{ segment.status }}
-            <span v-if="segment.duration"> · {{ segment.duration.toFixed(2) }}s</span>
+            <span class="segment-number">{{ segment.segment_id }}</span>
+            <span class="status-pill is-neutral">{{ segment.status }}</span>
+            <span v-if="segment.duration" class="segment-duration">{{ segment.duration.toFixed(2) }} 秒</span>
           </div>
           <textarea
             v-model="editedText[segment.segment_id]"
@@ -772,7 +842,7 @@ onBeforeUnmount(() => {
               {{ busySegments[segment.segment_id] ? '处理中' : '重新生成音频' }}
             </button>
           </div>
-          <p v-if="segment.audio_path" class="muted path-line">{{ segment.audio_path }}</p>
+          <p v-if="segment.audio_path" class="muted path-line segment-path">{{ segment.audio_path }}</p>
           <p v-if="segment.error_message" class="error">{{ segment.error_message }}</p>
         </article>
       </div>

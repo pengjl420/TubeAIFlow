@@ -89,11 +89,21 @@ async function submit() {
 
 <template>
   <section>
-    <div class="page-title">
-      <h1>新建项目</h1>
+    <div class="page-title create-page-title">
+      <div>
+        <span class="page-kicker">NEW PRODUCTION</span>
+        <h1>创建视频项目</h1>
+        <p class="muted">先准备声音和输出位置，创建后再进入工作台添加逐字稿。</p>
+      </div>
+      <RouterLink class="secondary-button" to="/">取消并返回</RouterLink>
     </div>
-    <div class="grid">
-      <div class="panel">
+    <div class="setup-steps" aria-label="项目创建步骤">
+      <span class="is-active"><i>1</i>项目信息</span>
+      <span><i>2</i>输出设置</span>
+      <span><i>3</i>生成选项</span>
+    </div>
+    <div class="grid create-form-grid">
+      <div class="panel form-section-card">
         <div class="section-head"><h2>基本信息</h2></div>
         <label class="field">
           <span>项目名称</span>
@@ -124,7 +134,7 @@ async function submit() {
         </label>
       </div>
 
-      <div class="panel">
+      <div class="panel form-section-card">
         <div class="section-head"><h2>输出设置</h2></div>
         <label class="field reference-field">
           <span>输出根目录</span>
@@ -148,7 +158,7 @@ async function submit() {
         </label>
       </div>
 
-      <div class="panel">
+      <div class="panel form-section-card">
         <div class="section-head"><h2>一键生成选项</h2></div>
         <label class="checkbox-field">
           <input v-model="includeTranslation" type="checkbox" />
@@ -175,10 +185,11 @@ async function submit() {
         </label>
       </div>
     </div>
-    <p v-if="error" class="error">{{ error }}</p>
-    <div class="actions">
+    <div v-if="error" class="alert alert-danger"><strong>还不能创建项目</strong><span>{{ error }}</span></div>
+    <div class="actions form-footer">
+      <span class="muted">创建后仍可在项目设置中修改这些选项。</span>
       <button class="primary-button" :disabled="saving || selectingFolder !== null" @click="submit">
-        {{ saving ? '创建中' : '创建项目' }}
+        {{ saving ? '正在创建…' : '创建并进入工作台 →' }}
       </button>
     </div>
   </section>

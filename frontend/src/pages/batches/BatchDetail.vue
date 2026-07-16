@@ -20,6 +20,15 @@ const percent = computed(() => {
 const canPause = computed(() => batch.value?.status === 'queued' || batch.value?.status === 'running')
 const canResume = computed(() => batch.value?.status === 'paused' || batch.value?.status === 'draft')
 
+const statusLabels: Record<string, string> = {
+  draft: '草稿', queued: '排队中', running: '执行中', paused: '已暂停',
+  completed: '已完成', completed_with_errors: '部分失败', failed: '执行失败',
+}
+
+function statusLabel(status: string) {
+  return statusLabels[status] || status
+}
+
 const stageLabels: Record<string, string> = {
   segmenting: '生成切段',
   tts: '生成分段音频',
@@ -103,6 +112,7 @@ onBeforeUnmount(() => {
   <section v-if="batch">
     <div class="page-title">
       <div>
+        <span class="page-kicker">BATCH DETAIL</span>
         <h1>{{ batch.name }}</h1>
         <span class="muted">创建于 {{ new Date(batch.created_at).toLocaleString() }}</span>
       </div>
@@ -116,7 +126,7 @@ onBeforeUnmount(() => {
     <div class="panel batch-summary">
       <div class="section-head">
         <strong>总进度 {{ percent }}%</strong>
-        <span class="status-pill">{{ batch.status }}</span>
+        <span class="status-pill" :class="batch.failed ? 'is-danger' : batch.status === 'completed' ? 'is-success' : 'is-running'"><i></i>{{ statusLabel(batch.status) }}</span>
       </div>
       <div class="progress-bar"><div class="progress-fill" :style="{ width: `${percent}%` }"></div></div>
       <div class="stats-row">

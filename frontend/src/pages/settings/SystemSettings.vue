@@ -61,9 +61,11 @@ onMounted(load)
   <section>
     <div class="page-title">
       <div>
+        <span class="page-kicker">LOCAL SYSTEM</span>
         <h1>系统设置</h1>
         <p class="muted">配置保存在本机 SQLite 数据库中，不会读取 .env 文件。</p>
       </div>
+      <button v-if="settings" class="primary-button" :disabled="saving" @click="save">{{ saving ? '保存中…' : '保存全部设置' }}</button>
     </div>
 
     <p v-if="loading" class="muted">正在加载…</p>

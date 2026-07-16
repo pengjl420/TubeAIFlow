@@ -148,7 +148,11 @@ onMounted(load)
 <template>
   <section v-if="project">
     <div class="page-title">
-      <h1>项目设置</h1>
+      <div>
+        <span class="page-kicker">PROJECT SETTINGS</span>
+        <h1>项目设置</h1>
+        <p class="muted">管理项目输出、生成选项与声音克隆参考。</p>
+      </div>
       <div class="page-title-actions">
         <button class="secondary-button" @click="router.push(`/projects/${project.id}`)">返回项目</button>
         <button class="primary-button" type="button" :disabled="saving || selectingFolder !== null" @click="save">

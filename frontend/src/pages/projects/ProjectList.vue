@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 
 import { deleteProject, listProjects } from '../../api/projects'
 import { cancelProjectTask } from '../../api/tasks'
@@ -15,6 +16,7 @@ const actingProjectId = ref('')
 const batchDeleting = ref(false)
 const selectedProjectIds = ref<Set<string>>(new Set())
 const message = ref('')
+const router = useRouter()
 
 const statusLabels: Record<string, string> = {
   created: '待开始',
@@ -94,6 +96,33 @@ function isEditable(project: Project) {
 
 function isGenerating(project: Project) {
   return generatingStatuses.has(project.status)
+}
+
+function openProject(projectId: string) {
+  void router.push(`/projects/${projectId}`)
+}
+
+function voiceProfileName(project: Project) {
+  const profileName = project.config?.voice_profile_name
+  if (typeof profileName === 'string' && profileName.trim()) return profileName
+  const configuredName = project.config?.reference_audio_filename
+  if (typeof configuredName === 'string' && configuredName.trim()) {
+    return configuredName.replace(/\.[^.]+$/, '')
+  }
+  if (!project.reference_audio_path) return '未配置'
+  const filename = project.reference_audio_path.split(/[\\/]/).pop() || '参考音频'
+  return filename.replace(/\.[^.]+$/, '')
+}
+
+function ttsEngineName(project: Project) {
+  const engine = typeof project.config?.tts_engine === 'string'
+    ? project.config.tts_engine.toLocaleLowerCase()
+    : ''
+  return {
+    qwen3_tts: 'Qwen3-TTS',
+    chatterbox: 'Chatterbox',
+    cosyvoice: 'CosyVoice',
+  }[engine] || engine
 }
 
 function toggleProjectSelection(projectId: string) {
@@ -229,7 +258,7 @@ async function removeSelectedProjects() {
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('zh-CN', {
-    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
   }).format(new Date(value))
 }
 
@@ -352,6 +381,12 @@ onMounted(loadProjects)
         :key="project.id"
         class="project-card"
         :class="{ 'is-selected': selectedProjectIds.has(project.id) }"
+        role="link"
+        tabindex="0"
+        :aria-label="`进入项目 ${project.name}`"
+        @click="openProject(project.id)"
+        @keydown.enter.self="openProject(project.id)"
+        @keydown.space.self.prevent="openProject(project.id)"
       >
         <div class="project-card-top">
           <div class="project-card-leading">
@@ -360,26 +395,34 @@ onMounted(loadProjects)
               :checked="selectedProjectIds.has(project.id)"
               :disabled="isGenerating(project) || batchDeleting"
               :aria-label="isGenerating(project) ? `${project.name} 生成中，不能删除` : `选择 ${project.name}`"
+              @click.stop
               @change="toggleProjectSelection(project.id)"
             />
             <span class="project-avatar">{{ project.name.slice(0, 1).toUpperCase() }}</span>
+            <h3 :title="project.name">{{ project.name }}</h3>
           </div>
           <span class="status-pill" :class="statusTone(project.status)"><i></i>{{ statusLabel(project.status) }}</span>
         </div>
         <div class="project-card-body">
-          <h3><RouterLink :to="`/projects/${project.id}`">{{ project.name }}</RouterLink></h3>
-          <p>{{ project.output_dir || '尚未配置输出目录' }}</p>
+          <p class="project-reference-audio" :title="`${voiceProfileName(project)} ${ttsEngineName(project)}`">
+            <span>参考音频</span>
+            <strong>{{ voiceProfileName(project) }}</strong>
+            <span v-if="ttsEngineName(project)" class="project-engine">{{ ttsEngineName(project) }}</span>
+          </p>
         </div>
         <div class="project-card-footer">
-          <span>更新于 {{ formatDate(project.updated_at || project.created_at) }}</span>
+          <div class="project-card-times">
+            <span>创建于 {{ formatDate(project.created_at) }}</span>
+            <span>更新于 {{ formatDate(project.updated_at || project.created_at) }}</span>
+          </div>
           <div class="project-card-actions">
-            <RouterLink v-if="isEditable(project)" class="text-button" :to="`/projects/${project.id}/config`">修改</RouterLink>
+            <RouterLink v-if="isEditable(project)" class="text-button" :to="`/projects/${project.id}/config`" @click.stop>修改</RouterLink>
             <button
               v-if="isGenerating(project)"
               class="danger-button"
               type="button"
               :disabled="batchDeleting || actingProjectId === project.id"
-              @click="stopProject(project)"
+              @click.stop="stopProject(project)"
             >
               {{ actingProjectId === project.id ? '停止中…' : '强制停止' }}
             </button>
@@ -388,7 +431,7 @@ onMounted(loadProjects)
               class="danger-button"
               type="button"
               :disabled="batchDeleting || actingProjectId === project.id"
-              @click="removeProject(project)"
+              @click.stop="removeProject(project)"
             >
               {{ actingProjectId === project.id ? '删除中…' : '删除' }}
             </button>

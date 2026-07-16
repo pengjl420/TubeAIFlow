@@ -65,8 +65,17 @@ def create_project(session: Session, name: str, config: dict | None = None) -> P
     return project
 
 
-def list_projects(session: Session) -> list[Project]:
-    return list(session.exec(select(Project).order_by(Project.created_at.desc())).all())
+def project_response(project: Project) -> dict:
+    """Return the API representation while keeping config_json for old clients."""
+    return {
+        **project.model_dump(),
+        "config": load_project_config(project),
+    }
+
+
+def list_projects(session: Session) -> list[dict]:
+    projects = session.exec(select(Project).order_by(Project.created_at.desc())).all()
+    return [project_response(project) for project in projects]
 
 
 def get_project(session: Session, project_id: str) -> Project | None:

@@ -29,6 +29,18 @@ class FakeSession:
 
 
 class ProjectSettingsTests(unittest.TestCase):
+    def test_project_response_exposes_typed_config(self) -> None:
+        project = Project(
+            id="project-id",
+            name="Name",
+            config_json='{"reference_audio_filename": "narrator.wav"}',
+        )
+
+        response = project_service.project_response(project)
+
+        self.assertEqual(response["config"]["reference_audio_filename"], "narrator.wav")
+        self.assertEqual(response["config_json"], project.config_json)
+
     def test_update_project_settings_saves_all_page_fields_together(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

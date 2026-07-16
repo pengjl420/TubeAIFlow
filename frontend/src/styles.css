@@ -596,6 +596,13 @@ main {
   min-height: 158px;
   padding: 12px;
   transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+  cursor: pointer;
+}
+
+.project-card:focus-visible {
+  border-color: var(--teal);
+  box-shadow: 0 0 0 3px rgb(45 117 128 / 16%);
+  outline: none;
 }
 
 .project-card.is-selected {
@@ -621,6 +628,7 @@ main {
   align-items: center;
   display: flex;
   gap: 8px;
+  min-width: 0;
 }
 
 .project-card-leading input,
@@ -655,6 +663,13 @@ main {
   margin: 0 0 4px;
 }
 
+.project-card-leading h3 {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .project-card h3 a {
   color: inherit;
   text-decoration: none;
@@ -678,11 +693,40 @@ main {
   -webkit-line-clamp: 1;
 }
 
+.project-card-body .project-reference-audio {
+  align-items: center;
+  color: #5f6c68;
+  display: flex;
+  gap: 7px;
+  white-space: normal;
+}
+
+.project-reference-audio strong {
+  color: #273431;
+  font-size: 13px;
+}
+
+.project-engine {
+  background: #edf2ef;
+  border-radius: 999px;
+  color: #5a6763;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+}
+
 .project-card-footer {
   border-top: 1px solid #eceee8;
   color: #77827f;
   font-size: 11px;
   padding-top: 8px;
+}
+
+.project-card-times {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
 .project-card-actions {

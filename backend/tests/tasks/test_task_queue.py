@@ -191,7 +191,11 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertIn("uq_task_runs_single_running", indexes)
         self.assertIn("subtitle_cues", table_names)
         self.assertIn("visual_scenes", table_names)
-        self.assertEqual(versions, [(1,), (2,), (3,), (4,)])
+        self.assertIn("media_files", table_names)
+        self.assertIn("media_shots", table_names)
+        self.assertIn("scene_candidates", table_names)
+        self.assertIn("scene_assignments", table_names)
+        self.assertEqual(versions, [(1,), (2,), (3,), (4,), (5,)])
 
     def test_source_subtitle_migration_removes_bilingual_schema_and_config(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

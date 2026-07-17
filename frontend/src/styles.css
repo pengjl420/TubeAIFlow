@@ -1848,6 +1848,29 @@ main {
   padding: 6px 9px;
 }
 
+.project-storyboard-input { align-items: start; }
+.storyboard-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.storyboard-edit-grid .field-wide { grid-column: 1 / -1; }
+.storyboard-edit-grid textarea { min-height: 76px; resize: vertical; }
+.storyboard-scene-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.storyboard-scene-meta span {
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.scene-save-actions { justify-content: flex-end; }
+
 .empty-icon {
   align-items: center;
   background: var(--accent);
@@ -2359,6 +2382,8 @@ main {
   .app-dialog-actions > * { flex: 1; }
   .scene-card-head, .scene-card-head > div { align-items: flex-start; flex-direction: column; }
   .storyboard-detail-grid { grid-template-columns: 1fr; }
+  .storyboard-edit-grid { grid-template-columns: 1fr; }
+  .storyboard-edit-grid .field-wide { grid-column: auto; }
   .srt-file-picker { align-items: flex-start; flex-direction: column; }
 }
 

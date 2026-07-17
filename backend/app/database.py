@@ -96,6 +96,95 @@ def _apply_migrations() -> None:
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_visual_scenes_project_index "
             "ON visual_scenes (project_id, scene_index)",
         ],
+        5: [
+            """
+            CREATE TABLE IF NOT EXISTS media_files (
+                id VARCHAR NOT NULL PRIMARY KEY,
+                provider VARCHAR NOT NULL DEFAULT 'local',
+                provider_asset_id VARCHAR,
+                path VARCHAR NOT NULL,
+                filename VARCHAR NOT NULL,
+                media_type VARCHAR NOT NULL,
+                file_hash VARCHAR NOT NULL,
+                size_bytes INTEGER NOT NULL DEFAULT 0,
+                duration_ms INTEGER,
+                width INTEGER,
+                height INTEGER,
+                status VARCHAR NOT NULL DEFAULT 'ready',
+                metadata_json VARCHAR NOT NULL DEFAULT '{}',
+                created_at VARCHAR NOT NULL,
+                updated_at VARCHAR NOT NULL
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_media_files_provider ON media_files (provider)",
+            "CREATE INDEX IF NOT EXISTS ix_media_files_media_type ON media_files (media_type)",
+            "CREATE INDEX IF NOT EXISTS ix_media_files_status ON media_files (status)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_media_files_hash ON media_files (file_hash)",
+            """
+            CREATE TABLE IF NOT EXISTS media_shots (
+                id VARCHAR NOT NULL PRIMARY KEY,
+                media_file_id VARCHAR NOT NULL,
+                shot_index INTEGER NOT NULL,
+                start_ms INTEGER NOT NULL DEFAULT 0,
+                end_ms INTEGER,
+                description VARCHAR NOT NULL DEFAULT '',
+                tags_json VARCHAR NOT NULL DEFAULT '[]',
+                thumbnail_path VARCHAR,
+                vector_id INTEGER,
+                status VARCHAR NOT NULL DEFAULT 'ready',
+                technical_json VARCHAR NOT NULL DEFAULT '{}',
+                created_at VARCHAR NOT NULL,
+                updated_at VARCHAR NOT NULL
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_media_shots_media_file_id ON media_shots (media_file_id)",
+            "CREATE INDEX IF NOT EXISTS ix_media_shots_status ON media_shots (status)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_media_shots_file_index "
+            "ON media_shots (media_file_id, shot_index)",
+            """
+            CREATE TABLE IF NOT EXISTS scene_candidates (
+                id VARCHAR NOT NULL PRIMARY KEY,
+                project_id VARCHAR NOT NULL,
+                scene_id VARCHAR NOT NULL,
+                media_shot_id VARCHAR NOT NULL,
+                source VARCHAR NOT NULL DEFAULT 'local',
+                query VARCHAR NOT NULL DEFAULT '',
+                semantic_score FLOAT NOT NULL DEFAULT 0,
+                text_score FLOAT NOT NULL DEFAULT 0,
+                tag_score FLOAT NOT NULL DEFAULT 0,
+                technical_score FLOAT NOT NULL DEFAULT 0,
+                total_score FLOAT NOT NULL DEFAULT 0,
+                status VARCHAR NOT NULL DEFAULT 'LOW_RELEVANCE',
+                conflicts_json VARCHAR NOT NULL DEFAULT '[]',
+                created_at VARCHAR NOT NULL
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_scene_candidates_project_id ON scene_candidates (project_id)",
+            "CREATE INDEX IF NOT EXISTS ix_scene_candidates_scene_id ON scene_candidates (scene_id)",
+            "CREATE INDEX IF NOT EXISTS ix_scene_candidates_media_shot_id ON scene_candidates (media_shot_id)",
+            "CREATE INDEX IF NOT EXISTS ix_scene_candidates_status ON scene_candidates (status)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_scene_candidates_scene_shot "
+            "ON scene_candidates (scene_id, media_shot_id)",
+            """
+            CREATE TABLE IF NOT EXISTS scene_assignments (
+                id VARCHAR NOT NULL PRIMARY KEY,
+                project_id VARCHAR NOT NULL,
+                scene_id VARCHAR NOT NULL,
+                media_shot_id VARCHAR NOT NULL,
+                candidate_id VARCHAR,
+                trim_start_ms INTEGER NOT NULL DEFAULT 0,
+                trim_end_ms INTEGER,
+                playback_speed FLOAT NOT NULL DEFAULT 1.0,
+                transition VARCHAR NOT NULL DEFAULT 'cut',
+                manual_confirmed BOOLEAN NOT NULL DEFAULT 1,
+                created_at VARCHAR NOT NULL,
+                updated_at VARCHAR NOT NULL
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_scene_assignments_project_id ON scene_assignments (project_id)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_scene_assignments_scene_id "
+            "ON scene_assignments (scene_id)",
+        ],
     }
     with engine.begin() as connection:
         connection.exec_driver_sql(

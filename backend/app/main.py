@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
+    assets,
     batches,
     exports,
     projects,
@@ -41,6 +42,7 @@ def health() -> dict:
 
 
 app.include_router(projects.router, prefix="/api")
+app.include_router(assets.router, prefix="/api")
 app.include_router(batches.router, prefix="/api")
 app.include_router(voices.router, prefix="/api")
 app.include_router(segments.router, prefix="/api")

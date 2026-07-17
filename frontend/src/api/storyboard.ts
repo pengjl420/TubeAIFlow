@@ -2,6 +2,7 @@ import { apiClient, unwrap } from './client'
 import type {
   SrtImportResult,
   LabSubtitleCue,
+  StoryboardContent,
   StoryboardGenerateResult,
   SubtitleCue,
   VisualScene,
@@ -43,4 +44,15 @@ export async function getStoryboard(projectId: string): Promise<VisualScene[]> {
     await apiClient.get(`/projects/${projectId}/storyboard`),
   )
   return result.scenes
+}
+
+export async function updateStoryboardScene(
+  projectId: string,
+  sceneId: string,
+  storyboard: StoryboardContent,
+): Promise<VisualScene> {
+  return unwrap(await apiClient.put(
+    `/projects/${projectId}/storyboard/scenes/${encodeURIComponent(sceneId)}`,
+    { storyboard },
+  ))
 }

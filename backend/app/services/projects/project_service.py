@@ -9,6 +9,7 @@ from app.config import get_settings
 from app.models.project import Project
 from app.models.narration import Segment
 from app.models.batch import BatchItem, BatchJob
+from app.models.media import SceneAssignment, SceneCandidate
 from app.models.task import TaskRun
 from app.models.storyboard import SubtitleCue, VisualScene
 from app.infrastructure.file_storage import ensure_inside_any, project_dir
@@ -158,6 +159,14 @@ def delete_project(session: Session, project: Project) -> dict:
         select(SubtitleCue).where(SubtitleCue.project_id == project.id)
     ).all():
         session.delete(cue)
+    for assignment in session.exec(
+        select(SceneAssignment).where(SceneAssignment.project_id == project.id)
+    ).all():
+        session.delete(assignment)
+    for candidate in session.exec(
+        select(SceneCandidate).where(SceneCandidate.project_id == project.id)
+    ).all():
+        session.delete(candidate)
     for scene in session.exec(
         select(VisualScene).where(VisualScene.project_id == project.id)
     ).all():

@@ -6,6 +6,7 @@ import BatchList from './pages/batches/BatchList.vue'
 import ProjectConfig from './pages/projects/ProjectConfig.vue'
 import ProjectCreate from './pages/projects/ProjectCreate.vue'
 import ProjectShell from './pages/projects/ProjectShell.vue'
+import ProjectStoryboardWorkspace from './pages/projects/ProjectStoryboardWorkspace.vue'
 import StoryboardLab from './pages/projects/ProjectStoryboard.vue'
 import ProjectList from './pages/projects/ProjectList.vue'
 import SystemSettings from './pages/settings/SystemSettings.vue'
@@ -21,6 +22,7 @@ const router = createRouter({
     { path: '/batches/:id', component: BatchDetail },
     { path: '/projects/new', component: ProjectCreate },
     { path: '/projects/:id', component: ProjectShell },
+    { path: '/projects/:id/storyboard', component: ProjectStoryboardWorkspace },
     { path: '/storyboard-lab', component: StoryboardLab },
     { path: '/projects/:id/config', component: ProjectConfig },
     { path: '/voices', component: VoiceProfiles },

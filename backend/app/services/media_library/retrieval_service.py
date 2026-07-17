@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from sqlmodel import Session, select
 
+from app.infrastructure import gpu_resource
 from app.integrations.vision.vector_index import search as vector_search
 from app.models.media import (
     LIBRARY_ROLE_LANDSCAPE_FALLBACK,
@@ -43,39 +44,41 @@ def clear_project_scene_data(session: Session, project_id: str) -> None:
 def search_scene_candidates(
     session: Session, project: Project, scene_id: str
 ) -> dict:
-    result = _search_available_candidates(session, project, scene_id)
-    if result["status"] == "QUALIFIED":
-        result["online_search"] = []
-        return result
-
-    scene = _require_scene(session, project.id, scene_id)
-    storyboard = StoryboardContent.model_validate_json(scene.storyboard_json)
-    attempts = []
-    for provider in media_provider_service.PROVIDER_ORDER:
-        attempt = remote_retrieval_service.fetch_provider_candidates(
-            session, provider, storyboard
-        )
-        attempts.append(attempt)
-        if attempt["downloaded"]:
-            result = _search_available_candidates(session, project, scene_id)
+    owner = f"scene-media-search:project:{project.id}:scene:{scene_id}"
+    with gpu_resource.exclusive_gpu(owner):
+        result = _search_available_candidates(session, project, scene_id)
         if result["status"] == "QUALIFIED":
-            break
-    if result["status"] != "QUALIFIED":
-        added = _append_fallback_candidates(
-            session, project, scene, storyboard, LIBRARY_ROLE_THEMED_FALLBACK
-        )
-        if not added and storyboard.allow_landscape_fallback:
-            added = _append_fallback_candidates(
-                session, project, scene, storyboard, LIBRARY_ROLE_LANDSCAPE_FALLBACK
+            result["online_search"] = []
+            return result
+
+        scene = _require_scene(session, project.id, scene_id)
+        storyboard = StoryboardContent.model_validate_json(scene.storyboard_json)
+        attempts = []
+        for provider in media_provider_service.PROVIDER_ORDER:
+            attempt = remote_retrieval_service.fetch_provider_candidates(
+                session, provider, storyboard
             )
-        if added:
-            result = {
-                "scene_id": scene.id,
-                "status": "FALLBACK_REQUIRED",
-                "candidates": list_scene_candidates(session, project.id, scene.id),
-            }
-    result["online_search"] = attempts
-    return result
+            attempts.append(attempt)
+            if attempt["downloaded"]:
+                result = _search_available_candidates(session, project, scene_id)
+            if result["status"] == "QUALIFIED":
+                break
+        if result["status"] != "QUALIFIED":
+            added = _append_fallback_candidates(
+                session, project, scene, storyboard, LIBRARY_ROLE_THEMED_FALLBACK
+            )
+            if not added and storyboard.allow_landscape_fallback:
+                added = _append_fallback_candidates(
+                    session, project, scene, storyboard, LIBRARY_ROLE_LANDSCAPE_FALLBACK
+                )
+            if added:
+                result = {
+                    "scene_id": scene.id,
+                    "status": "FALLBACK_REQUIRED",
+                    "candidates": list_scene_candidates(session, project.id, scene.id),
+                }
+        result["online_search"] = attempts
+        return result
 
 
 def _search_available_candidates(

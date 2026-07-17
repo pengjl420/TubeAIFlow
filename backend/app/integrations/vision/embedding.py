@@ -5,6 +5,7 @@ from threading import RLock
 from typing import Sequence
 
 from app.config import get_settings
+from app.infrastructure import gpu_resource
 
 
 MODEL_NAME = "Qwen/Qwen3-VL-Embedding-2B"
@@ -23,7 +24,9 @@ def embed_media(value: str, image_paths: Sequence[str | Path]) -> list[float]:
     paths = _existing_images(image_paths)
     if not text and not paths:
         return [0.0] * VECTOR_DIMENSIONS
-    return _get_runtime().embed(text, paths)
+    with gpu_resource.exclusive_gpu("vision-embedding"):
+        gpu_resource.defer_cleanup("vision-embedding-model", release_model)
+        return _get_runtime().embed(text, paths)
 
 
 def release_model() -> None:
@@ -33,8 +36,10 @@ def release_model() -> None:
         _RUNTIME = None
         _RUNTIME_SIGNATURE = None
         try:
+            import gc
             import torch
 
+            gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
         except ImportError:

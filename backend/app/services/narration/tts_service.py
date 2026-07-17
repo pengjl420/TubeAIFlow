@@ -10,7 +10,7 @@ from sqlmodel import Session, select
 from app.config import get_settings
 from app.models.project import Project
 from app.models.narration import Segment
-from app.infrastructure import process_runner as task_control
+from app.infrastructure import gpu_resource, process_runner as task_control
 from app.infrastructure.ffmpeg import probe_duration
 from app.infrastructure.project_layout import ensure_project_dirs, get_project_work_dir, load_project_config
 
@@ -235,16 +235,17 @@ def _run_tts_batch(
     audio_dir: Path,
     logs_dir: Path,
 ) -> None:
-    if engine == "qwen3_tts":
-        _run_qwen3_tts_batch(project, reference_audio_path, segments, audio_dir, logs_dir)
-        return
-    if engine == "chatterbox":
-        _run_chatterbox_batch(project, reference_audio_path, segments, audio_dir, logs_dir)
-        return
-    if engine == "cosyvoice":
-        _run_cosyvoice_batch(project, reference_audio_path, segments, audio_dir, logs_dir)
-        return
-    raise ValueError(f"Unsupported TTS engine: {engine}")
+    with gpu_resource.exclusive_gpu(f"tts:{engine}:project:{project.id}"):
+        if engine == "qwen3_tts":
+            _run_qwen3_tts_batch(project, reference_audio_path, segments, audio_dir, logs_dir)
+            return
+        if engine == "chatterbox":
+            _run_chatterbox_batch(project, reference_audio_path, segments, audio_dir, logs_dir)
+            return
+        if engine == "cosyvoice":
+            _run_cosyvoice_batch(project, reference_audio_path, segments, audio_dir, logs_dir)
+            return
+        raise ValueError(f"Unsupported TTS engine: {engine}")
 
 
 def _run_qwen3_tts_batch(

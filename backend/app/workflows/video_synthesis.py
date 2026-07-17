@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from sqlmodel import Session, select
 
+from app.infrastructure import gpu_resource
 from app.models.media import LIBRARY_ROLE_SEMANTIC, SceneAssignment
 from app.models.project import Project
 from app.models.storyboard import SubtitleCue, VisualScene
@@ -45,10 +46,11 @@ def run_video_synthesis(
         on_stage_changed(stage)
 
     if stage == "asset_search":
-        _ingest_configured_assets(session, project)
-        scenes = _scenes(session, project.id)
-        for scene in scenes:
-            retrieval_service.search_scene_candidates(session, project, scene.id)
+        with gpu_resource.exclusive_gpu(f"project-media-search:project:{project.id}"):
+            _ingest_configured_assets(session, project)
+            scenes = _scenes(session, project.id)
+            for scene in scenes:
+                retrieval_service.search_scene_candidates(session, project, scene.id)
         stage = "asset_review"
         on_stage_changed(stage)
 

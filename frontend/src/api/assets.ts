@@ -45,7 +45,7 @@ export async function updateAsset(
 }
 
 export async function ingestAsset(mediaId: string): Promise<{ asset: MediaAsset; errors: Array<{ shot_id: string; error: string }> }> {
-  return unwrap(await apiClient.post(`/assets/${encodeURIComponent(mediaId)}/ingest`, undefined, { timeout: 300_000 }))
+  return unwrap(await apiClient.post(`/assets/${encodeURIComponent(mediaId)}/ingest`, undefined, { timeout: 0 }))
 }
 
 export async function listSceneCandidates(projectId: string, sceneId: string): Promise<SceneCandidate[]> {
@@ -58,6 +58,8 @@ export async function listSceneCandidates(projectId: string, sceneId: string): P
 export async function searchSceneCandidates(projectId: string, sceneId: string): Promise<SceneSearchResult> {
   return unwrap(await apiClient.post(
     `/projects/${projectId}/storyboard/scenes/${encodeURIComponent(sceneId)}/search`,
+    undefined,
+    { timeout: 0 },
   ))
 }
 

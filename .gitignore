@@ -14,6 +14,7 @@ models/
 reports/
 backend/workspace/app.db
 backend/workspace/backend.lock
+backend/workspace/.runtime/
 backend/workspace/projects/*
 backend/workspace/voices/*
 backend/workspace/templates/*

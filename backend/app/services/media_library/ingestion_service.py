@@ -8,6 +8,7 @@ from sqlalchemy import delete
 from sqlmodel import Session, select
 
 from app.config import get_settings
+from app.infrastructure import gpu_resource
 from app.infrastructure.ffmpeg import probe_media, run_ffmpeg
 from app.integrations.vision.embedding import MODEL_NAME
 from app.integrations.vision.vector_index import remove_shot, upsert_shot
@@ -212,17 +213,19 @@ def ingest_asset(session: Session, media_id: str) -> dict:
         .order_by(MediaShot.shot_index)
     ).all()
     errors = []
-    for shot in shots:
-        try:
-            _ingest_shot(session, media_file, shot, source_path)
-        except (OSError, RuntimeError, ValueError) as exc:
-            shot.status = "error"
-            technical = _safe_json_object(shot.technical_json)
-            technical["ingestion_error"] = str(exc)
-            shot.technical_json = json.dumps(technical, ensure_ascii=False)
-            shot.updated_at = utc_now_iso()
-            session.add(shot)
-            errors.append({"shot_id": shot.id, "error": str(exc)})
+    owner = f"asset-vectorization:media:{media_file.id}"
+    with gpu_resource.exclusive_gpu(owner):
+        for shot in shots:
+            try:
+                _ingest_shot(session, media_file, shot, source_path)
+            except (OSError, RuntimeError, ValueError) as exc:
+                shot.status = "error"
+                technical = _safe_json_object(shot.technical_json)
+                technical["ingestion_error"] = str(exc)
+                shot.technical_json = json.dumps(technical, ensure_ascii=False)
+                shot.updated_at = utc_now_iso()
+                session.add(shot)
+                errors.append({"shot_id": shot.id, "error": str(exc)})
     media_file.status = "ready" if len(errors) < len(shots) else "error"
     media_file.updated_at = utc_now_iso()
     session.add(media_file)

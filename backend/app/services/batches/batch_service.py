@@ -54,6 +54,7 @@ def create_batch(
     tts_engine: str = DEFAULT_TTS_ENGINE,
     reference_audio_text: str = "",
     voice_profile_id: str = "",
+    video_mode: str | None = None,
 ) -> BatchJob:
     if not scripts:
         raise ValueError("请至少上传一份逐字稿")
@@ -81,11 +82,16 @@ def create_batch(
     if normalized_tts_engine == "cosyvoice" and not normalized_reference_audio_text:
         raise ValueError("CosyVoice 需要填写参考音频逐字稿")
 
+    resolved_video_mode = project_service.normalize_video_mode(video_mode, include_video)
+    include_video = resolved_video_mode != project_service.VIDEO_MODE_NONE
     output_root = Path(output_dir).expanduser().resolve()
     output_root.mkdir(parents=True, exist_ok=True)
     video_root = Path(media_video_dir).expanduser().resolve() if media_video_dir.strip() else None
-    if include_video and (video_root is None or not video_root.is_dir()):
-        raise ValueError("生成视频时必须选择有效的素材视频目录")
+    if (
+        resolved_video_mode == project_service.VIDEO_MODE_LANDSCAPE
+        and (video_root is None or not video_root.is_dir())
+    ):
+        raise ValueError("纯风景视频生成时必须选择有效的素材视频目录")
 
     now = utc_now_iso()
     batch = BatchJob(
@@ -97,6 +103,7 @@ def create_batch(
                 "output_dir": str(output_root),
                 "media_video_dir": str(video_root) if video_root else "",
                 "include_video": include_video,
+                "video_mode": resolved_video_mode,
                 "continue_on_error": continue_on_error,
                 "reference_audio_filename": reference_audio_filename,
                 "tts_engine": normalized_tts_engine,
@@ -137,6 +144,7 @@ def create_batch(
             normalized_reference_audio_text,
             include_video,
             voice_profile_id=selected_profile.id if selected_profile else "",
+            video_mode=resolved_video_mode,
         )
         if not selected_profile:
             reference_audio.seek(0)

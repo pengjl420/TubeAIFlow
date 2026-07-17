@@ -3,9 +3,9 @@ import { computed, onMounted, ref } from 'vue'
 
 import {
   assetPreviewUrl,
+  getAssetLibrary,
   importAssets,
   ingestAsset,
-  listAssets,
   updateAsset,
 } from '../../api/assets'
 import { selectDirectory } from '../../api/projects'
@@ -25,14 +25,19 @@ const roleFilter = ref<'all' | LibraryRole>('all')
 const searchText = ref('')
 const message = ref('')
 const error = ref('')
+const currentVectorModel = ref('')
 
 const allShots = computed(() => assets.value.flatMap((asset) => asset.shots))
 const semanticAssets = computed(() => assets.value.filter((asset) => asset.library_role === 'semantic'))
-const indexedShots = computed(() => allShots.value.filter((shot) => shot.vector_id !== null))
+const indexedShots = computed(() => allShots.value.filter(
+  (shot) => shot.vector_id !== null && shot.vector_model === currentVectorModel.value,
+))
 const pendingSemanticAssets = computed(() => semanticAssets.value.filter(
   (asset) => asset.enabled
     && asset.review_status === 'approved'
-    && asset.shots.some((shot) => shot.vector_id === null),
+    && asset.shots.some(
+      (shot) => shot.vector_id === null || shot.vector_model !== currentVectorModel.value,
+    ),
 ))
 const filteredAssets = computed(() => {
   const query = searchText.value.trim().toLocaleLowerCase()
@@ -48,7 +53,9 @@ async function loadAssets() {
   loading.value = true
   error.value = ''
   try {
-    assets.value = await listAssets()
+    const result = await getAssetLibrary()
+    assets.value = result.assets
+    currentVectorModel.value = result.vectorModel
   } catch (err) {
     error.value = err instanceof Error ? err.message : '素材库加载失败'
   } finally {
@@ -188,7 +195,9 @@ function roleDescription(role: LibraryRole) {
 }
 
 function assetIndexedCount(asset: MediaAsset) {
-  return asset.shots.filter((shot) => shot.vector_id !== null).length
+  return asset.shots.filter(
+    (shot) => shot.vector_id !== null && shot.vector_model === currentVectorModel.value,
+  ).length
 }
 
 function formatMilliseconds(value: number | null) {
@@ -232,8 +241,8 @@ onMounted(loadAssets)
           <p>先登记文件、来源、技术参数和镜头；此步骤不会自动执行批量向量化。</p>
         </div>
       </div>
-      <div class="asset-import-form">
-        <label class="field">
+      <div class="asset-import-form" :class="`is-${importRole}`">
+        <label class="field asset-role-field">
           <span>素材角色</span>
           <select v-model="importRole">
             <option value="semantic">语义素材</option>
@@ -242,11 +251,11 @@ onMounted(loadAssets)
           </select>
           <small>{{ roleDescription(importRole) }}</small>
         </label>
-        <label v-if="importRole === 'themed_fallback'" class="field">
+        <label v-if="importRole === 'themed_fallback'" class="field asset-category-field">
           <span>兜底类别</span>
           <input v-model="fallbackCategory" placeholder="business / technology / history" />
         </label>
-        <label v-if="importRole !== 'semantic'" class="field">
+        <label v-if="importRole !== 'semantic'" class="field asset-mood-field">
           <span>情绪标签</span>
           <input v-model="mood" placeholder="neutral / serious / reflective" />
         </label>
@@ -257,7 +266,7 @@ onMounted(loadAssets)
             <button class="secondary-button" :disabled="importing" @click="chooseDirectory">选择目录</button>
           </span>
         </label>
-        <button class="primary-button" :disabled="importing || !directory" @click="scanDirectory">
+        <button class="primary-button asset-import-submit" :disabled="importing || !directory" @click="scanDirectory">
           {{ importing ? '正在扫描入库…' : '扫描并入库' }}
         </button>
       </div>
@@ -271,14 +280,19 @@ onMounted(loadAssets)
       </div>
       <div class="vector-model-note">
         <span>当前模型</span>
-        <strong>local-hash-v1</strong>
-        <small>当前基于文件名、描述和标签建立轻量文本向量；关键帧已保留，后续可升级为 SigLIP/Qwen3-VL 画面向量。</small>
+        <strong>{{ currentVectorModel || '未配置' }}</strong>
+        <small>使用镜头描述和最多 4 张代表性关键帧生成多模态向量；旧模型生成的向量会自动列入待重建队列。</small>
       </div>
     </article>
 
     <div class="asset-library-toolbar">
       <label class="search-field">
-        <span>搜索</span>
+        <span class="asset-search-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <circle cx="11" cy="11" r="6.5" />
+            <path d="m16 16 4 4" />
+          </svg>
+        </span>
         <input v-model="searchText" placeholder="文件名、路径、平台、类别或情绪" />
       </label>
       <select v-model="roleFilter" class="filter-select" aria-label="素材角色筛选">

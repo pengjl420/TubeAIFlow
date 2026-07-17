@@ -1997,11 +1997,31 @@ main {
 .asset-library-metrics span { color: var(--ink-soft); font-size: 11px; }
 .asset-library-metrics strong { color: var(--teal); font-size: 24px; }
 .asset-import-panel { display: grid; gap: 16px; }
+.asset-import-panel .section-head { margin-bottom: 0; }
 .asset-import-panel .section-head p { color: var(--ink-soft); margin: 6px 0 0; }
-.asset-import-form { align-items: end; display: grid; gap: 12px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.asset-directory-field { grid-column: span 3; }
+.asset-import-form {
+  align-items: start;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(200px, 0.8fr) minmax(320px, 2fr) auto;
+}
+.asset-role-field { grid-column: 1; grid-row: 1; }
+.asset-directory-field { grid-column: 2; grid-row: 1; }
 .asset-directory-field .inline-form { display: flex; gap: 8px; }
-.asset-directory-field .inline-form input { flex: 1; }
+.asset-directory-field .inline-form input { flex: 1; min-width: 0; }
+.asset-import-submit {
+  align-self: start;
+  grid-column: 3;
+  grid-row: 1;
+  margin-top: 21px;
+  white-space: nowrap;
+}
+.asset-import-form.is-themed_fallback { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.asset-import-form.is-themed_fallback .asset-directory-field,
+.asset-import-form.is-landscape_fallback .asset-directory-field { grid-column: 1 / span 2; grid-row: 2; }
+.asset-import-form.is-themed_fallback .asset-import-submit,
+.asset-import-form.is-landscape_fallback .asset-import-submit { grid-column: 3; grid-row: 2; }
+.asset-import-form.is-landscape_fallback { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .vector-help-panel { align-items: center; display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr) 360px; }
 .vector-help-panel h2 { margin: 4px 0 8px; }
 .vector-help-panel p { color: var(--ink-soft); margin: 0; }
@@ -2010,6 +2030,15 @@ main {
 .vector-model-note strong { color: var(--teal); }
 .asset-library-toolbar { align-items: end; display: flex; flex-wrap: wrap; gap: 10px; }
 .asset-library-toolbar .search-field { flex: 1; min-width: 260px; }
+.asset-library-toolbar .search-field .asset-search-icon {
+  display: block;
+  flex: 0 0 18px;
+  font-size: 0;
+  height: 18px;
+  transform: none;
+  width: 18px;
+}
+.asset-search-icon svg { display: block; height: 100%; stroke: currentColor; stroke-linecap: round; stroke-width: 1.8; width: 100%; }
 .asset-library-grid { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .asset-library-card { overflow: hidden; padding: 0; }
 .asset-library-preview { aspect-ratio: 16 / 7; background: #eaf0f3; position: relative; }
@@ -2030,8 +2059,28 @@ main {
 @media (max-width: 1180px) {
   .media-review-layout { grid-template-columns: 250px minmax(0, 1fr); }
   .candidate-grid { grid-template-columns: 1fr; }
-  .asset-import-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .asset-directory-field { grid-column: span 2; }
+  .asset-library-hero { align-items: start; flex-direction: column; }
+  .asset-library-hero .page-title-actions { width: 100%; }
+  .asset-import-form,
+  .asset-import-form.is-themed_fallback,
+  .asset-import-form.is-landscape_fallback { grid-template-columns: minmax(0, 1fr); }
+  .asset-import-form .asset-role-field,
+  .asset-import-form .asset-category-field,
+  .asset-import-form .asset-mood-field,
+  .asset-import-form .asset-directory-field,
+  .asset-import-form .asset-import-submit {
+    grid-column: 1;
+    grid-row: auto;
+  }
+  .asset-import-form.is-themed_fallback .asset-directory-field,
+  .asset-import-form.is-landscape_fallback .asset-directory-field,
+  .asset-import-form.is-themed_fallback .asset-import-submit,
+  .asset-import-form.is-landscape_fallback .asset-import-submit {
+    grid-column: 1;
+    grid-row: auto;
+  }
+  .asset-import-submit { margin-top: 0; width: 100%; }
+  .vector-help-panel { grid-template-columns: 1fr; }
   .asset-library-grid { grid-template-columns: 1fr; }
 }
 
@@ -2040,9 +2089,7 @@ main {
   .scene-review-rail { max-height: 380px; position: static; }
   .asset-index-grid { grid-template-columns: 1fr; }
   .asset-classification-controls { grid-template-columns: 1fr; }
-  .asset-library-hero { align-items: start; flex-direction: column; }
   .asset-library-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .vector-help-panel { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 680px) {
@@ -2051,9 +2098,14 @@ main {
   .media-import-bar { grid-template-columns: 1fr; }
   .media-directory-control { align-items: stretch; flex-direction: column; }
   .score-breakdown { grid-template-columns: repeat(2, 1fr); }
-  .asset-import-form, .asset-card-settings { grid-template-columns: 1fr; }
-  .asset-directory-field { grid-column: auto; }
+  .asset-card-settings { grid-template-columns: 1fr; }
   .asset-directory-field .inline-form, .asset-card-actions { align-items: stretch; flex-direction: column; }
+  .asset-library-toolbar {
+    align-items: center;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .asset-library-toolbar .search-field { grid-column: 1 / -1; min-width: 0; width: 100%; }
 }
 
 .empty-icon {

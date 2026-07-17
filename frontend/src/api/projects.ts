@@ -1,5 +1,5 @@
 import { apiClient, unwrap } from './client'
-import type { Project } from '../types/project'
+import type { Project, VideoGenerationMode } from '../types/project'
 
 export interface CreateProjectInput {
   name: string
@@ -8,6 +8,7 @@ export interface CreateProjectInput {
   output_filename: string
   media_video_dir: string
   include_video: boolean
+  video_mode: VideoGenerationMode
 }
 
 export async function listProjects(): Promise<Project[]> {
@@ -22,6 +23,7 @@ export async function createProject(input: CreateProjectInput): Promise<Project>
   form.append('output_filename', input.output_filename)
   form.append('media_video_dir', input.media_video_dir)
   form.append('include_video', String(input.include_video))
+  form.append('video_mode', input.video_mode)
   return unwrap<Project>(await apiClient.post('/projects', form))
 }
 
@@ -95,6 +97,7 @@ export interface ProjectSettingsInput {
   output_filename: string
   media_video_dir: string
   include_video: boolean
+  video_mode: VideoGenerationMode
   voice_profile_id: string
 }
 

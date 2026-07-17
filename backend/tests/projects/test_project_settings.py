@@ -160,6 +160,42 @@ class ProjectSettingsTests(unittest.TestCase):
             config = json.loads(result.config_json or "{}")
             self.assertFalse(config["include_video"])
 
+    def test_ai_semantic_video_does_not_require_landscape_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = Project(id="project-id", name="Name", config_json="{}")
+            with patch.object(
+                project_service,
+                "get_settings",
+                return_value=SimpleNamespace(workspace_dir=root / "workspace"),
+            ):
+                result = project_service.update_project_settings(
+                    FakeSession(),
+                    project,
+                    "Name",
+                    str(root / "output"),
+                    "voice",
+                    "",
+                    include_video=True,
+                    video_mode="ai_semantic",
+                )
+
+            config = json.loads(result.config_json or "{}")
+            self.assertTrue(config["include_video"])
+            self.assertEqual(config["video_mode"], "ai_semantic")
+            self.assertNotIn("media_video_dir", config)
+
+    def test_legacy_include_video_projects_resolve_to_landscape_mode(self) -> None:
+        project = Project(
+            id="project-id",
+            name="Name",
+            config_json='{"include_video":true}',
+        )
+        self.assertEqual(
+            project_service.get_project_video_mode(project),
+            project_service.VIDEO_MODE_LANDSCAPE,
+        )
+
     def test_switching_to_qwen_resets_completed_segments(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

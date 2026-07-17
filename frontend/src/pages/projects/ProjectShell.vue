@@ -138,6 +138,7 @@ function stopOneClickTimer() {
 }
 
 const projectConfig = computed(() => {
+  if (project.value?.config) return project.value.config
   if (!project.value?.config_json) return {}
   try {
     const data = JSON.parse(project.value.config_json)
@@ -197,7 +198,14 @@ const mediaVideoDir = computed(() => {
   return typeof value === 'string' ? value : ''
 })
 
-const includeVideo = computed(() => projectConfig.value.include_video === true)
+const videoMode = computed(() => {
+  const mode = projectConfig.value.video_mode
+  if (mode === 'ai_semantic' || mode === 'landscape' || mode === 'none') return mode
+  return projectConfig.value.include_video === true ? 'landscape' : 'none'
+})
+const includeVideo = computed(() => videoMode.value !== 'none')
+const usesAiSemanticVideo = computed(() => videoMode.value === 'ai_semantic')
+const usesLandscapeVideo = computed(() => videoMode.value === 'landscape')
 
 const finalVideoPath = computed(() => {
   if (!hasOutputFilename.value) return ''
@@ -233,12 +241,16 @@ const workflowSteps = computed(() => {
   const voiceReady = ttsStatus.value.total > 0 && ttsStatus.value.completed >= ttsStatus.value.total
   const audioReady = Boolean(finalAudioPath.value && outputs.value?.final_audio_path)
   const videoReady = Boolean(finalVideoPath.value && outputs.value?.final_video_path)
+  const videoActive = composingVideo.value || Boolean(
+    projectTask.value?.status === 'running'
+    && ['storyboard', 'asset_search', 'asset_review', 'scene_render', 'final_render', 'quality_check', 'quality_review'].includes(projectTask.value.stage || ''),
+  )
   return [
     { label: '脚本', caption: scriptCharacterCount.value ? `${scriptCharacterCount.value} 字` : scriptReady ? '已保存' : '等待输入', state: scriptReady ? 'done' : 'current' },
     { label: '切段', caption: segmentReady ? `${segments.value.length} 段` : '尚未生成', state: segmentReady ? 'done' : scriptCharacterCount.value ? 'current' : 'pending' },
     { label: '配音', caption: voiceReady ? '音频已就绪' : ttsRunning.value ? '正在生成' : '等待生成', state: voiceReady ? 'done' : ttsRunning.value ? 'current' : 'pending' },
     { label: '字幕', caption: audioReady ? '已生成' : '等待合并', state: audioReady ? 'done' : mergingAudio.value || generatingSubtitles.value ? 'current' : 'pending' },
-    { label: '成片', caption: includeVideo.value ? (videoReady ? '已输出' : '等待合成') : '未启用', state: videoReady ? 'done' : composingVideo.value ? 'current' : 'pending' },
+    { label: '成片', caption: includeVideo.value ? (videoReady ? '已输出' : '等待合成') : '未启用', state: videoReady ? 'done' : videoActive ? 'current' : 'pending' },
   ]
 })
 
@@ -374,6 +386,13 @@ function taskStageLabel(task: ProjectTaskStatus) {
     audio_merge: '合并完整音频',
     subtitles: '生成字幕',
     video: '生成视频',
+    storyboard: '生成视觉分镜',
+    asset_search: '检索语义素材',
+    asset_review: '等待素材审核',
+    scene_render: '渲染场景视频',
+    final_render: '合成最终视频',
+    quality_check: '执行质量检查',
+    quality_review: '等待质量复核',
     completed: '生成完成',
   }
   return labels[task.stage || ''] || task.stage || '准备执行'
@@ -418,6 +437,7 @@ function applyProjectTaskStatus(task: ProjectTaskStatus) {
   if (task.status === 'failed') error.value = task.error_message || '一键生成失败'
   if (task.status === 'cancelled') message.value = '任务已取消'
   if (task.status === 'paused') message.value = '任务已暂停；如果它属于批次，请从批次详情页恢复执行。'
+  if (task.status === 'review_required') message.value = task.error_message || 'AI 语义视频正在等待人工复核。'
 }
 
 async function refreshProjectTaskStatus() {
@@ -641,7 +661,7 @@ async function oneClickGenerate() {
     error.value = '请先配置项目参考音频后再一键生成'
     return
   }
-  if (includeVideo.value && !mediaVideoDir.value) {
+  if (usesLandscapeVideo.value && !mediaVideoDir.value) {
     error.value = '请先在项目设置中选择素材视频目录后再一键生成'
     return
   }
@@ -720,9 +740,9 @@ onBeforeUnmount(() => {
         <p>在同一条生产线上编辑脚本、生成配音字幕并输出成片。</p>
       </div>
       <div class="page-title-actions">
-        <RouterLink class="secondary-button" :to="`/projects/${project.id}/storyboard`">分镜工作区</RouterLink>
-        <RouterLink class="secondary-button" :to="`/projects/${project.id}/media`">素材审核</RouterLink>
-        <RouterLink class="primary-button" :to="`/projects/${project.id}/render`">智能视频流程</RouterLink>
+        <RouterLink v-if="usesAiSemanticVideo" class="secondary-button" :to="`/projects/${project.id}/storyboard`">分镜工作区</RouterLink>
+        <RouterLink v-if="usesAiSemanticVideo" class="secondary-button" :to="`/projects/${project.id}/media`">素材审核</RouterLink>
+        <RouterLink v-if="usesAiSemanticVideo" class="primary-button" :to="`/projects/${project.id}/render`">智能视频流程</RouterLink>
         <RouterLink class="secondary-button" :to="`/projects/${project.id}/config`">项目设置</RouterLink>
       </div>
     </div>
@@ -783,7 +803,7 @@ onBeforeUnmount(() => {
           <button class="text-button" :disabled="oneClickGenerating" @click="splitSegments">生成切段</button>
           <button class="text-button" :disabled="ttsRunning || oneClickGenerating" @click="runTts">{{ ttsRunning ? 'TTS 生成中' : '开始 TTS' }}</button>
           <button class="text-button" :disabled="mergingAudio || generatingSubtitles || oneClickGenerating" @click="mergeAudio">{{ generatingSubtitles ? '字幕生成中' : mergingAudio ? '合并中' : '合并音频字幕' }}</button>
-          <button v-if="includeVideo" class="text-button" :disabled="composingVideo || oneClickGenerating" @click="composeVideo">{{ composingVideo ? '视频生成中' : '单独生成视频' }}</button>
+          <button v-if="usesLandscapeVideo" class="text-button" :disabled="composingVideo || oneClickGenerating" @click="composeVideo">{{ composingVideo ? '视频生成中' : '单独生成纯风景视频' }}</button>
           <button
             v-if="hasRunningGeneration"
             class="text-button danger-text"
@@ -831,7 +851,9 @@ onBeforeUnmount(() => {
         <div class="execution-intro">
           <span class="section-eyebrow">PRODUCTION</span>
           <h2>{{ hasRunningGeneration ? '正在执行生产任务' : '准备开始生成' }}</h2>
-          <p>{{ includeVideo ? '将依次完成切段、配音、字幕与视频合成。' : '将依次完成切段、配音与字幕生成。' }}</p>
+          <p v-if="usesAiSemanticVideo">将依次完成切段、配音、字幕与 AI 语义视频流程，并在素材审核阶段等待确认。</p>
+          <p v-else-if="usesLandscapeVideo">将依次完成切段、配音、字幕与纯风景素材拼接。</p>
+          <p v-else>将依次完成切段、配音与字幕生成。</p>
           <button class="primary-button primary-action" :disabled="oneClickGenerating || readingScriptFile" @click="oneClickGenerate">
             <span>{{ oneClickGenerating ? '●' : '▶' }}</span>
             {{ oneClickGenerating ? '正在一键生成' : '开始一键生成' }}

@@ -10,7 +10,7 @@ import {
 import { API_BASE_URL } from '../../api/client'
 import { listVoices, type VoiceProfile } from '../../api/voices'
 import AudioPlayer from '../../components/common/AudioPlayer.vue'
-import type { Project } from '../../types/project'
+import type { Project, VideoGenerationMode } from '../../types/project'
 
 const route = useRoute()
 const router = useRouter()
@@ -22,7 +22,7 @@ const voiceProfileId = ref('')
 const outputDir = ref('')
 const outputFilename = ref('')
 const mediaVideoDir = ref('')
-const includeVideo = ref(false)
+const videoMode = ref<VideoGenerationMode>('none')
 const loading = ref(false)
 const saving = ref(false)
 const selectingFolder = ref<'output' | 'video' | null>(null)
@@ -30,6 +30,7 @@ const error = ref('')
 const message = ref('')
 
 const projectConfig = computed(() => {
+  if (project.value?.config) return project.value.config
   if (!project.value?.config_json) return {}
   try {
     const data = JSON.parse(project.value.config_json)
@@ -52,7 +53,10 @@ function fillForm() {
   outputDir.value = project.value.output_dir || ''
   const filename = projectConfig.value.output_filename
   const videoDir = projectConfig.value.media_video_dir
-  includeVideo.value = projectConfig.value.include_video === true
+  const configuredMode = projectConfig.value.video_mode
+  videoMode.value = configuredMode === 'ai_semantic' || configuredMode === 'landscape' || configuredMode === 'none'
+    ? configuredMode
+    : projectConfig.value.include_video === true ? 'landscape' : 'none'
   outputFilename.value = typeof filename === 'string' ? filename : ''
   mediaVideoDir.value = typeof videoDir === 'string' ? videoDir : ''
   voiceProfileId.value = typeof projectConfig.value.voice_profile_id === 'string'
@@ -104,8 +108,8 @@ async function save() {
     error.value = '请选择系统音色'
     return
   }
-  if (includeVideo.value && !mediaVideoDir.value.trim()) {
-    error.value = '勾选生成视频后，必须选择原始素材文件夹'
+  if (videoMode.value === 'landscape' && !mediaVideoDir.value.trim()) {
+    error.value = '纯风景素材拼接必须选择原始素材文件夹'
     return
   }
 
@@ -117,8 +121,9 @@ async function save() {
       name: projectName.value.trim(),
       output_dir: outputDir.value.trim(),
       output_filename: outputFilename.value.trim(),
-      media_video_dir: mediaVideoDir.value.trim(),
-      include_video: includeVideo.value,
+      media_video_dir: videoMode.value === 'landscape' ? mediaVideoDir.value.trim() : '',
+      include_video: videoMode.value !== 'none',
+      video_mode: videoMode.value,
       voice_profile_id: voiceProfileId.value,
     })
     fillForm()
@@ -184,11 +189,16 @@ onMounted(load)
 
       <div class="panel">
         <div class="section-head"><h2>一键生成选项</h2></div>
-        <label class="checkbox-field">
-          <input v-model="includeVideo" type="checkbox" />
-          <span>生成视频<small>开启后，一键生成会在字幕完成后合并视频。</small></span>
+        <label class="field reference-field">
+          <span>视频生成方式</span>
+          <select v-model="videoMode">
+            <option value="none">不生成视频（仅配音与原文 SRT）</option>
+            <option value="landscape">纯风景素材拼接</option>
+            <option value="ai_semantic">AI 语义视频拼接</option>
+          </select>
+          <span class="muted">三种方式共用切段、TTS、音频合并和 SRT 生成，只在字幕完成后分流。</span>
         </label>
-        <label v-if="includeVideo" class="field reference-field">
+        <label v-if="videoMode === 'landscape'" class="field reference-field">
           <span>原始素材文件夹</span>
           <div class="inline-form">
             <input v-model="mediaVideoDir" readonly placeholder="请选择原始素材文件夹" />

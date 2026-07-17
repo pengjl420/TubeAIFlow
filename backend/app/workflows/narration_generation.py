@@ -8,6 +8,7 @@ from app.infrastructure import process_runner as task_control
 from app.services.narration import audio_service, srt_service, timeline_service, tts_service
 from app.services.projects import project_service
 from app.services.rendering import rough_cut_service
+from app.workflows import video_synthesis
 
 
 StageChanged = Callable[[str], None]
@@ -22,7 +23,11 @@ def run_project_generation(
 ) -> None:
     """Run one project's generation stages from its persisted checkpoint."""
     stage = current_stage or "segmenting"
-    if stage not in {"segmenting", "tts", "audio_merge", "subtitles", "video", "completed"}:
+    supported_stages = {
+        "segmenting", "tts", "audio_merge", "subtitles", "video", "completed",
+        *video_synthesis.STAGES,
+    }
+    if stage not in supported_stages:
         raise ValueError(f"Unknown generation stage: {stage}")
 
     if stage == "segmenting":
@@ -48,7 +53,17 @@ def run_project_generation(
     if stage == "subtitles":
         with task_control.controlled(project.id, "subtitles"):
             _create_subtitles(session, project)
-        stage = "video" if include_video else "completed"
+        video_mode = (
+            project_service.get_project_video_mode(project)
+            if include_video
+            else project_service.VIDEO_MODE_NONE
+        )
+        if video_mode == project_service.VIDEO_MODE_LANDSCAPE:
+            stage = "video"
+        elif video_mode == project_service.VIDEO_MODE_AI_SEMANTIC:
+            stage = "storyboard"
+        else:
+            stage = "completed"
         on_stage_changed(stage)
 
     if stage == "video":
@@ -64,6 +79,9 @@ def run_project_generation(
                 pass
             raise
         on_stage_changed("completed")
+
+    if stage in video_synthesis.STAGES - {"completed"}:
+        video_synthesis.run_video_synthesis(session, project, stage, on_stage_changed)
 
 
 def _create_subtitles(session: Session, project: Project) -> None:

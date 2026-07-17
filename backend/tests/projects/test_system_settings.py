@@ -18,6 +18,7 @@ class SettingsModelTests(unittest.TestCase):
             cosyvoice_root="",
             cosyvoice_python="  ",
             cosyvoice_model_dir=None,
+            vision_embedding_model_dir="",
         )
         self.assertIsNone(settings.qwen_tts_root)
         self.assertIsNone(settings.qwen_tts_python)
@@ -28,6 +29,7 @@ class SettingsModelTests(unittest.TestCase):
         self.assertIsNone(settings.cosyvoice_root)
         self.assertIsNone(settings.cosyvoice_python)
         self.assertIsNone(settings.cosyvoice_model_dir)
+        self.assertIsNone(settings.vision_embedding_model_dir)
 
     def test_qwen_dtype_is_validated(self) -> None:
         with self.assertRaisesRegex(ValueError, "Unsupported Qwen3-TTS dtype"):
@@ -36,6 +38,10 @@ class SettingsModelTests(unittest.TestCase):
     def test_chatterbox_model_version_is_validated(self) -> None:
         with self.assertRaisesRegex(ValueError, "Unsupported Chatterbox"):
             Settings(chatterbox_t3_model="v4")
+
+    def test_vision_embedding_dtype_is_validated(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Unsupported vision embedding dtype"):
+            Settings(vision_embedding_dtype="int8")
 
     def test_media_search_cache_cannot_be_shorter_than_24_hours(self) -> None:
         with self.assertRaises(ValueError):

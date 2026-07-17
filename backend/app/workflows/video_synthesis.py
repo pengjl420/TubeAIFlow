@@ -127,5 +127,8 @@ def _ingest_configured_assets(session: Session, project: Project) -> None:
     for asset in ingestion_service.list_assets(
         session, limit=1000, library_role=LIBRARY_ROLE_SEMANTIC
     ):
-        if any(shot.get("vector_id") is None for shot in asset["shots"]):
+        if any(
+            shot.get("vector_id") is None or shot.get("vector_model") != ingestion_service.MODEL_NAME
+            for shot in asset["shots"]
+        ):
             ingestion_service.ingest_asset(session, asset["id"])

@@ -23,6 +23,15 @@ _wake_event = threading.Event()
 _worker_id = f"{os.getpid()}-{uuid.uuid4().hex[:8]}"
 
 
+def _is_video_task(task: TaskRun, stage: str | None = None) -> bool:
+    current_stage = stage or task.current_stage
+    return (
+        task.workflow == "video_synthesis"
+        or current_stage == "video"
+        or current_stage in video_synthesis.STAGES
+    )
+
+
 def start_worker() -> None:
     global _worker_thread
     with _worker_lock:
@@ -87,7 +96,7 @@ def recover_interrupted_tasks(session: Session) -> int:
                 "cancelled"
                 if task.status == "cancelled"
                 else "video_in_progress"
-                if task.workflow == "video_synthesis" or task.current_stage == "video"
+                if _is_video_task(task)
                 else "narration_in_progress"
             )
             project.updated_at = now
@@ -179,7 +188,7 @@ def process_next_task() -> bool:
         task.error_message = None
         project.status = (
             "video_in_progress"
-            if task.workflow == "video_synthesis" or task.current_stage == "video"
+            if _is_video_task(task)
             else "narration_in_progress"
         )
         project.updated_at = now
@@ -218,7 +227,7 @@ def process_next_task() -> bool:
             if current_project:
                 current_project.status = (
                     "video_in_progress"
-                    if current.workflow == "video_synthesis" or stage == "video"
+                    if _is_video_task(current, stage)
                     else "narration_in_progress"
                 )
                 current_project.updated_at = changed_at
@@ -382,7 +391,16 @@ def _mark_review_required(session: Session, task_id: str, stage: str, message: s
         project.status = "review_required"
         project.updated_at = now
         session.add(project)
+    item = session.get(BatchItem, task.batch_item_id) if task.batch_item_id else None
+    if item:
+        item.status = "review_required"
+        item.current_stage = stage
+        item.error_message = message[-4000:]
+        item.updated_at = now
+        session.add(item)
     session.commit()
+    if task.batch_id:
+        refresh_batch_status(session, task.batch_id)
 
 
 def _cancel_task(session: Session, task_id: str, error: str) -> None:
@@ -429,8 +447,12 @@ def refresh_batch_status(session: Session, batch_id: str) -> None:
     )
     batch.completed = sum(item.status == "completed" for item in items)
     batch.failed = sum(item.status == "failed" for item in items)
-    pending = any(item.status == "pending" for item in items)
-    if not pending:
+    review_required = any(item.status == "review_required" for item in items)
+    unfinished = any(item.status not in {"completed", "failed"} for item in items)
+    if review_required:
+        batch.status = "review_required"
+        batch.finished_at = None
+    elif not unfinished:
         batch.status = "completed_with_errors" if batch.failed else "completed"
         batch.finished_at = utc_now_iso()
     elif batch.status != "paused":

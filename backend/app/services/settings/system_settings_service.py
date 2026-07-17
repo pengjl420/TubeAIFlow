@@ -98,6 +98,7 @@ def _validate_paths(settings: Settings) -> None:
         "chatterbox_model_dir",
         "cosyvoice_root",
         "cosyvoice_model_dir",
+        "vision_embedding_model_dir",
     ):
         path: Path | None = getattr(settings, field_name)
         if path is not None and not path.is_dir():

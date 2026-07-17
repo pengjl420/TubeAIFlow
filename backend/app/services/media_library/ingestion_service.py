@@ -28,6 +28,10 @@ SHOT_TARGET_MS = 12_000
 MIN_TAIL_MS = 1_500
 
 
+def current_vector_model() -> str:
+    return MODEL_NAME
+
+
 def import_directory(
     session: Session,
     directory: str,
@@ -374,7 +378,7 @@ def _ingest_shot(
         [shot.description, media_file.filename, *json.loads(shot.tags_json)]
     )
     if shot.library_role == LIBRARY_ROLE_SEMANTIC:
-        shot.vector_id = upsert_shot(shot.id, searchable_text)
+        shot.vector_id = upsert_shot(shot.id, searchable_text, [frame.path for frame in frames])
         vector_model = MODEL_NAME
     else:
         remove_shot(shot.id)
@@ -393,6 +397,13 @@ def _ingest_shot(
     )
     shot.technical_json = json.dumps(technical, ensure_ascii=False)
     session.add(shot)
+
+
+def shot_needs_embedding(shot: MediaShot) -> bool:
+    if shot.library_role != LIBRARY_ROLE_SEMANTIC:
+        return False
+    technical = _safe_json_object(shot.technical_json)
+    return shot.vector_id is None or technical.get("vector_model") != MODEL_NAME
 
 
 def _keyframe_timestamps(shot: MediaShot, media_type: str) -> list[int]:

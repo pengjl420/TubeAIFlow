@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router'
 import { createBatch } from '../../api/batches'
 import { selectDirectory } from '../../api/projects'
 import { listVoices, type VoiceProfile } from '../../api/voices'
+import type { VideoGenerationMode } from '../../types/project'
 
 const router = useRouter()
 const name = ref(`批量生成 ${new Date().toLocaleDateString()}`)
@@ -13,7 +14,7 @@ const voices = ref<VoiceProfile[]>([])
 const voiceProfileId = ref('')
 const outputDir = ref('')
 const mediaVideoDir = ref('')
-const includeVideo = ref(true)
+const videoMode = ref<VideoGenerationMode>('landscape')
 const continueOnError = ref(true)
 const saving = ref(false)
 const selectingFolder = ref<'output' | 'video' | null>(null)
@@ -65,8 +66,8 @@ async function submit() {
     error.value = '请选择输出目录'
     return
   }
-  if (includeVideo.value && !mediaVideoDir.value.trim()) {
-    error.value = '生成视频时必须选择素材视频目录'
+  if (videoMode.value === 'landscape' && !mediaVideoDir.value.trim()) {
+    error.value = '纯风景素材拼接必须选择素材视频目录'
     return
   }
 
@@ -78,8 +79,9 @@ async function submit() {
       scripts: scripts.value,
       voiceProfileId: voiceProfileId.value,
       outputDir: outputDir.value.trim(),
-      mediaVideoDir: mediaVideoDir.value.trim(),
-      includeVideo: includeVideo.value,
+      mediaVideoDir: videoMode.value === 'landscape' ? mediaVideoDir.value.trim() : '',
+      includeVideo: videoMode.value !== 'none',
+      videoMode: videoMode.value,
       continueOnError: continueOnError.value,
     })
     router.push(`/batches/${batch.id}`)
@@ -154,12 +156,17 @@ onMounted(async () => {
           </div>
         </label>
 
-        <label class="checkbox-field">
-          <input v-model="includeVideo" type="checkbox" />
-          <span>生成最终视频<small>关闭后只生成配音和原文 SRT 字幕。</small></span>
+        <label class="field">
+          <span>视频生成方式</span>
+          <select v-model="videoMode">
+            <option value="none">不生成视频（仅配音与原文 SRT）</option>
+            <option value="landscape">纯风景素材拼接</option>
+            <option value="ai_semantic">AI 语义视频拼接</option>
+          </select>
+          <small>所有方式共用 TTS、音频合并和 SRT 逻辑；AI 语义方式会在素材审核阶段等待人工确认。</small>
         </label>
 
-        <label v-if="includeVideo" class="field">
+        <label v-if="videoMode === 'landscape'" class="field">
           <span>素材视频目录</span>
           <div class="inline-form compact-inline-form">
             <input v-model="mediaVideoDir" readonly placeholder="请选择素材视频文件夹" />

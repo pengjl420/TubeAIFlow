@@ -78,7 +78,7 @@ def _download_and_ingest(session: Session, candidate: RemoteMediaCandidate) -> M
 
 def _ensure_ingested(session: Session, media_file: MediaFile) -> None:
     shots = session.exec(select(MediaShot).where(MediaShot.media_file_id == media_file.id)).all()
-    if any(shot.vector_id is None for shot in shots):
+    if any(ingestion_service.shot_needs_embedding(shot) for shot in shots):
         result = ingestion_service.ingest_asset(session, media_file.id)
         if result["errors"] and len(result["errors"]) == len(shots):
             raise RuntimeError(f"在线素材 {media_file.provider_asset_id} 处理失败")

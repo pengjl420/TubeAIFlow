@@ -26,9 +26,7 @@ def cancel_project_task(project_id: str, session: Session = Depends(get_session)
         raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
     task = task_service.get_active_project_task(session, project_id)
     if not task:
-        latest_video = task_service.get_latest_project_workflow_task(
-            session, project_id, "video_synthesis"
-        )
+        latest_video = _latest_ai_video_task(session, project_id)
         if latest_video and latest_video.status == "review_required":
             task = latest_video
     if task:
@@ -120,6 +118,11 @@ def start_video_workflow(project_id: str, session: Session = Depends(get_session
     project = project_service.get_project(session, project_id)
     if not project:
         raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
+    if project_service.get_project_video_mode(project) != project_service.VIDEO_MODE_AI_SEMANTIC:
+        raise HTTPException(
+            status_code=409,
+            detail={"success": False, "error": "当前项目未启用 AI 语义视频生成"},
+        )
     if not video_synthesis.has_subtitles(session, project_id):
         raise HTTPException(
             status_code=400,
@@ -134,7 +137,7 @@ def start_video_workflow(project_id: str, session: Session = Depends(get_session
             )
         return {"success": True, "data": task_service.serialize_task(session, active)}
 
-    latest = task_service.get_latest_project_workflow_task(session, project_id, "video_synthesis")
+    latest = _latest_ai_video_task(session, project_id)
     if latest and latest.status == "review_required":
         resume_stage = video_synthesis.initial_stage(session, project_id)
         if resume_stage in {"storyboard", "asset_search"}:
@@ -171,8 +174,20 @@ def video_workflow_status(project_id: str, session: Session = Depends(get_sessio
     project = project_service.get_project(session, project_id)
     if not project:
         raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
-    task = task_service.get_latest_project_workflow_task(session, project_id, "video_synthesis")
+    task = _latest_ai_video_task(session, project_id)
     return {"success": True, "data": task_service.serialize_task(session, task)}
+
+
+def _latest_ai_video_task(session: Session, project_id: str) -> TaskRun | None:
+    """Include full-generation tasks after they have entered the AI video stages."""
+    task = task_service.get_latest_project_workflow_task(session, project_id, "video_synthesis")
+    full_task = task_service.get_latest_project_workflow_task(
+        session, project_id, "narration_generation"
+    )
+    if full_task and full_task.current_stage in video_synthesis.STAGES:
+        if task is None or full_task.queue_sequence > task.queue_sequence:
+            return full_task
+    return task
 
 
 @router.get("/tasks")

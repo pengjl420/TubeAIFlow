@@ -4,7 +4,6 @@ from uuid import uuid4
 
 from sqlmodel import Session, select
 
-from app.integrations.vision.embedding import MODEL_NAME
 from app.integrations.vision.vector_index import search as vector_search
 from app.models.media import (
     LIBRARY_ROLE_LANDSCAPE_FALLBACK,
@@ -496,7 +495,7 @@ def _serialize_candidate(
         "is_fallback": candidate.is_fallback,
         "conflicts": json.loads(candidate.conflicts_json),
         "retrieval": {
-            "vector_model": MODEL_NAME if shot.vector_id is not None else None,
+            "vector_model": serialized_shot.get("vector_model") if shot.vector_id is not None else None,
             "vector_id": shot.vector_id,
         },
         "shot": serialized_shot,

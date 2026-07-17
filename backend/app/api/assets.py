@@ -24,7 +24,13 @@ def list_assets(
         assets = ingestion_service.list_assets(session, limit, library_role)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"success": False, "error": str(exc)}) from exc
-    return {"success": True, "data": {"assets": assets}}
+    return {
+        "success": True,
+        "data": {
+            "assets": assets,
+            "vector_model": ingestion_service.current_vector_model(),
+        },
+    }
 
 
 @router.post("/assets/import")

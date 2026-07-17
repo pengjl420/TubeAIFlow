@@ -8,6 +8,7 @@ from sqlalchemy.exc import OperationalError
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_WORKSPACE_DIR = (BASE_DIR / "workspace").resolve()
+DEFAULT_EMBEDDING_MODEL_DIR = (BASE_DIR.parent / "models" / "Qwen3-VL-Embedding-2B").resolve()
 DATABASE_PATH = DEFAULT_WORKSPACE_DIR / "app.db"
 
 
@@ -27,6 +28,16 @@ class Settings(BaseModel):
     pixabay_api_key: str = ""
     media_search_cache_hours: int = Field(default=24, ge=24, le=168)
     media_search_download_limit: int = Field(default=3, ge=1, le=5)
+    vision_embedding_model_dir: Path | None = (
+        DEFAULT_EMBEDDING_MODEL_DIR if DEFAULT_EMBEDDING_MODEL_DIR.is_dir() else None
+    )
+    vision_embedding_device: str = "cuda:0"
+    vision_embedding_dtype: str = "float16"
+    vision_embedding_max_images: int = Field(default=4, ge=1, le=8)
+    vision_embedding_max_pixels: int = Field(default=589824, ge=4096, le=1843200)
+    vision_embedding_instruction: str = (
+        "Retrieve documentary video shots relevant to the narration query."
+    )
     qwen_tts_root: Path | None = None
     qwen_tts_python: Path | None = None
     qwen_tts_model_dir: Path | None = None
@@ -60,6 +71,7 @@ class Settings(BaseModel):
         "cosyvoice_root",
         "cosyvoice_python",
         "cosyvoice_model_dir",
+        "vision_embedding_model_dir",
         mode="before",
     )
     @classmethod
@@ -90,6 +102,22 @@ class Settings(BaseModel):
         text = str(value or "").strip()
         if not text:
             raise ValueError("Qwen3-TTS device and language cannot be empty")
+        return text
+
+    @field_validator("vision_embedding_dtype")
+    @classmethod
+    def validate_vision_embedding_dtype(cls, value):
+        dtype = str(value or "").strip().lower()
+        if dtype not in {"bfloat16", "float16", "float32"}:
+            raise ValueError("Unsupported vision embedding dtype")
+        return dtype
+
+    @field_validator("vision_embedding_device", "vision_embedding_instruction")
+    @classmethod
+    def non_empty_vision_embedding_setting(cls, value):
+        text = str(value or "").strip()
+        if not text:
+            raise ValueError("Vision embedding device and instruction cannot be empty")
         return text
 
     @field_validator("chatterbox_t3_model")
@@ -126,6 +154,7 @@ def _normalize_paths(settings: Settings) -> Settings:
         "cosyvoice_root",
         "cosyvoice_python",
         "cosyvoice_model_dir",
+        "vision_embedding_model_dir",
     ):
         value = getattr(settings, field_name)
         if value is not None:

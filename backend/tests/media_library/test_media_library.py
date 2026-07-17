@@ -193,6 +193,7 @@ class MediaLibraryTests(unittest.TestCase):
                 ),
             ):
                 result = ingestion_service.ingest_asset(session, media_file.id)
+                indexed_images = ingestion_service.upsert_shot.call_args.args[2]
             saved_shot = session.get(MediaShot, shot.id)
             frames = session.exec(
                 select(MediaKeyframe).where(MediaKeyframe.media_shot_id == shot.id)
@@ -202,7 +203,11 @@ class MediaLibraryTests(unittest.TestCase):
         self.assertEqual(len(frames), 3)
         self.assertEqual(saved_shot.vector_id, 17)
         self.assertTrue(saved_shot.thumbnail_path)
-        self.assertEqual(result["asset"]["shots"][0]["vector_model"], "local-hash-v1")
+        self.assertEqual(
+            result["asset"]["shots"][0]["vector_model"],
+            "Qwen/Qwen3-VL-Embedding-2B",
+        )
+        self.assertEqual(len(indexed_images), 3)
 
     def test_landscape_assets_only_appear_as_an_allowed_final_fallback(self) -> None:
         storyboard = StoryboardContent(

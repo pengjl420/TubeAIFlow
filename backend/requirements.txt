@@ -1,6 +1,16 @@
+--extra-index-url https://download.pytorch.org/whl/cu128
+
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 sqlmodel==0.0.22
 httpx==0.28.1
 python-multipart==0.0.20
 Send2Trash==1.8.3
+accelerate==1.12.0
+faiss-cpu==1.14.3
+numpy==2.3.5
+pillow==11.3.0
+qwen-vl-utils==0.0.14
+torch==2.8.0+cu128
+torchvision==0.23.0+cu128
+transformers==4.57.3

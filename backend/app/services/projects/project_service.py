@@ -33,6 +33,14 @@ from app.shared.time import elapsed_seconds, utc_now_iso
 
 DEFAULT_TTS_ENGINE = "qwen3_tts"
 SUPPORTED_TTS_ENGINES = {DEFAULT_TTS_ENGINE, "chatterbox", "cosyvoice"}
+VIDEO_MODE_NONE = "none"
+VIDEO_MODE_LANDSCAPE = "landscape"
+VIDEO_MODE_AI_SEMANTIC = "ai_semantic"
+SUPPORTED_VIDEO_MODES = {
+    VIDEO_MODE_NONE,
+    VIDEO_MODE_LANDSCAPE,
+    VIDEO_MODE_AI_SEMANTIC,
+}
 EDITABLE_STATUSES = {"created", "script_imported", "segmented"}
 GENERATING_STATUSES = {
     "narration_in_progress",
@@ -132,6 +140,24 @@ def get_project(session: Session, project_id: str) -> Project | None:
 
 def is_project_editable(project: Project) -> bool:
     return project.status in EDITABLE_STATUSES
+
+
+def normalize_video_mode(video_mode: str | None, include_video: bool = False) -> str:
+    """Resolve the explicit video mode while preserving old include_video projects."""
+    normalized = str(video_mode or "").strip().lower()
+    if not normalized:
+        return VIDEO_MODE_LANDSCAPE if include_video else VIDEO_MODE_NONE
+    if normalized not in SUPPORTED_VIDEO_MODES:
+        raise ValueError("Unsupported video generation mode")
+    return normalized
+
+
+def get_project_video_mode(project: Project) -> str:
+    config = load_project_config(project)
+    return normalize_video_mode(
+        config.get("video_mode"),
+        bool(config.get("include_video", False)),
+    )
 
 
 def delete_project(session: Session, project: Project) -> dict:
@@ -364,6 +390,7 @@ def update_project_settings(
     reference_audio_text: str = "",
     include_video: bool = False,
     voice_profile_id: str = "",
+    video_mode: str | None = None,
 ) -> Project:
     project_name = name.strip()
     if not project_name:
@@ -386,9 +413,11 @@ def update_project_settings(
     if normalized_tts_engine == "cosyvoice" and not normalized_reference_audio_text:
         raise ValueError("CosyVoice requires the reference audio transcript")
 
+    resolved_video_mode = normalize_video_mode(video_mode, include_video)
+    include_video = resolved_video_mode != VIDEO_MODE_NONE
     video_directory: Path | None = None
-    if include_video and not media_video_dir.strip():
-        raise ValueError("Video material directory is required when video generation is enabled")
+    if resolved_video_mode == VIDEO_MODE_LANDSCAPE and not media_video_dir.strip():
+        raise ValueError("Video material directory is required for landscape video generation")
     if media_video_dir.strip():
         video_directory = Path(media_video_dir).expanduser().resolve()
         if not video_directory.is_dir():
@@ -405,6 +434,7 @@ def update_project_settings(
     config["tts_engine"] = normalized_tts_engine
     config["reference_audio_text"] = normalized_reference_audio_text
     config["include_video"] = include_video
+    config["video_mode"] = resolved_video_mode
     if video_directory:
         config["media_video_dir"] = str(video_directory)
     else:

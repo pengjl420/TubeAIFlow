@@ -8,9 +8,13 @@ import type {
   SceneSearchResult,
 } from '../types/media'
 
+export async function getAssetLibrary(): Promise<{ assets: MediaAsset[]; vectorModel: string }> {
+  const result = unwrap<{ assets: MediaAsset[]; vector_model: string }>(await apiClient.get('/assets'))
+  return { assets: result.assets, vectorModel: result.vector_model }
+}
+
 export async function listAssets(): Promise<MediaAsset[]> {
-  const result = unwrap<{ assets: MediaAsset[] }>(await apiClient.get('/assets'))
-  return result.assets
+  return (await getAssetLibrary()).assets
 }
 
 export async function importAssets(

@@ -28,6 +28,7 @@ const totalAudioDuration = computed(() => (
 
 const statusLabels: Record<string, string> = {
   draft: '草稿', queued: '排队中', running: '执行中', paused: '已暂停',
+  review_required: '等待人工复核',
   completed: '已完成', completed_with_errors: '部分失败', failed: '执行失败',
 }
 
@@ -41,6 +42,13 @@ const stageLabels: Record<string, string> = {
   audio_merge: '合并完整音频',
   subtitles: '生成原文 SRT 字幕',
   video: '生成视频',
+  storyboard: '生成视觉分镜',
+  asset_search: '检索语义素材',
+  asset_review: '等待素材审核',
+  scene_render: '渲染场景视频',
+  final_render: '合成最终视频',
+  quality_check: '执行质量检查',
+  quality_review: '等待质量复核',
   completed: '完成',
 }
 
@@ -198,7 +206,7 @@ onBeforeUnmount(() => {
           <p class="muted">项目：{{ item.project_name }}</p>
           <p v-if="item.error_message" class="error batch-item-error">{{ item.error_message }}</p>
         </div>
-        <span class="status-pill">{{ item.status }}</span>
+        <span class="status-pill">{{ statusLabel(item.status) }}</span>
         <span>{{ stageLabel(item.current_stage) }}</span>
         <strong class="tabular-number">{{ formatDuration(item.audio_duration_seconds || null, '未生成') }}</strong>
         <div class="batch-item-timing">
@@ -207,6 +215,7 @@ onBeforeUnmount(() => {
         </div>
         <div class="batch-item-actions">
           <RouterLink class="mini-button" :to="`/projects/${item.project_id}`">查看项目</RouterLink>
+          <RouterLink v-if="item.status === 'review_required'" class="mini-button" :to="`/projects/${item.project_id}/render`">进入复核</RouterLink>
           <button v-if="item.status === 'failed'" class="mini-button" :disabled="acting" @click="retry(item.id)">重试</button>
         </div>
       </div>

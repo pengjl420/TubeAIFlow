@@ -21,6 +21,7 @@ def enqueue_project_task(
     project: Project,
     *,
     include_video: bool,
+    workflow: str = "narration_generation",
     current_stage: str = "segmenting",
     batch_id: str | None = None,
     batch_item_id: str | None = None,
@@ -42,6 +43,7 @@ def enqueue_project_task(
             project_id=project.id,
             batch_id=batch_id,
             batch_item_id=batch_item_id,
+            workflow=workflow,
             status=initial_status,
             current_stage=current_stage,
             include_video=include_video,
@@ -56,7 +58,11 @@ def enqueue_project_task(
         )
         session.add(task)
         if initial_status == "queued":
-            project.status = "video_in_progress" if current_stage == "video" else "narration_in_progress"
+            project.status = (
+                "video_in_progress"
+                if workflow == "video_synthesis" or current_stage == "video"
+                else "narration_in_progress"
+            )
             project.updated_at = now
             session.add(project)
         session.flush()
@@ -76,6 +82,26 @@ def get_latest_project_task(session: Session, project_id: str) -> TaskRun | None
         .where(TaskRun.project_id == project_id)
         .order_by(TaskRun.queue_sequence.desc())
     ).first()
+
+
+def get_latest_project_workflow_task(
+    session: Session, project_id: str, workflow: str
+) -> TaskRun | None:
+    return session.exec(
+        select(TaskRun)
+        .where(TaskRun.project_id == project_id, TaskRun.workflow == workflow)
+        .order_by(TaskRun.queue_sequence.desc())
+    ).first()
+
+
+def resume_review_task(session: Session, task: TaskRun, *, current_stage: str | None = None) -> None:
+    if task.status != "review_required":
+        raise ValueError("当前任务不处于待复核状态")
+    if current_stage:
+        task.current_stage = current_stage
+    queue_paused_task(session, task)
+    session.commit()
+    session.refresh(task)
 
 
 def get_active_project_task(session: Session, project_id: str) -> TaskRun | None:
@@ -135,7 +161,7 @@ def request_cancel(session: Session, task: TaskRun) -> None:
         task.finished_at = now
     elif task.status == "running":
         task.cancel_requested = True
-    elif task.status == "paused":
+    elif task.status in {"paused", "review_required"}:
         task.status = "cancelled"
         task.finished_at = now
     task.updated_at = now

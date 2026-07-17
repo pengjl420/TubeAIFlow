@@ -7,8 +7,9 @@ import ProjectConfig from './pages/projects/ProjectConfig.vue'
 import ProjectCreate from './pages/projects/ProjectCreate.vue'
 import ProjectShell from './pages/projects/ProjectShell.vue'
 import ProjectStoryboardWorkspace from './pages/projects/ProjectStoryboardWorkspace.vue'
-import StoryboardLab from './pages/projects/ProjectStoryboard.vue'
 import ProjectList from './pages/projects/ProjectList.vue'
+import ProjectMedia from './pages/projects/ProjectMedia.vue'
+import ProjectRender from './pages/projects/ProjectRender.vue'
 import SystemSettings from './pages/settings/SystemSettings.vue'
 import VoiceProfiles from './pages/settings/VoiceProfiles.vue'
 
@@ -23,7 +24,8 @@ const router = createRouter({
     { path: '/projects/new', component: ProjectCreate },
     { path: '/projects/:id', component: ProjectShell },
     { path: '/projects/:id/storyboard', component: ProjectStoryboardWorkspace },
-    { path: '/storyboard-lab', component: StoryboardLab },
+    { path: '/projects/:id/media', component: ProjectMedia },
+    { path: '/projects/:id/render', component: ProjectRender },
     { path: '/projects/:id/config', component: ProjectConfig },
     { path: '/voices', component: VoiceProfiles },
     { path: '/settings', component: SystemSettings },
@@ -35,8 +37,6 @@ router.afterEach((to) => {
     ? '参考音频'
     : to.path.startsWith('/batches')
       ? '批量生产'
-      : to.path.startsWith('/storyboard-lab')
-        ? '分镜测试台'
       : to.path.startsWith('/settings')
         ? '系统设置'
         : to.path.startsWith('/projects/new')

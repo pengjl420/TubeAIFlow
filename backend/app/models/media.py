@@ -41,6 +41,17 @@ class MediaShot(SQLModel, table=True):
     updated_at: str = Field(default_factory=utc_now_iso)
 
 
+class MediaKeyframe(SQLModel, table=True):
+    __tablename__ = "media_keyframes"
+
+    id: str = Field(primary_key=True)
+    media_shot_id: str = Field(index=True)
+    frame_index: int
+    timestamp_ms: int
+    path: str
+    created_at: str = Field(default_factory=utc_now_iso)
+
+
 class SceneCandidate(SQLModel, table=True):
     __tablename__ = "scene_candidates"
 

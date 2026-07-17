@@ -721,6 +721,8 @@ onBeforeUnmount(() => {
       </div>
       <div class="page-title-actions">
         <RouterLink class="secondary-button" :to="`/projects/${project.id}/storyboard`">分镜工作区</RouterLink>
+        <RouterLink class="secondary-button" :to="`/projects/${project.id}/media`">素材审核</RouterLink>
+        <RouterLink class="primary-button" :to="`/projects/${project.id}/render`">智能视频流程</RouterLink>
         <RouterLink class="secondary-button" :to="`/projects/${project.id}/config`">项目设置</RouterLink>
       </div>
     </div>

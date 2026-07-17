@@ -13,7 +13,7 @@ from app.models.project import Project
 from app.models.task import TaskRun
 from app.services.tasks import task_service
 from app.shared.time import utc_now_iso
-from app.workflows import narration_generation
+from app.workflows import narration_generation, video_synthesis
 
 
 logger = logging.getLogger(__name__)
@@ -86,7 +86,9 @@ def recover_interrupted_tasks(session: Session) -> int:
             project.status = (
                 "cancelled"
                 if task.status == "cancelled"
-                else "video_in_progress" if task.current_stage == "video" else "narration_in_progress"
+                else "video_in_progress"
+                if task.workflow == "video_synthesis" or task.current_stage == "video"
+                else "narration_in_progress"
             )
             project.updated_at = now
             session.add(project)
@@ -175,7 +177,11 @@ def process_next_task() -> bool:
         task.started_at = task.started_at or now
         task.updated_at = now
         task.error_message = None
-        project.status = "video_in_progress" if task.current_stage == "video" else "narration_in_progress"
+        project.status = (
+            "video_in_progress"
+            if task.workflow == "video_synthesis" or task.current_stage == "video"
+            else "narration_in_progress"
+        )
         project.updated_at = now
         session.add(task)
         session.add(project)
@@ -210,7 +216,11 @@ def process_next_task() -> bool:
                 session.add(current_item)
             current_project = session.get(Project, current.project_id)
             if current_project:
-                current_project.status = "video_in_progress" if stage == "video" else "narration_in_progress"
+                current_project.status = (
+                    "video_in_progress"
+                    if current.workflow == "video_synthesis" or stage == "video"
+                    else "narration_in_progress"
+                )
                 current_project.updated_at = changed_at
                 session.add(current_project)
             session.commit()
@@ -219,16 +229,29 @@ def process_next_task() -> bool:
                 raise runtime_control.TaskCancelledError("Task was stopped by the user")
 
         try:
-            narration_generation.run_project_generation(
-                session,
-                project,
-                task.current_stage,
-                task.include_video,
-                update_stage,
-            )
+            if task.workflow == "narration_generation":
+                narration_generation.run_project_generation(
+                    session,
+                    project,
+                    task.current_stage,
+                    task.include_video,
+                    update_stage,
+                )
+            elif task.workflow == "video_synthesis":
+                video_synthesis.run_video_synthesis(
+                    session,
+                    project,
+                    task.current_stage,
+                    update_stage,
+                )
+            else:
+                raise ValueError(f"Unknown workflow: {task.workflow}")
         except runtime_control.TaskCancelledError as exc:
             session.rollback()
             _cancel_task(session, task.id, str(exc))
+        except video_synthesis.ReviewRequired as exc:
+            session.rollback()
+            _mark_review_required(session, task.id, exc.stage, str(exc))
         except Exception as exc:
             session.rollback()
             logger.exception("Task %s failed at stage %s", task.id, task.current_stage)
@@ -277,7 +300,11 @@ def _complete_task(session: Session, task_id: str) -> None:
     session.add(task)
     project = session.get(Project, task.project_id)
     if project:
-        project.status = "completed" if task.include_video else "narration_ready"
+        project.status = (
+            "completed"
+            if task.workflow == "video_synthesis" or task.include_video
+            else "narration_ready"
+        )
         project.updated_at = now
         session.add(project)
     item = session.get(BatchItem, task.batch_item_id) if task.batch_item_id else None
@@ -334,6 +361,28 @@ def _fail_task(
     session.commit()
     if batch:
         refresh_batch_status(session, batch.id)
+
+
+def _mark_review_required(session: Session, task_id: str, stage: str, message: str) -> None:
+    task = session.get(TaskRun, task_id)
+    if not task:
+        return
+    now = utc_now_iso()
+    task.status = "review_required"
+    task.current_stage = stage
+    task.cancel_requested = False
+    task.lease_owner = None
+    task.heartbeat_at = now
+    task.updated_at = now
+    task.error_message = message[-4000:]
+    _append_checkpoint_event(task, "review_required", stage, now, task.error_message)
+    session.add(task)
+    project = session.get(Project, task.project_id)
+    if project:
+        project.status = "review_required"
+        project.updated_at = now
+        session.add(project)
+    session.commit()
 
 
 def _cancel_task(session: Session, task_id: str, error: str) -> None:

@@ -1,8 +1,12 @@
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse
 from sqlmodel import Session
 
 from app.database import get_session
 from app.schemas.media import AssetImportRequest, SceneAssignmentRequest
+from app.models.media import MediaKeyframe, MediaShot
 from app.services.media_library import ingestion_service, retrieval_service
 from app.services.projects import project_service
 
@@ -31,6 +35,46 @@ def import_assets(
             detail={"success": False, "error": str(exc)},
         ) from exc
     return {"success": True, "data": data}
+
+
+@router.get("/assets/{media_id}")
+def get_asset(media_id: str, session: Session = Depends(get_session)) -> dict:
+    try:
+        data = ingestion_service.get_asset(session, media_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"success": False, "error": str(exc)},
+        ) from exc
+    return {"success": True, "data": data}
+
+
+@router.post("/assets/{media_id}/ingest")
+def ingest_asset(media_id: str, session: Session = Depends(get_session)) -> dict:
+    try:
+        data = ingestion_service.ingest_asset(session, media_id)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"success": False, "error": str(exc)},
+        ) from exc
+    return {"success": True, "data": data}
+
+
+@router.get("/assets/shots/{shot_id}/thumbnail", response_class=FileResponse)
+def get_shot_thumbnail(shot_id: str, session: Session = Depends(get_session)) -> FileResponse:
+    shot = session.get(MediaShot, shot_id)
+    if not shot or not shot.thumbnail_path:
+        raise HTTPException(status_code=404, detail="缩略图不存在")
+    return _media_response(shot.thumbnail_path)
+
+
+@router.get("/assets/keyframes/{keyframe_id}", response_class=FileResponse)
+def get_keyframe(keyframe_id: str, session: Session = Depends(get_session)) -> FileResponse:
+    keyframe = session.get(MediaKeyframe, keyframe_id)
+    if not keyframe:
+        raise HTTPException(status_code=404, detail="关键帧不存在")
+    return _media_response(keyframe.path)
 
 
 @router.get("/projects/{project_id}/storyboard/scenes/{scene_id}/candidates")
@@ -93,3 +137,10 @@ def _require_project(session: Session, project_id: str):
             detail={"success": False, "error": "Project not found"},
         )
     return project
+
+
+def _media_response(value: str) -> FileResponse:
+    path = Path(value).resolve()
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="预览文件不存在")
+    return FileResponse(path, media_type="image/jpeg")

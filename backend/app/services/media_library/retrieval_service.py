@@ -4,16 +4,32 @@ from uuid import uuid4
 
 from sqlmodel import Session, select
 
+from app.integrations.vision.embedding import MODEL_NAME
+from app.integrations.vision.vector_index import search as vector_search
 from app.models.media import MediaFile, MediaShot, SceneAssignment, SceneCandidate
 from app.models.project import Project
 from app.models.storyboard import VisualScene
 from app.schemas.media import SceneAssignmentRequest
 from app.schemas.storyboard import StoryboardContent
 from app.shared.time import utc_now_iso
+from app.services.media_library.ingestion_service import serialize_shot
 
 
 MIN_LOCAL_RELEVANCE = 0.25
 MAX_CANDIDATES = 20
+
+
+def clear_project_scene_data(session: Session, project_id: str) -> None:
+    """Invalidate candidates and assignments before replacing a project's scenes."""
+    candidates = session.exec(
+        select(SceneCandidate).where(SceneCandidate.project_id == project_id)
+    ).all()
+    assignments = session.exec(
+        select(SceneAssignment).where(SceneAssignment.project_id == project_id)
+    ).all()
+    for item in [*candidates, *assignments]:
+        session.delete(item)
+    session.flush()
 
 
 def search_scene_candidates(
@@ -42,9 +58,24 @@ def search_scene_candidates(
         .join(MediaFile, MediaFile.id == MediaShot.media_file_id)
         .where(MediaShot.status == "ready", MediaFile.status == "ready")
     ).all()
+    vector_query = " ".join(
+        [
+            storyboard.primary_query,
+            *storyboard.alternative_queries,
+            storyboard.visual_summary,
+            *storyboard.entities,
+            *storyboard.locations,
+        ]
+    )
+    vector_scores = vector_search(vector_query)
     ranked = []
     for shot, media_file in rows:
-        scored = _score_candidate(storyboard, shot, media_file)
+        scored = _score_candidate(
+            storyboard,
+            shot,
+            media_file,
+            vector_scores.get(shot.id, 0.0),
+        )
         ranked.append((scored["total_score"], shot, media_file, scored))
     ranked.sort(key=lambda item: item[0], reverse=True)
 
@@ -74,7 +105,7 @@ def search_scene_candidates(
         candidates.append((candidate, shot, media_file))
     session.commit()
 
-    serialized = [_serialize_candidate(*item) for item in candidates]
+    serialized = [_serialize_candidate(session, *item) for item in candidates]
     overall_status = "NO_RESULT"
     if serialized:
         overall_status = (
@@ -99,7 +130,7 @@ def list_scene_candidates(
         shot = session.get(MediaShot, candidate.media_shot_id)
         media_file = session.get(MediaFile, shot.media_file_id) if shot else None
         if shot and media_file:
-            result.append(_serialize_candidate(candidate, shot, media_file))
+            result.append(_serialize_candidate(session, candidate, shot, media_file))
     return result
 
 
@@ -170,7 +201,10 @@ def assign_candidate(
 
 
 def _score_candidate(
-    storyboard: StoryboardContent, shot: MediaShot, media_file: MediaFile
+    storyboard: StoryboardContent,
+    shot: MediaShot,
+    media_file: MediaFile,
+    semantic_score: float = 0.0,
 ) -> dict:
     tags = json.loads(shot.tags_json)
     searchable = " ".join([shot.description, media_file.filename, *tags]).lower()
@@ -200,12 +234,17 @@ def _score_candidate(
         if not _matches_constraint(required, searchable, searchable_tokens):
             conflicts.append(f"missing required: {required}")
 
-    total_score = text_score * 0.75 + tag_score * 0.15 + technical_score * 0.10
+    total_score = (
+        semantic_score * 0.55
+        + text_score * 0.20
+        + tag_score * 0.15
+        + technical_score * 0.10
+    )
     if conflicts:
         total_score = max(0, total_score - min(0.6, len(conflicts) * 0.2))
     status = "QUALIFIED" if total_score >= MIN_LOCAL_RELEVANCE and not conflicts else "LOW_RELEVANCE"
     return {
-        "semantic_score": 0.0,
+        "semantic_score": round(semantic_score, 4),
         "text_score": round(text_score, 4),
         "tag_score": round(tag_score, 4),
         "technical_score": round(technical_score, 4),
@@ -245,8 +284,12 @@ def _require_scene(session: Session, project_id: str, scene_id: str) -> VisualSc
 
 
 def _serialize_candidate(
-    candidate: SceneCandidate, shot: MediaShot, media_file: MediaFile
+    session: Session,
+    candidate: SceneCandidate,
+    shot: MediaShot,
+    media_file: MediaFile,
 ) -> dict:
+    serialized_shot = serialize_shot(session, shot)
     return {
         "id": candidate.id,
         "scene_id": candidate.scene_id,
@@ -262,13 +305,11 @@ def _serialize_candidate(
         },
         "status": candidate.status,
         "conflicts": json.loads(candidate.conflicts_json),
-        "shot": {
-            "shot_index": shot.shot_index,
-            "start_ms": shot.start_ms,
-            "end_ms": shot.end_ms,
-            "description": shot.description,
-            "thumbnail_path": shot.thumbnail_path,
+        "retrieval": {
+            "vector_model": MODEL_NAME if shot.vector_id is not None else None,
+            "vector_id": shot.vector_id,
         },
+        "shot": serialized_shot,
         "media": {
             "id": media_file.id,
             "filename": media_file.filename,

@@ -4,10 +4,14 @@ import re
 from pathlib import Path
 from uuid import uuid4
 
+from sqlalchemy import delete
 from sqlmodel import Session, select
 
-from app.infrastructure.ffmpeg import probe_media
-from app.models.media import MediaFile, MediaShot
+from app.config import get_settings
+from app.infrastructure.ffmpeg import probe_media, run_ffmpeg
+from app.integrations.vision.embedding import MODEL_NAME
+from app.integrations.vision.vector_index import upsert_shot
+from app.models.media import MediaFile, MediaKeyframe, MediaShot
 from app.shared.time import utc_now_iso
 
 
@@ -67,9 +71,56 @@ def list_assets(session: Session, limit: int = 200) -> list[dict]:
             .order_by(MediaShot.shot_index)
         ).all()
         item = _serialize_media_file(media_file)
-        item["shots"] = [_serialize_shot(shot) for shot in shots]
+        item["shots"] = [serialize_shot(session, shot) for shot in shots]
         result.append(item)
     return result
+
+
+def get_asset(session: Session, media_id: str) -> dict:
+    media_file = session.get(MediaFile, media_id)
+    if not media_file:
+        raise ValueError("素材不存在")
+    shots = session.exec(
+        select(MediaShot)
+        .where(MediaShot.media_file_id == media_file.id)
+        .order_by(MediaShot.shot_index)
+    ).all()
+    item = _serialize_media_file(media_file)
+    item["shots"] = [serialize_shot(session, shot) for shot in shots]
+    return item
+
+
+def ingest_asset(session: Session, media_id: str) -> dict:
+    """Generate review frames and a persistent retrieval vector for every shot."""
+    media_file = session.get(MediaFile, media_id)
+    if not media_file:
+        raise ValueError("素材不存在")
+    source_path = Path(media_file.path)
+    if not source_path.is_file():
+        raise ValueError(f"素材文件不存在：{source_path}")
+
+    shots = session.exec(
+        select(MediaShot)
+        .where(MediaShot.media_file_id == media_file.id)
+        .order_by(MediaShot.shot_index)
+    ).all()
+    errors = []
+    for shot in shots:
+        try:
+            _ingest_shot(session, media_file, shot, source_path)
+        except (OSError, RuntimeError, ValueError) as exc:
+            shot.status = "error"
+            technical = _safe_json_object(shot.technical_json)
+            technical["ingestion_error"] = str(exc)
+            shot.technical_json = json.dumps(technical, ensure_ascii=False)
+            shot.updated_at = utc_now_iso()
+            session.add(shot)
+            errors.append({"shot_id": shot.id, "error": str(exc)})
+    media_file.status = "ready" if len(errors) < len(shots) else "error"
+    media_file.updated_at = utc_now_iso()
+    session.add(media_file)
+    session.commit()
+    return {"asset": get_asset(session, media_id), "errors": errors}
 
 
 def _create_media_file(path: Path, file_hash: str) -> MediaFile:
@@ -166,7 +217,109 @@ def _serialize_media_file(media_file: MediaFile) -> dict:
     }
 
 
-def _serialize_shot(shot: MediaShot) -> dict:
+def _ingest_shot(
+    session: Session,
+    media_file: MediaFile,
+    shot: MediaShot,
+    source_path: Path,
+) -> None:
+    session.exec(delete(MediaKeyframe).where(MediaKeyframe.media_shot_id == shot.id))
+    frame_dir = get_settings().workspace_dir / "assets" / media_file.id / shot.id
+    frame_dir.mkdir(parents=True, exist_ok=True)
+    timestamps = _keyframe_timestamps(shot, media_file.media_type)
+    frames = []
+    now = utc_now_iso()
+    for index, timestamp_ms in enumerate(timestamps, start=1):
+        frame_path = frame_dir / f"frame_{index:02d}.jpg"
+        _extract_frame(source_path, frame_path, timestamp_ms, media_file.media_type)
+        frame = MediaKeyframe(
+            id=f"keyframe_{uuid4().hex}",
+            media_shot_id=shot.id,
+            frame_index=index,
+            timestamp_ms=timestamp_ms,
+            path=str(frame_path),
+            created_at=now,
+        )
+        session.add(frame)
+        frames.append(frame)
+
+    searchable_text = " ".join(
+        [shot.description, media_file.filename, *json.loads(shot.tags_json)]
+    )
+    shot.vector_id = upsert_shot(shot.id, searchable_text)
+    shot.thumbnail_path = frames[len(frames) // 2].path if frames else None
+    shot.status = "ready"
+    shot.updated_at = now
+    technical = _safe_json_object(shot.technical_json)
+    technical.update(
+        {
+            "keyframe_count": len(frames),
+            "vector_model": MODEL_NAME,
+            "ingestion_error": None,
+        }
+    )
+    shot.technical_json = json.dumps(technical, ensure_ascii=False)
+    session.add(shot)
+
+
+def _keyframe_timestamps(shot: MediaShot, media_type: str) -> list[int]:
+    if media_type == "image":
+        return [0]
+    duration_ms = max(1, (shot.end_ms or shot.start_ms + 1) - shot.start_ms)
+    if duration_ms <= 4_000:
+        count = 3
+    elif duration_ms <= 8_000:
+        count = 4
+    elif duration_ms <= 15_000:
+        count = 6
+    else:
+        count = 8
+    return [
+        shot.start_ms + min(duration_ms - 1, round(duration_ms * index / (count + 1)))
+        for index in range(1, count + 1)
+    ]
+
+
+def _extract_frame(
+    source_path: Path,
+    destination: Path,
+    timestamp_ms: int,
+    media_type: str,
+) -> None:
+    args = ["-y"]
+    if media_type == "video":
+        args.extend(["-ss", f"{timestamp_ms / 1000:.3f}"])
+    args.extend(
+        [
+            "-i",
+            str(source_path),
+            "-frames:v",
+            "1",
+            "-vf",
+            "scale=640:-2:force_original_aspect_ratio=decrease",
+            "-q:v",
+            "3",
+            str(destination),
+        ]
+    )
+    run_ffmpeg(args)
+
+
+def _safe_json_object(value: str) -> dict:
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def serialize_shot(session: Session, shot: MediaShot) -> dict:
+    keyframes = session.exec(
+        select(MediaKeyframe)
+        .where(MediaKeyframe.media_shot_id == shot.id)
+        .order_by(MediaKeyframe.frame_index)
+    ).all()
+    technical = _safe_json_object(shot.technical_json)
     return {
         "id": shot.id,
         "shot_index": shot.shot_index,
@@ -175,5 +328,18 @@ def _serialize_shot(shot: MediaShot) -> dict:
         "description": shot.description,
         "tags": json.loads(shot.tags_json),
         "thumbnail_path": shot.thumbnail_path,
+        "thumbnail_url": f"/api/assets/shots/{shot.id}/thumbnail" if shot.thumbnail_path else None,
+        "keyframes": [
+            {
+                "id": frame.id,
+                "frame_index": frame.frame_index,
+                "timestamp_ms": frame.timestamp_ms,
+                "url": f"/api/assets/keyframes/{frame.id}",
+            }
+            for frame in keyframes
+        ],
+        "vector_id": shot.vector_id,
+        "vector_model": technical.get("vector_model"),
         "status": shot.status,
+        "technical": technical,
     }

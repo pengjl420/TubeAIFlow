@@ -6,6 +6,7 @@ from app.api import (
     batches,
     exports,
     projects,
+    quality,
     renders,
     segments,
     settings,
@@ -52,4 +53,5 @@ app.include_router(storyboard.router, prefix="/api")
 app.include_router(exports.router, prefix="/api")
 app.include_router(renders.router, prefix="/api")
 app.include_router(tasks.router, prefix="/api")
+app.include_router(quality.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")

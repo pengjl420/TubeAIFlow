@@ -1,0 +1,136 @@
+from collections.abc import Callable
+from pathlib import Path
+
+from sqlmodel import Session, select
+
+from app.infrastructure.project_layout import load_project_config
+from app.models.media import MediaShot, SceneAssignment
+from app.models.project import Project
+from app.models.storyboard import SubtitleCue, VisualScene
+from app.services.media_library import ingestion_service, retrieval_service
+from app.services.quality import qa_service
+from app.services.rendering import final_renderer, scene_renderer
+from app.services.storyboard import storyboard_service
+
+
+StageChanged = Callable[[str], None]
+STAGES = {
+    "storyboard",
+    "asset_search",
+    "asset_review",
+    "scene_render",
+    "final_render",
+    "quality_check",
+    "quality_review",
+    "completed",
+}
+
+
+class ReviewRequired(RuntimeError):
+    def __init__(self, stage: str, message: str):
+        super().__init__(message)
+        self.stage = stage
+
+
+def run_video_synthesis(
+    session: Session,
+    project: Project,
+    current_stage: str,
+    on_stage_changed: StageChanged,
+) -> None:
+    stage = current_stage or "storyboard"
+    if stage not in STAGES:
+        raise ValueError(f"Unknown video synthesis stage: {stage}")
+
+    if stage == "storyboard":
+        regenerate_storyboard(session, project)
+        stage = "asset_search"
+        on_stage_changed(stage)
+
+    if stage == "asset_search":
+        _ingest_configured_assets(session, project)
+        scenes = _scenes(session, project.id)
+        for scene in scenes:
+            retrieval_service.search_scene_candidates(session, project, scene.id)
+        stage = "asset_review"
+        on_stage_changed(stage)
+
+    if stage == "asset_review":
+        missing = assignment_gap(session, project.id)
+        if missing:
+            raise ReviewRequired("asset_review", f"仍有 {missing} 个场景需要人工确认素材")
+        stage = "scene_render"
+        on_stage_changed(stage)
+
+    if stage == "scene_render":
+        scene_renderer.render_all_scenes(session, project)
+        stage = "final_render"
+        on_stage_changed(stage)
+
+    if stage == "final_render":
+        final_renderer.compose_final_video(session, project)
+        stage = "quality_check"
+        on_stage_changed(stage)
+
+    if stage in {"quality_check", "quality_review"}:
+        report = qa_service.run_quality_check(session, project)
+        if not report["passed"]:
+            raise ReviewRequired(
+                "quality_review",
+                f"QA 发现 {report['summary']['error_count']} 个错误，请复核后重新运行",
+            )
+        on_stage_changed("completed")
+
+
+def initial_stage(session: Session, project_id: str) -> str:
+    scenes = _scenes(session, project_id)
+    if not scenes:
+        return "storyboard"
+    return "scene_render" if assignment_gap(session, project_id) == 0 else "asset_search"
+
+
+def regenerate_storyboard(session: Session, project: Project) -> dict:
+    retrieval_service.clear_project_scene_data(session, project.id)
+    return storyboard_service.generate_storyboard(session, project)
+
+
+def assignment_gap(session: Session, project_id: str) -> int:
+    scenes = _scenes(session, project_id)
+    assigned_ids = {
+        item.scene_id
+        for item in session.exec(
+            select(SceneAssignment).where(
+                SceneAssignment.project_id == project_id,
+                SceneAssignment.manual_confirmed == True,  # noqa: E712
+            )
+        ).all()
+    }
+    return sum(scene.id not in assigned_ids for scene in scenes)
+
+
+def has_subtitles(session: Session, project_id: str) -> bool:
+    return session.exec(
+        select(SubtitleCue.id).where(SubtitleCue.project_id == project_id).limit(1)
+    ).first() is not None
+
+
+def _scenes(session: Session, project_id: str) -> list[VisualScene]:
+    return list(
+        session.exec(
+            select(VisualScene)
+            .where(VisualScene.project_id == project_id)
+            .order_by(VisualScene.scene_index)
+        ).all()
+    )
+
+
+def _ingest_configured_assets(session: Session, project: Project) -> None:
+    config = load_project_config(project)
+    directory_value = str(config.get("media_video_dir") or "").strip()
+    if directory_value:
+        directory = Path(directory_value).expanduser().resolve()
+        if directory.is_dir():
+            ingestion_service.import_directory(session, directory)
+    for asset in ingestion_service.list_assets(session, limit=1000):
+        if any(shot.get("vector_id") is None for shot in asset["shots"]):
+            ingestion_service.ingest_asset(session, asset["id"])

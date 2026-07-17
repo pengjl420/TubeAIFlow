@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from app.models.media import MediaFile, MediaShot, SceneAssignment
+from app.models.media import MediaFile, MediaKeyframe, MediaShot, SceneAssignment
 from app.models.project import Project
 from app.models.storyboard import VisualScene
 from app.schemas.media import SceneAssignmentRequest
@@ -153,6 +153,56 @@ class MediaLibraryTests(unittest.TestCase):
         self.assertTrue(assignment_confirmed)
         self.assertEqual(scene_status, "assigned")
         self.assertEqual(repeated_ids.count(assignment["candidate_id"]), 1)
+
+    def test_ingest_asset_generates_review_frames_and_vector_metadata(self) -> None:
+        source = self.root / "source.mp4"
+        source.write_bytes(b"video")
+        media_file = MediaFile(
+            id="media-frames",
+            path=str(source),
+            filename=source.name,
+            media_type="video",
+            file_hash="frames",
+            duration_ms=4_000,
+            width=1920,
+            height=1080,
+        )
+        shot = MediaShot(
+            id="shot-frames",
+            media_file_id=media_file.id,
+            shot_index=1,
+            start_ms=0,
+            end_ms=4_000,
+            description="airport traveler",
+            tags_json='["airport", "traveler"]',
+        )
+
+        def fake_extract(_source, destination, _timestamp, _media_type):
+            destination.write_bytes(b"jpeg")
+
+        with Session(self.engine) as session:
+            session.add_all([media_file, shot])
+            session.commit()
+            with (
+                patch.object(ingestion_service, "_extract_frame", side_effect=fake_extract),
+                patch.object(ingestion_service, "upsert_shot", return_value=17),
+                patch.object(
+                    ingestion_service,
+                    "get_settings",
+                    return_value=type("Settings", (), {"workspace_dir": self.root / "workspace"})(),
+                ),
+            ):
+                result = ingestion_service.ingest_asset(session, media_file.id)
+            saved_shot = session.get(MediaShot, shot.id)
+            frames = session.exec(
+                select(MediaKeyframe).where(MediaKeyframe.media_shot_id == shot.id)
+            ).all()
+
+        self.assertEqual(result["errors"], [])
+        self.assertEqual(len(frames), 3)
+        self.assertEqual(saved_shot.vector_id, 17)
+        self.assertTrue(saved_shot.thumbnail_path)
+        self.assertEqual(result["asset"]["shots"][0]["vector_model"], "local-hash-v1")
 
 
 if __name__ == "__main__":

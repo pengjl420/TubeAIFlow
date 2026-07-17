@@ -185,6 +185,22 @@ def _apply_migrations() -> None:
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_scene_assignments_scene_id "
             "ON scene_assignments (scene_id)",
         ],
+        6: [
+            """
+            CREATE TABLE IF NOT EXISTS media_keyframes (
+                id VARCHAR NOT NULL PRIMARY KEY,
+                media_shot_id VARCHAR NOT NULL,
+                frame_index INTEGER NOT NULL,
+                timestamp_ms INTEGER NOT NULL,
+                path VARCHAR NOT NULL,
+                created_at VARCHAR NOT NULL
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_media_keyframes_media_shot_id "
+            "ON media_keyframes (media_shot_id)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_media_keyframes_shot_index "
+            "ON media_keyframes (media_shot_id, frame_index)",
+        ],
     }
     with engine.begin() as connection:
         connection.exec_driver_sql(

@@ -1,5 +1,5 @@
 from app.models.batch import BatchItem, BatchJob
-from app.models.media import MediaFile, MediaShot, SceneAssignment, SceneCandidate
+from app.models.media import MediaFile, MediaKeyframe, MediaShot, SceneAssignment, SceneCandidate
 from app.models.narration import Segment, VoiceProfile
 from app.models.project import Project
 from app.models.settings import SystemSetting
@@ -10,6 +10,7 @@ __all__ = [
     "BatchItem",
     "BatchJob",
     "MediaFile",
+    "MediaKeyframe",
     "MediaShot",
     "Project",
     "Segment",

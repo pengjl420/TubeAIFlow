@@ -30,40 +30,6 @@ STORYBOARD_LIST_FIELDS = (
 logger = logging.getLogger(__name__)
 
 
-def generate_storyboard_preview(
-    cues: list[dict],
-    client: DeepSeekClient | None = None,
-) -> dict:
-    """Generate an in-memory storyboard for the standalone development lab."""
-    if not cues:
-        raise ValueError("请先导入 SRT 字幕")
-    llm_client = client or DeepSeekClient()
-    cue_groups, warnings = group_cues(cues, llm_client)
-    scene_values = _build_scene_values("storyboard_lab", cue_groups)
-    storyboard_by_scene = _generate_storyboard_content(scene_values, llm_client)
-    scenes = []
-    for value in scene_values:
-        content = storyboard_by_scene[value["id"]]
-        scenes.append(
-            {
-                "id": value["id"],
-                "scene_index": value["scene_index"],
-                "start_ms": value["start_ms"],
-                "end_ms": value["end_ms"],
-                "narration": value["narration"],
-                "subtitle_ids": json.loads(value["subtitle_ids_json"]),
-                "storyboard": content.model_dump(),
-                "confidence": content.confidence,
-                "status": "preview",
-            }
-        )
-    return {
-        "scenes": scenes,
-        "warnings": warnings,
-        "model": get_settings().deepseek_model,
-    }
-
-
 def generate_storyboard(
     session: Session,
     project: Project,

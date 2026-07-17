@@ -224,6 +224,7 @@ onMounted(load)
       </div>
       <div class="page-title-actions">
         <span v-if="modelName" class="status-pill is-neutral">{{ modelName }}</span>
+        <RouterLink v-if="scenes.length" class="secondary-button" :to="`/projects/${projectId}/media`">进入素材审核</RouterLink>
         <button class="primary-button" :disabled="loading || generating || !cues.length" @click="runStoryboard">
           {{ generating ? '生成并保存中…' : scenes.length ? '重新生成分镜' : '生成项目分镜' }}
         </button>

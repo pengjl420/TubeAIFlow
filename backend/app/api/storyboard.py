@@ -7,6 +7,7 @@ from app.schemas.storyboard import StoryboardContent
 from app.services.narration import subtitle_service
 from app.services.projects import project_service
 from app.services.storyboard import storyboard_service
+from app.workflows import video_synthesis
 
 
 router = APIRouter(tags=["storyboard"])
@@ -18,31 +19,6 @@ class SrtImportRequest(BaseModel):
 
 class StoryboardUpdateRequest(BaseModel):
     storyboard: StoryboardContent
-
-
-@router.post("/storyboard-lab/parse")
-def parse_storyboard_lab_srt(payload: SrtImportRequest) -> dict:
-    try:
-        cues = _build_lab_cues(payload.content)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail={"success": False, "error": str(exc)},
-        ) from exc
-    return {"success": True, "data": {"cues": cues}}
-
-
-@router.post("/storyboard-lab/generate")
-def generate_storyboard_lab(payload: SrtImportRequest) -> dict:
-    try:
-        cues = _build_lab_cues(payload.content)
-        data = storyboard_service.generate_storyboard_preview(cues)
-    except (RuntimeError, ValueError) as exc:
-        raise HTTPException(
-            status_code=400,
-            detail={"success": False, "error": str(exc)},
-        ) from exc
-    return {"success": True, "data": {"cues": cues, **data}}
 
 
 @router.post("/projects/{project_id}/subtitles/import")
@@ -81,7 +57,7 @@ def generate_project_storyboard(
 ) -> dict:
     project = _require_project(session, project_id)
     try:
-        data = storyboard_service.generate_storyboard(session, project)
+        data = video_synthesis.regenerate_storyboard(session, project)
     except (OSError, RuntimeError, ValueError) as exc:
         raise HTTPException(
             status_code=400,
@@ -130,15 +106,3 @@ def _require_project(session: Session, project_id: str):
             detail={"success": False, "error": "Project not found"},
         )
     return project
-
-
-def _build_lab_cues(content: str) -> list[dict]:
-    parsed = subtitle_service.parse_srt(content)
-    return [
-        {
-            "id": f"lab:sub_{index:04d}",
-            "cue_index": index,
-            **item,
-        }
-        for index, item in enumerate(parsed, start=1)
-    ]

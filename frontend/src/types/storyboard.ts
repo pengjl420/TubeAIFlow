@@ -8,14 +8,6 @@ export interface SubtitleCue {
   text: string
 }
 
-export interface LabSubtitleCue {
-  id: string
-  cue_index: number
-  start_ms: number
-  end_ms: number
-  text: string
-}
-
 export interface StoryboardContent {
   visual_summary: string
   visual_type: string

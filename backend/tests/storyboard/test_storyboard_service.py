@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -100,46 +101,12 @@ class _InvalidStoryboardListDeepSeek(_FakeDeepSeek):
 
 
 class StoryboardServiceTests(unittest.TestCase):
-    def test_standalone_preview_does_not_require_a_project_or_database(self) -> None:
-        cues = [
-            {
-                "id": f"lab:sub_{index:04d}",
-                "cue_index": index,
-                "start_ms": (index - 1) * 3000,
-                "end_ms": index * 3000,
-                "text": f"字幕 {index}",
-            }
-            for index in range(1, 4)
-        ]
-        settings = SimpleNamespace(deepseek_model="deepseek-test")
-
-        with patch.object(storyboard_service, "get_settings", return_value=settings):
-            result = storyboard_service.generate_storyboard_preview(
-                cues, client=_FakeDeepSeek()
-            )
-
-        self.assertEqual(result["model"], "deepseek-test")
-        self.assertEqual(len(result["scenes"]), 2)
-        self.assertEqual(result["scenes"][0]["subtitle_ids"], ["lab:sub_0001", "lab:sub_0002"])
-        self.assertNotIn("project_id", result["scenes"][0])
-
     def test_scalar_storyboard_list_fields_are_normalized_at_llm_boundary(self) -> None:
-        cues = [
-            {
-                "id": f"lab:sub_{index:04d}",
-                "cue_index": index,
-                "start_ms": (index - 1) * 3000,
-                "end_ms": index * 3000,
-                "text": f"Subtitle {index}",
-            }
-            for index in range(1, 4)
-        ]
-        settings = SimpleNamespace(deepseek_model="deepseek-test")
-
-        with patch.object(storyboard_service, "get_settings", return_value=settings):
-            result = storyboard_service.generate_storyboard_preview(
-                cues, client=_ScalarStoryboardListsDeepSeek()
-            )
+        with self.project_session() as (session, project, settings):
+            with patch.object(storyboard_service, "get_settings", return_value=settings):
+                result = storyboard_service.generate_storyboard(
+                    session, project, client=_ScalarStoryboardListsDeepSeek()
+                )
 
         storyboard = result["scenes"][0]["storyboard"]
         self.assertEqual(storyboard["entities"], [])
@@ -149,19 +116,13 @@ class StoryboardServiceTests(unittest.TestCase):
         self.assertEqual(storyboard["avoid"], ["modern smartphone"])
 
     def test_unsafe_storyboard_list_type_still_fails_after_one_repair(self) -> None:
-        cues = [
-            {
-                "id": "lab:sub_0001",
-                "cue_index": 1,
-                "start_ms": 0,
-                "end_ms": 3000,
-                "text": "Subtitle",
-            }
-        ]
         client = _InvalidStoryboardListDeepSeek()
-
-        with self.assertRaises(ValidationError):
-            storyboard_service.generate_storyboard_preview(cues, client=client)
+        with self.project_session(cue_count=1) as (session, project, settings):
+            with (
+                patch.object(storyboard_service, "get_settings", return_value=settings),
+                self.assertRaises(ValidationError),
+            ):
+                storyboard_service.generate_storyboard(session, project, client=client)
 
         self.assertEqual(client.storyboard_calls, 2)
 
@@ -214,6 +175,37 @@ class StoryboardServiceTests(unittest.TestCase):
                 self.assertEqual(result["scenes"][1]["end_ms"], 9000)
                 self.assertEqual(result["scenes"][0]["storyboard"]["fallback_category"], "business")
                 self.assertTrue(Path(result["path"]).is_file())
+            engine.dispose()
+
+    @contextmanager
+    def project_session(self, cue_count: int = 3):
+        with tempfile.TemporaryDirectory() as directory:
+            engine = create_engine(
+                f"sqlite:///{Path(directory) / 'storyboard.db'}",
+                connect_args={"check_same_thread": False},
+            )
+            SQLModel.metadata.create_all(engine)
+            with Session(engine) as session:
+                project = Project(id="p1", name="Project")
+                session.add(project)
+                for index in range(1, cue_count + 1):
+                    session.add(
+                        SubtitleCue(
+                            id=f"p1:sub_{index:04d}",
+                            project_id="p1",
+                            source_segment_id="imported_srt",
+                            cue_index=index,
+                            start_ms=(index - 1) * 3000,
+                            end_ms=index * 3000,
+                            text=f"字幕 {index}",
+                        )
+                    )
+                session.commit()
+                settings = SimpleNamespace(
+                    workspace_dir=Path(directory),
+                    deepseek_model="deepseek-test",
+                )
+                yield session, project, settings
             engine.dispose()
 
 

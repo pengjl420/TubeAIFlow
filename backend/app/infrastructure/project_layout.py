@@ -13,6 +13,11 @@ def get_project_output_dir(project: Project, workspace_dir: Path) -> Path:
 
 
 def get_project_work_dir(project: Project, workspace_dir: Path) -> Path:
+    return project_dir(workspace_dir, project.id).resolve()
+
+
+def get_legacy_project_work_dir(project: Project, workspace_dir: Path) -> Path:
+    """Locate files produced before work data was separated from final exports."""
     return get_project_output_dir(project, workspace_dir) / get_output_stem(project)
 
 
@@ -34,9 +39,13 @@ def ensure_project_dirs(base_dir: Path) -> None:
         "segments",
         "audio/segments",
         "subtitles",
-        "video/temp",
         "timeline",
         "logs",
+        "storyboard",
+        "media",
+        "renders/scenes",
+        "reports",
+        "video/temp",
     ]:
         (base_dir / relative).mkdir(parents=True, exist_ok=True)
 

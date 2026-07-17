@@ -189,7 +189,9 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertIn("compensation_count", columns)
         self.assertIn("uq_task_runs_active_project", indexes)
         self.assertIn("uq_task_runs_single_running", indexes)
-        self.assertEqual(versions, [(1,), (2,), (3,)])
+        self.assertIn("subtitle_cues", table_names)
+        self.assertIn("visual_scenes", table_names)
+        self.assertEqual(versions, [(1,), (2,), (3,), (4,)])
 
     def test_source_subtitle_migration_removes_bilingual_schema_and_config(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

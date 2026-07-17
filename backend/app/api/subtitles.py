@@ -32,7 +32,11 @@ def create_srt(
         with task_control.controlled(project_id, "subtitles"):
             project = project_service.ensure_output_filename(session, project)
             segments = timeline_service.build_timeline(session, project)["segments"]
-            srt_path = srt_service.create_full_srt(project, _load_segments_for_srt(session, project.id))
+            srt_path = srt_service.create_full_srt(
+                project,
+                _load_segments_for_srt(session, project.id),
+                session=session,
+            )
             project.status = "narration_ready"
             project.updated_at = datetime.utcnow().isoformat()
             session.add(project)

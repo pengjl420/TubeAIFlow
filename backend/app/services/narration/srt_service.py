@@ -10,13 +10,20 @@ from app.infrastructure.project_layout import (
     get_project_work_dir,
 )
 from app.shared.time import seconds_to_srt_time
+from app.services.narration import subtitle_service
 
 
-def create_full_srt(project: Project, segments: list[Segment]) -> Path:
+def create_full_srt(
+    project: Project,
+    segments: list[Segment],
+    session=None,
+) -> Path:
     base_dir = get_project_work_dir(project, get_settings().workspace_dir)
     ensure_project_dirs(base_dir)
 
     cues = build_source_subtitle_cues(segments)
+    if session is not None:
+        subtitle_service.sync_segment_cues(session, project, segments)
 
     stem = get_output_stem(project)
     work_path = base_dir / "subtitles" / f"{stem}.srt"

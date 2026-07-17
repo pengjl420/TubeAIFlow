@@ -13,6 +13,7 @@ from app.infrastructure.project_layout import (
     get_final_audio_path,
     get_final_srt_path,
     get_final_video_path,
+    get_legacy_project_work_dir,
     get_output_stem,
     get_project_output_dir,
     get_project_work_dir,
@@ -158,7 +159,7 @@ def get_project_outputs(project_id: str, session: Session = Depends(get_session)
                 {
                     "name": path.name,
                     "path": str(path),
-                    "relative_path": str(path.relative_to(output_root)),
+                    "relative_path": str(path.relative_to(work_dir)),
                     "size": stat.st_size,
                     "modified_at": stat.st_mtime,
                 }
@@ -280,6 +281,7 @@ def get_reference_audio(project_id: str, session: Session = Depends(get_session)
             Path(project.reference_audio_path),
             [
                 get_project_work_dir(project, get_settings().workspace_dir),
+                get_legacy_project_work_dir(project, get_settings().workspace_dir),
                 project_dir(get_settings().workspace_dir, project_id),
                 get_settings().workspace_dir / "voices",
             ],

@@ -1,0 +1,55 @@
+import json
+
+import httpx
+
+from app.config import Settings, get_settings
+
+
+class DeepSeekClient:
+    def __init__(self, settings: Settings | None = None) -> None:
+        self.settings = settings or get_settings()
+
+    def chat_json(self, system_prompt: str, user_prompt: str) -> dict:
+        if not self.settings.deepseek_api_key.strip():
+            raise ValueError("系统尚未配置 DeepSeek API Key")
+        endpoint = self.settings.deepseek_base_url.rstrip("/")
+        if not endpoint.endswith("/chat/completions"):
+            endpoint = f"{endpoint}/chat/completions"
+        payload = {
+            "model": self.settings.deepseek_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "response_format": {"type": "json_object"},
+            "temperature": 0.2,
+            "max_tokens": self.settings.deepseek_max_tokens,
+            "stream": False,
+        }
+        last_error: Exception | None = None
+        for _attempt in range(self.settings.deepseek_retry_count + 1):
+            try:
+                with httpx.Client(timeout=self.settings.deepseek_timeout_seconds) as client:
+                    response = client.post(
+                        endpoint,
+                        headers={
+                            "Authorization": f"Bearer {self.settings.deepseek_api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json=payload,
+                    )
+                response.raise_for_status()
+                data = response.json()
+                choice = data["choices"][0]
+                if choice.get("finish_reason") == "length":
+                    raise RuntimeError("DeepSeek 输出被 max_tokens 截断")
+                content = choice["message"].get("content")
+                if not isinstance(content, str) or not content.strip():
+                    raise RuntimeError("DeepSeek 返回了空内容")
+                parsed = json.loads(content)
+                if not isinstance(parsed, dict):
+                    raise RuntimeError("DeepSeek 返回的 JSON 根节点必须是对象")
+                return parsed
+            except (httpx.HTTPError, KeyError, IndexError, TypeError, json.JSONDecodeError, RuntimeError) as exc:
+                last_error = exc
+        raise RuntimeError(f"DeepSeek 请求失败：{last_error}") from last_error

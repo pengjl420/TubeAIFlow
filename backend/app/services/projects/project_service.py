@@ -10,6 +10,7 @@ from app.models.project import Project
 from app.models.narration import Segment
 from app.models.batch import BatchItem, BatchJob
 from app.models.task import TaskRun
+from app.models.storyboard import SubtitleCue, VisualScene
 from app.infrastructure.file_storage import ensure_inside_any, project_dir
 from app.infrastructure.recycle_bin import move_existing_to_recycle_bin
 from app.infrastructure.project_layout import (
@@ -17,6 +18,7 @@ from app.infrastructure.project_layout import (
     get_final_audio_path,
     get_final_srt_path,
     get_final_video_path,
+    get_legacy_project_work_dir,
     get_output_stem,
     get_project_output_dir,
     get_project_work_dir,
@@ -152,6 +154,14 @@ def delete_project(session: Session, project: Project) -> dict:
         session.delete(task)
     for segment in session.exec(select(Segment).where(Segment.project_id == project.id)).all():
         session.delete(segment)
+    for cue in session.exec(
+        select(SubtitleCue).where(SubtitleCue.project_id == project.id)
+    ).all():
+        session.delete(cue)
+    for scene in session.exec(
+        select(VisualScene).where(VisualScene.project_id == project.id)
+    ).all():
+        session.delete(scene)
     for item in batch_items:
         session.delete(item)
     session.delete(project)
@@ -181,12 +191,13 @@ def _project_artifact_paths(project: Project) -> list[Path]:
     paths = [
         project_dir(settings.workspace_dir, project.id),
         get_project_work_dir(project, settings.workspace_dir),
+        get_legacy_project_work_dir(project, settings.workspace_dir),
         get_final_audio_path(project, settings.workspace_dir),
         output_root / f"{stem}.mp3",
         get_final_srt_path(project, settings.workspace_dir),
         get_final_video_path(project, settings.workspace_dir),
     ]
-    return paths
+    return list(dict.fromkeys(paths))
 
 
 def save_script(session: Session, project: Project, raw_text: str) -> Project:
@@ -221,7 +232,11 @@ def create_segments(session: Session, project: Project) -> list[Segment]:
     settings = get_settings()
     clean_path = ensure_inside_any(
         Path(project.script_clean_path),
-        [get_project_work_dir(project, settings.workspace_dir), project_dir(settings.workspace_dir, project.id)],
+        [
+            get_project_work_dir(project, settings.workspace_dir),
+            get_legacy_project_work_dir(project, settings.workspace_dir),
+            project_dir(settings.workspace_dir, project.id),
+        ],
     )
     if not clean_path.is_file():
         raise ValueError("Cleaned script file does not exist")

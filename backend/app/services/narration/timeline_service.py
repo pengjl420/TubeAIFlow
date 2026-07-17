@@ -6,7 +6,12 @@ from sqlmodel import Session, select
 from app.config import get_settings
 from app.models.project import Project
 from app.models.narration import Segment
-from app.infrastructure.project_layout import ensure_project_dirs, get_output_stem, get_project_work_dir
+from app.infrastructure.project_layout import (
+    ensure_project_dirs,
+    get_legacy_project_work_dir,
+    get_output_stem,
+    get_project_work_dir,
+)
 
 
 def build_timeline(session: Session, project: Project, gap_seconds: float = 0.0) -> dict:
@@ -57,6 +62,11 @@ def load_timeline(project: Project) -> dict:
     if not path.exists():
         legacy_path = base_dir / "timeline" / "timeline.json"
         path = legacy_path if legacy_path.exists() else path
+    if not path.exists():
+        legacy_base = get_legacy_project_work_dir(project, get_settings().workspace_dir)
+        named_legacy_path = legacy_base / "timeline" / f"{get_output_stem(project)}_timeline.json"
+        plain_legacy_path = legacy_base / "timeline" / "timeline.json"
+        path = named_legacy_path if named_legacy_path.exists() else plain_legacy_path
     if not Path(path).exists():
         raise ValueError("timeline.json does not exist")
     return json.loads(Path(path).read_text(encoding="utf-8"))

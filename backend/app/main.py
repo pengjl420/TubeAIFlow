@@ -1,7 +1,19 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import batches, exports, projects, renders, segments, settings, subtitles, tasks, tts, voices
+from app.api import (
+    batches,
+    exports,
+    projects,
+    renders,
+    segments,
+    settings,
+    storyboard,
+    subtitles,
+    tasks,
+    tts,
+    voices,
+)
 from app.database import create_db_and_tables
 from app.services.tasks import task_worker
 
@@ -34,6 +46,7 @@ app.include_router(voices.router, prefix="/api")
 app.include_router(segments.router, prefix="/api")
 app.include_router(tts.router, prefix="/api")
 app.include_router(subtitles.router, prefix="/api")
+app.include_router(storyboard.router, prefix="/api")
 app.include_router(exports.router, prefix="/api")
 app.include_router(renders.router, prefix="/api")
 app.include_router(tasks.router, prefix="/api")

@@ -2,6 +2,7 @@ from app.models.batch import BatchItem, BatchJob
 from app.models.narration import Segment, VoiceProfile
 from app.models.project import Project
 from app.models.settings import SystemSetting
+from app.models.storyboard import SubtitleCue, VisualScene
 from app.models.task import TaskRun
 
 __all__ = [
@@ -10,6 +11,8 @@ __all__ = [
     "Project",
     "Segment",
     "SystemSetting",
+    "SubtitleCue",
     "TaskRun",
+    "VisualScene",
     "VoiceProfile",
 ]

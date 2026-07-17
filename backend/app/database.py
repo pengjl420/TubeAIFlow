@@ -58,6 +58,44 @@ def _apply_migrations() -> None:
             "ON task_runs (status) WHERE status = 'running'",
         ],
         3: [],
+        4: [
+            """
+            CREATE TABLE IF NOT EXISTS subtitle_cues (
+                id VARCHAR NOT NULL PRIMARY KEY,
+                project_id VARCHAR NOT NULL,
+                source_segment_id VARCHAR NOT NULL,
+                cue_index INTEGER NOT NULL,
+                start_ms INTEGER NOT NULL,
+                end_ms INTEGER NOT NULL,
+                text VARCHAR NOT NULL,
+                created_at VARCHAR NOT NULL,
+                updated_at VARCHAR NOT NULL
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_subtitle_cues_project_id ON subtitle_cues (project_id)",
+            "CREATE INDEX IF NOT EXISTS ix_subtitle_cues_source_segment_id ON subtitle_cues (source_segment_id)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_subtitle_cues_source "
+            "ON subtitle_cues (project_id, source_segment_id, cue_index)",
+            """
+            CREATE TABLE IF NOT EXISTS visual_scenes (
+                id VARCHAR NOT NULL PRIMARY KEY,
+                project_id VARCHAR NOT NULL,
+                scene_index INTEGER NOT NULL,
+                start_ms INTEGER NOT NULL,
+                end_ms INTEGER NOT NULL,
+                narration VARCHAR NOT NULL,
+                subtitle_ids_json VARCHAR NOT NULL DEFAULT '[]',
+                storyboard_json VARCHAR,
+                confidence FLOAT,
+                status VARCHAR NOT NULL DEFAULT 'draft',
+                created_at VARCHAR NOT NULL,
+                updated_at VARCHAR NOT NULL
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_visual_scenes_project_id ON visual_scenes (project_id)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_visual_scenes_project_index "
+            "ON visual_scenes (project_id, scene_index)",
+        ],
     }
     with engine.begin() as connection:
         connection.exec_driver_sql(

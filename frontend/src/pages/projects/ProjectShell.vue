@@ -719,7 +719,9 @@ onBeforeUnmount(() => {
         </div>
         <p>在同一条生产线上编辑脚本、生成配音字幕并输出成片。</p>
       </div>
-      <RouterLink class="secondary-button" :to="`/projects/${project.id}/config`">项目设置</RouterLink>
+      <div class="page-title-actions">
+        <RouterLink class="secondary-button" :to="`/projects/${project.id}/config`">项目设置</RouterLink>
+      </div>
     </div>
 
     <div class="project-metrics-strip" aria-label="项目时间与时长">

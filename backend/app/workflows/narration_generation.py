@@ -75,7 +75,7 @@ def _create_subtitles(session: Session, project: Project) -> None:
             .order_by(Segment.segment_index)
         ).all()
     )
-    srt_service.create_full_srt(project, segments)
+    srt_service.create_full_srt(project, segments, session=session)
     project.status = "narration_ready"
     session.add(project)
     session.commit()

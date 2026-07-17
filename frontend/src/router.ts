@@ -6,6 +6,7 @@ import BatchList from './pages/batches/BatchList.vue'
 import ProjectConfig from './pages/projects/ProjectConfig.vue'
 import ProjectCreate from './pages/projects/ProjectCreate.vue'
 import ProjectShell from './pages/projects/ProjectShell.vue'
+import StoryboardLab from './pages/projects/ProjectStoryboard.vue'
 import ProjectList from './pages/projects/ProjectList.vue'
 import SystemSettings from './pages/settings/SystemSettings.vue'
 import VoiceProfiles from './pages/settings/VoiceProfiles.vue'
@@ -20,6 +21,7 @@ const router = createRouter({
     { path: '/batches/:id', component: BatchDetail },
     { path: '/projects/new', component: ProjectCreate },
     { path: '/projects/:id', component: ProjectShell },
+    { path: '/storyboard-lab', component: StoryboardLab },
     { path: '/projects/:id/config', component: ProjectConfig },
     { path: '/voices', component: VoiceProfiles },
     { path: '/settings', component: SystemSettings },
@@ -31,6 +33,8 @@ router.afterEach((to) => {
     ? '参考音频'
     : to.path.startsWith('/batches')
       ? '批量生产'
+      : to.path.startsWith('/storyboard-lab')
+        ? '分镜测试台'
       : to.path.startsWith('/settings')
         ? '系统设置'
         : to.path.startsWith('/projects/new')

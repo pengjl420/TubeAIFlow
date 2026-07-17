@@ -156,7 +156,7 @@ onMounted(async () => {
 
         <label class="checkbox-field">
           <input v-model="includeVideo" type="checkbox" />
-          <span>生成最终视频<small>关闭后只生成配音和中英文字幕。</small></span>
+          <span>生成最终视频<small>关闭后只生成配音和原文 SRT 字幕。</small></span>
         </label>
 
         <label v-if="includeVideo" class="field">

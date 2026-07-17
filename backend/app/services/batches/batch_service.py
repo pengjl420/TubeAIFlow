@@ -402,7 +402,6 @@ def _output_stem_exists(output_root: Path, stem: str) -> bool:
             output_root / stem,
             output_root / f"{stem}.wav",
             output_root / f"{stem}.srt",
-            output_root / f"{stem}_en.srt",
             output_root / f"{stem}.mp4",
         )
     )

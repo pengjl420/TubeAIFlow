@@ -62,7 +62,7 @@ class VoiceProfileTests(unittest.TestCase):
                 project_id=project.id,
                 segment_id="0001",
                 segment_index=1,
-                text_zh="测试",
+                text="测试",
                 status="completed",
                 audio_path="old.wav",
                 duration=1.0,

@@ -5,7 +5,7 @@ import { useRoute } from 'vue-router'
 import { API_BASE_URL } from '../../api/client'
 import { mergeProjectAudio } from '../../api/exports'
 import {
-  createZhSrt,
+  createSrt,
   getTtsStatus,
   listSegments,
   regenerateSegmentTts,
@@ -171,7 +171,7 @@ const currentSegmentText = computed(() => {
   const currentId = ttsStatus.value.progress?.current_segment_id
   if (!currentId) return ''
   const segment = segments.value.find((item) => item.segment_id === currentId)
-  return segment ? `#${segment.segment_id} ${segment.text_zh}` : `#${currentId}`
+  return segment ? `#${segment.segment_id} ${segment.text}` : `#${currentId}`
 })
 
 function fallbackFinalAudioPath() {
@@ -323,7 +323,7 @@ async function handleScriptDrop(event: DragEvent) {
 async function refreshSegments() {
   segments.value = await listSegments(projectId)
   for (const segment of segments.value) {
-    editedText[segment.segment_id] = segment.text_zh
+    editedText[segment.segment_id] = segment.text
   }
 }
 
@@ -595,7 +595,7 @@ async function mergeAudio() {
     message.value = '正在生成字幕...'
     mergingAudio.value = false
     generatingSubtitles.value = true
-    await createZhSrt(projectId)
+    await createSrt(projectId)
     await refreshAfterChange()
     message.value = `完整音频和字幕已生成：${result.path}`
   } catch (err) {
@@ -673,7 +673,7 @@ async function saveSegmentText(segment: Segment) {
   error.value = ''
   message.value = ''
   try {
-    await updateSegment(projectId, segment.segment_id, { text_zh: editedText[segment.segment_id] || '' })
+    await updateSegment(projectId, segment.segment_id, { text: editedText[segment.segment_id] || '' })
     await refreshSegments()
     message.value = `#${segment.segment_id} 文本已保存`
   } catch (err) {
@@ -688,7 +688,7 @@ async function regenerateSegment(segment: Segment) {
   error.value = ''
   message.value = ''
   try {
-    await updateSegment(projectId, segment.segment_id, { text_zh: editedText[segment.segment_id] || '' })
+    await updateSegment(projectId, segment.segment_id, { text: editedText[segment.segment_id] || '' })
     await regenerateSegmentTts(projectId, segment.segment_id)
     await refreshAfterChange()
     message.value = `#${segment.segment_id} 音频已重新生成`

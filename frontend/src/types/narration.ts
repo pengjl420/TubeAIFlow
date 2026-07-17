@@ -3,7 +3,7 @@ export interface Segment {
   segment_id: string
   project_id: string
   segment_index: number
-  text_zh: string
+  text: string
   status: string
   audio_path?: string
   duration?: number

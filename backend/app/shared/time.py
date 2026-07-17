@@ -22,17 +22,6 @@ def elapsed_seconds(started_at: str | None, finished_at: str | None = None) -> f
     return round(max(0.0, (finished - started).total_seconds()), 3)
 
 
-def seconds_to_ass_time(seconds: float) -> str:
-    centiseconds = int(round(seconds * 100))
-    hours = centiseconds // 360000
-    centiseconds %= 360000
-    minutes = centiseconds // 6000
-    centiseconds %= 6000
-    secs = centiseconds // 100
-    cs = centiseconds % 100
-    return f"{hours}:{minutes:02d}:{secs:02d}.{cs:02d}"
-
-
 def seconds_to_srt_time(seconds: float) -> str:
     milliseconds = int(round(seconds * 1000))
     hours = milliseconds // 3600000

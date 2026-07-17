@@ -5,7 +5,7 @@ def split_script(text: str) -> list[dict]:
         {
             "segment_id": f"{index:04d}",
             "index": index,
-            "text_zh": segment,
+            "text": segment,
             "status": "pending",
         }
         for index, segment in enumerate(segments, start=1)

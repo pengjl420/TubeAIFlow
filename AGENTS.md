@@ -26,7 +26,7 @@
 
 - 原始逐字稿文本
 - TTS 参考音频
-- 基础生成配置，例如项目名称、音色配置、字幕样式、输出目录
+- 基础生成配置，例如项目名称、音色配置、输出目录
 - 本地素材库与可选在线素材源
 - 视频尺寸、画面节奏、素材偏好、渲染与质量检查配置
 
@@ -34,8 +34,7 @@
 
 - 分段配音音频
 - 完整配音文件，优先输出 WAV，可选输出 MP3
-- 中文字幕 ASS 文件
-- 英文字幕 ASS 文件
+- 与输入逐字稿内容一致的单一 SRT 字幕文件
 - 时间轴 JSON
 - 分段信息 JSON
 - 项目 Manifest 文件
@@ -56,9 +55,7 @@
 → 拼接完整配音
 → 读取每段音频时长
 → 生成时间轴
-→ 生成中文字幕 ASS
-→ 翻译英文字幕
-→ 生成英文 ASS
+→ 根据输入逐字稿生成 SRT 字幕
 → 将字幕合并为视觉语义段
 → 生成结构化分镜与视觉查询
 → 检索本地素材库
@@ -76,6 +73,7 @@
 
 - 配音 Segment、字幕 Cue、视觉 Scene 和素材 Shot 是不同层级的数据，不能混为同一种对象。
 - 配音分段不等于视觉分镜；多个连续字幕可以合并为一个视觉语义段。
+- 字幕只保留输入逐字稿的原始语种与内容，不提供字幕翻译，也不生成 ASS 或其他语种字幕。
 - 真实素材优先，AI 图片或 AI 视频只作为后续可选补充。
 - 接口返回候选不代表素材合格，只有通过语义、事实、技术质量和去重检查的素材才能直接使用。
 - 向量检索负责“相关”，实体、年代、地点、质量和重复规则负责“正确”。
@@ -87,7 +85,7 @@
 
 ### 2.1 后端
 
-后端语言固定使用 Python，原因是需要和 TTS、音频处理、字幕生成、AI 翻译、多模态检索与视频处理等能力进行深度集成。
+后端语言固定使用 Python，原因是需要和 TTS、音频处理、字幕生成、多模态检索与视频处理等能力进行深度集成。
 
 推荐技术栈：
 
@@ -115,8 +113,7 @@
 - 调用 Qwen3-TTS、Chatterbox 或 CosyVoice 生成音频
 - 调用 FFmpeg 处理音频
 - 生成时间轴
-- 生成 ASS 字幕
-- 调用翻译 API 生成英文字幕
+- 根据输入逐字稿和真实音频时间轴生成单一 SRT 字幕
 - 生成视觉语义段和结构化分镜
 - 管理全局本地素材库
 - 调用 Pexels、Pixabay 等素材提供方
@@ -146,7 +143,6 @@
 - 创建项目
 - 粘贴或上传逐字稿
 - 上传参考音频
-- 选择字幕样式
 - 查看文本切段结果
 - 查看 TTS 生成进度
 - 查看生成日志
@@ -245,7 +241,6 @@ backend/
         audio_service.py
         timeline_service.py
         subtitle_service.py
-        translation_service.py
       storyboard/
         scene_grouper.py
         storyboard_service.py
@@ -489,7 +484,7 @@ completed
 failed
 ```
 
-`segmenting`、`tts`、`translation`、`storyboard`、`asset_search`、`rendering` 和 `quality_check` 等详细阶段统一保存在 TaskRun，不继续扩展 Project.status 为巨型状态机。迁移期间可以兼容现有旧状态值。
+`segmenting`、`tts`、`subtitle_export`、`storyboard`、`asset_search`、`rendering` 和 `quality_check` 等详细阶段统一保存在 TaskRun，不继续扩展 Project.status 为巨型状态机。迁移期间可以兼容现有旧状态值。
 
 ### 5.2 参考音频与音色档案模块
 
@@ -551,7 +546,7 @@ WAV
 {
   "segment_id": "0001",
   "index": 1,
-  "text_zh": "这里是分段后的中文文本。",
+  "text": "这里是分段后的逐字稿文本。",
   "status": "pending"
 }
 ```
@@ -627,7 +622,7 @@ workspace/projects/{project_id}/audio/segments/
       "start": 0.0,
       "end": 8.42,
       "duration": 8.42,
-      "text_zh": "这里是第一段字幕。"
+      "text": "这里是第一段字幕。"
     }
   ]
 }
@@ -638,71 +633,24 @@ workspace/projects/{project_id}/audio/segments/
 - 不要根据文字长度估算最终字幕时间。
 - 字幕时间必须基于真实音频时长。
 
-### 5.8 中文字幕 ASS 生成模块
+### 5.8 SRT 字幕生成模块
 
 职责：
 
-- 根据时间轴生成 `zh.ass`
-- 支持基础 ASS 样式配置
-- 支持自动换行
-- 支持字体、字号、描边、阴影、位置等配置
+- 根据时间轴生成唯一的 `subtitles.srt`
+- 字幕文本必须来自输入逐字稿的清洗或切段结果，不得翻译、改写或生成其他语种版本
+- 支持在不改变语义和顺序的前提下，按可读长度拆分过长字幕
+- 使用 UTF-8 编码，并输出标准 SRT 序号、时间戳和空行结构
 
 代码要求：
 
-- ASS 生成逻辑放在 `services/narration/subtitle_service.py`。
-- 不要依赖复杂字幕库，第一版可以直接生成文本文件。
+- SRT 生成逻辑放在 `services/narration/subtitle_service.py`。
+- 不要依赖复杂字幕库，可以直接生成标准 SRT 文本文件。
 - 时间格式转换函数要清晰可读。
-- 字幕文本需要转义 ASS 特殊字符。
+- SRT 文本中的换行与空行必须符合格式要求；不得引入 ASS 标签或样式控制符。
+- 每条 SubtitleCue 必须能够追溯到输入逐字稿对应的 VoiceSegment。
 
-### 5.9 英文翻译模块
-
-职责：
-
-- 将中文 segment 翻译为英文
-- 保持 segment_id 不变
-- 不合并字幕
-- 不拆分字幕
-- 保存翻译结果
-
-推荐支持：
-
-- DeepSeek API
-- Gemini API
-- OpenAI API
-- DeepL API
-
-代码要求：
-
-- 翻译业务逻辑集中放在 `services/narration/translation_service.py`，外部客户端放在 `integrations/llm/`。
-- API Key 从 `.env` 读取。
-- 不要将 API Key 写死在代码中。
-- 翻译结果必须保存到 `translation.json`。
-- 翻译失败时应支持重试。
-
-翻译结果示例：
-
-```json
-[
-  {
-    "segment_id": "0001",
-    "text_zh": "这里是中文。",
-    "text_en": "This is the English translation."
-  }
-]
-```
-
-### 5.10 英文 ASS 生成模块
-
-职责：
-
-- 根据同一份时间轴生成 `en.ass`
-- 使用英文字幕样式
-- 控制英文换行长度
-- 避免字幕过长遮挡画面
-
-英文字幕不应改变时间轴。中文与英文字幕必须使用同一组 segment 时间。
-
-### 5.11 导出模块
+### 5.9 导出模块
 
 职责：
 
@@ -731,14 +679,10 @@ workspace/projects/{project_id}/
     full_voice.mp3
 
   subtitles/
-    zh.ass
-    en.ass
+    subtitles.srt
 
   timeline/
     timeline.json
-
-  translation/
-    translation.json
 
   logs/
     tts.log
@@ -764,7 +708,7 @@ workspace/projects/{project_id}/
   manifest.json
 ```
 
-### 5.12 视觉语义段模块
+### 5.10 视觉语义段模块
 
 职责：
 
@@ -792,7 +736,7 @@ workspace/projects/{project_id}/
 - 开头 30 秒可以适当加快节奏。
 - 不允许 VisualScene 覆盖不到完整音频，场景时间轴不能出现空洞。
 
-### 5.13 分镜与视觉查询模块
+### 5.11 分镜与视觉查询模块
 
 职责：
 
@@ -836,7 +780,7 @@ workspace/projects/{project_id}/
 - 不根据画面猜测无法视觉确认的真实人物身份。
 - Prompt、模型名称和关键参数需要保存到任务配置快照，确保结果可追踪。
 
-### 5.14 全局本地素材库模块
+### 5.12 全局本地素材库模块
 
 素材来源优先级：
 
@@ -886,7 +830,7 @@ MVP：SigLIP 2 Base + FAISS IndexFlatIP + SQLite
 
 向量负责语义召回，结构化描述负责过滤、冲突判断和结果解释。向量文件存放在独立索引目录，SQLite 只保存 `vector_id` 和元数据，不把大向量直接塞入业务 JSON。
 
-### 5.15 远程素材搜索模块
+### 5.13 远程素材搜索模块
 
 职责：
 
@@ -914,7 +858,7 @@ MVP：SigLIP 2 Base + FAISS IndexFlatIP + SQLite
 - 查询缓存必须包含平台、标准化查询、过期时间和响应数据。
 - 不得为了提高命中率无限扩大搜索轮数或下载全部候选。
 
-### 5.16 素材排序、合格判断与去重模块
+### 5.14 素材排序、合格判断与去重模块
 
 候选状态统一为：
 
@@ -949,7 +893,7 @@ FALLBACK_REQUIRED
 - pHash 高度相似或文件哈希相同的素材只保留一个。
 - 只有 `QUALIFIED` 候选可以自动选用；低置信度候选必须进入人工审核或兜底。
 
-### 5.17 兜底素材模块
+### 5.15 兜底素材模块
 
 兜底优先级：
 
@@ -982,7 +926,7 @@ landscape
 - 商业事件、人物经历和公司冲突等具体叙事不能随意插入风景空镜。
 - 控制同类兜底素材在单条视频中的占比和连续重复。
 
-### 5.18 镜头时间轴编排模块
+### 5.16 镜头时间轴编排模块
 
 职责：
 
@@ -1005,7 +949,7 @@ landscape
 
 纪录片风格以硬切为主、叠化为辅；普通转场建议 0.2—0.5 秒。图片运镜应缓慢，缩放通常控制在 100% 到 106% 或 108%。
 
-### 5.19 FFmpeg 视频渲染模块
+### 5.17 FFmpeg 视频渲染模块
 
 标准输出参数：
 
@@ -1025,7 +969,7 @@ landscape
 - 横屏视频使用 `scale + crop`，禁止拉伸变形。
 - 竖屏素材默认不使用；必须使用时采用居中主画面和模糊背景或画中画布局。
 - 原素材音轨默认删除，最终音轨由配音、背景音乐和音效统一混合。
-- 支持外挂字幕和 ASS 烧录字幕两种模式。
+- 支持外挂 SRT 字幕，以及使用同一份 SRT 烧录字幕两种模式；不得为烧录流程额外生成 ASS 文件。
 - 配音存在时应自动压低背景音乐；音量和峰值规则通过配置管理。
 - 单场景失败必须可重试，替换一个场景素材时不能强制重渲染整条视频。
 - 最终拼接前使用 ffprobe 校验所有中间片段。
@@ -1039,7 +983,7 @@ renders/preview.mp4
 renders/final.mp4
 ```
 
-### 5.20 自动质量检查模块
+### 5.18 自动质量检查模块
 
 自动检查至少包括：
 
@@ -1048,12 +992,12 @@ renders/final.mp4
 - 字幕不得越过音频结束时间。
 - 黑屏比例、长静帧、重复画面、分辨率、纵横比和编码完整性。
 - 音频峰值、LUFS、过长静音、爆音和声道异常。
-- 字幕空文本、重叠、行长、中英文数量与时间轴一致性、特殊字符和安全区。
+- 字幕空文本、重叠、行长、Cue 数量与时间轴一致性、SRT 格式和安全区。
 - 素材平台、素材 ID、作者、来源页面、下载时间和使用场景是否齐全。
 
 质量检查输出 `reports/qa.json`，不得只返回布尔值。每个问题应包含类型、严重级别、关联场景或字幕、可读说明和可选修复建议。
 
-### 5.21 故事板人工审核模块
+### 5.19 故事板人工审核模块
 
 审核页面应显示：
 
@@ -1071,7 +1015,7 @@ renders/final.mp4
 
 人工确认结果必须持久化到 SceneAssignment，重新渲染时不得丢失人工选择。
 
-### 5.22 工作流、任务与恢复模块
+### 5.20 工作流、任务与恢复模块
 
 系统只维护两条主要工作流：
 
@@ -1083,7 +1027,7 @@ video_synthesis
 `narration_generation` 负责：
 
 ```text
-文本清洗 → 口播切段 → TTS → 音频拼接 → 字幕时间轴 → 翻译与字幕导出
+文本清洗 → 口播切段 → TTS → 音频拼接 → 字幕时间轴 → 原文 SRT 导出
 ```
 
 `video_synthesis` 负责：
@@ -1132,8 +1076,7 @@ GET  /api/projects/{project_id}/tts/status
 
 ```text
 POST /api/projects/{project_id}/audio/merge
-POST /api/projects/{project_id}/subtitles/zh
-POST /api/projects/{project_id}/subtitles/en
+POST /api/projects/{project_id}/subtitles/srt
 POST /api/projects/{project_id}/export
 ```
 
@@ -1234,8 +1177,7 @@ CREATE TABLE segments (
   segment_id TEXT NOT NULL,
   project_id TEXT NOT NULL,
   segment_index INTEGER NOT NULL,
-  text_zh TEXT NOT NULL,
-  text_en TEXT,
+  text TEXT NOT NULL,
   audio_path TEXT,
   duration REAL,
   start_time REAL,
@@ -1257,7 +1199,6 @@ CREATE TABLE subtitle_cues (
   project_id TEXT NOT NULL,
   source_segment_id TEXT NOT NULL,
   cue_index INTEGER NOT NULL,
-  language TEXT NOT NULL,
   start_ms INTEGER NOT NULL,
   end_ms INTEGER NOT NULL,
   text TEXT NOT NULL,
@@ -1266,7 +1207,7 @@ CREATE TABLE subtitle_cues (
 );
 ```
 
-中文与英文 SubtitleCue 必须可以通过稳定 ID 或 `source_segment_id + cue_index` 对齐，不能通过数组当前位置临时关联。
+SubtitleCue 只保存输入逐字稿内容，不保存翻译文本。每条 Cue 必须通过稳定 ID 和 `source_segment_id + cue_index` 追溯到原始 VoiceSegment，不能通过数组位置临时关联。
 
 ### 7.4 voice_profiles
 
@@ -1281,18 +1222,19 @@ CREATE TABLE voice_profiles (
 );
 ```
 
-### 7.5 subtitle_templates
+### 7.5 subtitle_export_presets
 
 ```sql
-CREATE TABLE subtitle_templates (
+CREATE TABLE subtitle_export_presets (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
-  language TEXT NOT NULL,
   config_json TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
 ```
+
+`config_json` 只保存 SRT 导出参数，例如 UTF-8 编码、单条建议长度和换行策略；不得保存字体、描边等 SRT 无法表达的样式配置。
 
 ### 7.6 visual_scenes
 
@@ -1529,13 +1471,8 @@ workspace/
 │       │   └── bgm.wav
 │       ├── timeline/
 │       │   └── timeline.json
-│       ├── translation/
-│       │   └── translation.json
 │       ├── subtitles/
-│       │   ├── zh.srt
-│       │   ├── en.srt
-│       │   ├── zh.ass
-│       │   └── en.ass
+│       │   └── subtitles.srt
 │       ├── storyboard/
 │       │   ├── scenes.json
 │       │   ├── candidates.json
@@ -1626,7 +1563,7 @@ class AbstractSegmentAudioPathFactoryBase:
 ### 9.4 注释规范
 
 - 注释解释“为什么这样做”，不要重复代码表面含义。
-- 对 FFmpeg 命令、ASS 格式、TTS 调用参数、向量模型输入和素材评分规则要写必要注释。
+- 对 FFmpeg 命令、SRT 时间格式、TTS 调用参数、向量模型输入和素材评分规则要写必要注释。
 - 对临时方案要标注清楚，例如 `TODO` 或 `NOTE`。
 - 不要写无意义注释。
 
@@ -1646,7 +1583,6 @@ FFMPEG_PATH=ffmpeg
 FFPROBE_PATH=ffprobe
 GEMINI_API_KEY=
 OPENAI_API_KEY=
-DEEPL_API_KEY=
 PEXELS_API_KEY=
 PIXABAY_API_KEY=
 EMBEDDING_MODEL_PATH=
@@ -1658,7 +1594,7 @@ VECTOR_INDEX_PATH=./workspace/indexes/media.faiss
 - API Key 不得写入代码。
 - `.env` 不得提交到公开仓库。
 - 默认配置应能在本地直接运行。
-- 缺少外部翻译 API Key 时，中文配音和中文字幕功能仍应可用。
+- 字幕导出不得依赖外部翻译 API 或翻译密钥。
 - 缺少远程素材 API Key 时，本地素材库、手工素材选择和粗剪功能仍应可用。
 - 系统配置、项目配置与单次任务快照必须分开。
 - 前端 API 返回配置对象时必须隐藏完整密钥，只返回是否已配置或掩码值。
@@ -1666,7 +1602,7 @@ VECTOR_INDEX_PATH=./workspace/indexes/media.faiss
 配置分层：
 
 1. `SystemSettings`：FFmpeg、模型路径、API Key、GPU 设备和本机 workspace。
-2. `ProjectConfig`：音色、字幕样式、视频尺寸、素材偏好、兜底策略和渲染参数。
+2. `ProjectConfig`：音色、SRT 导出参数、视频尺寸、素材偏好、兜底策略和渲染参数。
 3. `TaskRun.checkpoint_json`：单次任务使用的配置快照、阶段输出和恢复点。
 
 短期可以继续将 ProjectConfig 存在 `projects.config_json` 中，但必须通过 Pydantic 模型统一读写。API 返回解析后的 `config` 对象，前端不得自行解析 JSON 字符串。
@@ -1725,7 +1661,6 @@ render:
 - 切段结果
 - 每个 segment 的 TTS 生成状态
 - FFmpeg 命令执行失败原因
-- 翻译 API 调用失败原因
 - 字幕导出结果
 - 完整音频导出结果
 - 视觉语义段与 Storyboard 生成结果摘要
@@ -1781,42 +1716,20 @@ workspace/projects/{project_id}/logs/error.log
 
 ---
 
-## 13. ASS 字幕规范
+## 13. SRT 字幕规范
 
-ASS 字幕生成应支持基础样式配置。
+每个项目只生成一份 `subtitles/subtitles.srt`。字幕语言和内容与输入逐字稿一致，不执行翻译，不生成多语种副本，也不生成 ASS 文件。
 
-默认分辨率：
+文件要求：
 
-```text
-PlayResX: 1920
-PlayResY: 1080
-```
-
-中文字幕建议：
-
-```text
-字体较大
-底部居中
-白字
-黑色描边
-最多两行
-```
-
-英文字幕建议：
-
-```text
-字号小于中文
-底部居中
-自动换行
-最多两行
-```
-
-字幕文本要求：
-
-- 需要转义 ASS 特殊字符。
-- 不要让单条字幕过长。
-- 英文字幕可以按字符数自动插入换行。
-- 中文和英文字幕使用同一份时间轴。
+- 使用 UTF-8 编码。
+- Cue 序号从 1 开始连续递增。
+- 时间戳格式固定为 `HH:MM:SS,mmm --> HH:MM:SS,mmm`。
+- 每个 Cue 依次包含序号、时间戳、正文和一个空行。
+- 时间必须来自真实音频时间轴，不得按字符数估算。
+- Cue 不得重叠、倒序、出现负时长或越过配音结束时间。
+- 字幕文本不得翻译或改写；因显示长度拆分时，必须保持原文顺序、内容和语义不变。
+- 不写入字体、颜色、位置、描边等样式标签，不引入 ASS 控制符。
 
 ---
 
@@ -1840,6 +1753,7 @@ PlayResY: 1080
 - 不做插件市场
 - 不做通用工作流编排平台、可视化 DAG 或工作流 DSL
 - 不做多机并行或分布式素材库
+- 不做字幕翻译、多语种字幕或 ASS 字幕输出
 
 当前 MVP 应优先完成：
 
@@ -1850,7 +1764,7 @@ PlayResY: 1080
 5. 素材切镜、关键帧、向量化和 FAISS 检索。
 6. 主题化兜底素材。
 7. 场景独立渲染与完整视频拼接。
-8. 中英文字幕、配音和基础背景音乐合成。
+8. 原文 SRT 字幕、配音和基础背景音乐合成。
 9. 自动 QA、故事板审核和低置信度人工替换。
 
 后续能力必须通过现有业务边界扩展，不得污染配音字幕基础模块或把可选能力硬编码进核心工作流。
@@ -1874,7 +1788,7 @@ PlayResY: 1080
 - 本地版本数据库使用 SQLite。
 - 音频处理优先使用 FFmpeg。
 - 视频处理与最终合成优先使用 FFmpeg。
-- 字幕生成优先直接生成 ASS 文本文件。
+- 字幕只生成与输入逐字稿一致的 UTF-8 SRT 文件。
 - TTS 集成逻辑必须集中在 `integrations/tts/` 与 `services/narration/tts_service.py`，不能散落在 API、workflow 或渲染模块。
 - Pexels、Pixabay 集成逻辑必须集中在 `integrations/media_providers/`。
 - Embedding 和向量索引逻辑必须集中在 `integrations/vision/`。
@@ -1978,7 +1892,7 @@ backend/tests/
 
 要求：
 
-- 文本清洗、切段、字幕时间、ASS 转义和路径安全使用确定性单元测试。
+- 文本清洗、切段、字幕时间、SRT 序号与时间戳格式、路径安全使用确定性单元测试。
 - Storyboard 和 Provider 使用固定 JSON Fixture 测试解析、校验和异常响应。
 - 素材排序测试必须覆盖相关、低相关、人物冲突、年代冲突和重复素材。
 - FFmpeg 测试优先验证参数数组和短素材集成结果，不依赖长视频样本。
@@ -2003,6 +1917,6 @@ Top 3 / Top 5 召回率
 - 视频可播放且编码完整。
 - 画面轨道无空洞。
 - 视频与配音总时长误差小于 100 ms。
-- 中英文字幕时间轴一致。
+- `subtitles.srt` 内容与输入逐字稿一致，时间轴连续且不越过配音结束时间。
 - 所有自动选择素材均为 `QUALIFIED`，或明确标记为人工确认/兜底。
 - 最终导出包含素材来源与 QA 报告。

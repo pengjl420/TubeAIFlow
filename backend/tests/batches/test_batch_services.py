@@ -52,7 +52,7 @@ class BatchFileTests(unittest.TestCase):
                 ))
                 session.add(Segment(
                     id="segment", segment_id="0001", project_id="project",
-                    segment_index=1, text_zh="文案", duration=12.5,
+                    segment_index=1, text="文案", duration=12.5,
                 ))
                 session.add(TaskRun(
                     id="task", project_id="project", batch_id="batch", batch_item_id="item",
@@ -117,7 +117,7 @@ class GenerationCheckpointTests(unittest.TestCase):
             narration_generation._create_subtitles(session, project)
 
         create_srt.assert_called_once()
-        self.assertEqual(project.status, "zh_subtitle_created")
+        self.assertEqual(project.status, "narration_ready")
 
 
 class BatchApiTests(unittest.TestCase):

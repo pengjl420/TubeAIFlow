@@ -184,8 +184,6 @@ def _project_artifact_paths(project: Project) -> list[Path]:
         get_final_audio_path(project, settings.workspace_dir),
         output_root / f"{stem}.mp3",
         get_final_srt_path(project, settings.workspace_dir),
-        output_root / f"{stem}.ass",
-        output_root / f"{stem}_zh.ass",
         get_final_video_path(project, settings.workspace_dir),
     ]
     return paths
@@ -239,7 +237,7 @@ def create_segments(session: Session, project: Project) -> list[Segment]:
             segment_id=item["segment_id"],
             project_id=project.id,
             segment_index=item["index"],
-            text_zh=item["text_zh"],
+            text=item["text"],
             status=item["status"],
         )
         for item in segment_data
@@ -382,7 +380,6 @@ def update_project_settings(
     config["output_filename"] = safe_filename_stem(output_filename or project_name or _timestamp_stem())
     config["tts_engine"] = normalized_tts_engine
     config["reference_audio_text"] = normalized_reference_audio_text
-    config.pop("include_translation", None)
     config["include_video"] = include_video
     if video_directory:
         config["media_video_dir"] = str(video_directory)

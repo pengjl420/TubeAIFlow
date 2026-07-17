@@ -33,7 +33,7 @@ def build_timeline(session: Session, project: Project, gap_seconds: float = 0.0)
                 "start": round(start, 3),
                 "end": round(end, 3),
                 "duration": round(segment.duration, 3),
-                "text_zh": segment.text_zh,
+                "text": segment.text,
             }
         )
         current = end + gap_seconds

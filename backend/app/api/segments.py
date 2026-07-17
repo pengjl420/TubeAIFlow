@@ -18,7 +18,7 @@ router = APIRouter(tags=["segments"])
 
 
 class SegmentUpdateRequest(BaseModel):
-    text_zh: str | None = None
+    text: str | None = None
 
 
 @router.get("/projects/{project_id}/segments")
@@ -46,8 +46,8 @@ def update_segment(
     ).first()
     if not segment:
         raise HTTPException(status_code=404, detail={"success": False, "error": "Segment not found"})
-    if payload.text_zh is not None:
-        segment.text_zh = payload.text_zh
+    if payload.text is not None:
+        segment.text = payload.text
         segment.status = "pending"
         segment.error_message = None
     segment.updated_at = utc_now_iso()

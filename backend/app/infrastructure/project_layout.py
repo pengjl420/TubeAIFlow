@@ -34,7 +34,6 @@ def ensure_project_dirs(base_dir: Path) -> None:
         "segments",
         "audio/segments",
         "subtitles",
-        "subtitles/segments",
         "video/temp",
         "timeline",
         "logs",

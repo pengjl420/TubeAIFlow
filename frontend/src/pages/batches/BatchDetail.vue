@@ -39,7 +39,7 @@ const stageLabels: Record<string, string> = {
   segmenting: '生成切段',
   tts: '生成分段音频',
   audio_merge: '合并完整音频',
-  subtitles: '生成中英文字幕',
+  subtitles: '生成原文 SRT 字幕',
   video: '生成视频',
   completed: '完成',
 }

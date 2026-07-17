@@ -49,7 +49,7 @@ class TtsEngineTests(unittest.TestCase):
                 project_id="p1",
                 segment_id="0001",
                 segment_index=1,
-                text_zh="测试",
+                text="测试",
             )
 
             with patch.object(tts_service, "get_settings", return_value=settings):
@@ -94,7 +94,7 @@ class TtsEngineTests(unittest.TestCase):
                 project_id="p1",
                 segment_id="0001",
                 segment_index=1,
-                text_zh="需要合成的文本",
+                text="需要合成的文本",
             )
 
             completed = SimpleNamespace(returncode=0, stdout="ok", stderr="")
@@ -156,7 +156,7 @@ class TtsEngineTests(unittest.TestCase):
                 project_id="p1",
                 segment_id="0001",
                 segment_index=1,
-                text_zh="测试",
+                text="测试",
             )
 
             with patch.object(tts_service, "get_settings", return_value=settings):
@@ -191,7 +191,7 @@ class TtsEngineTests(unittest.TestCase):
                 project_id="chatterbox-project",
                 segment_id="0001",
                 segment_index=1,
-                text_zh="需要合成的文本",
+                text="需要合成的文本",
             )
             completed = SimpleNamespace(returncode=0, stdout="ok", stderr="")
 
@@ -236,7 +236,7 @@ class TtsEngineTests(unittest.TestCase):
                 project_id="p1",
                 segment_id="0001",
                 segment_index=1,
-                text_zh="测试",
+                text="测试",
             )
 
             with (
@@ -274,7 +274,7 @@ class TtsEngineTests(unittest.TestCase):
                 project_id="cosyvoice-project",
                 segment_id="0001",
                 segment_index=1,
-                text_zh="需要合成的文本",
+                text="需要合成的文本",
             )
             completed = SimpleNamespace(returncode=0, stdout="ok", stderr="")
 

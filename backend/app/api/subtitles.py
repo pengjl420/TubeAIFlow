@@ -20,8 +20,8 @@ def create_timeline(project_id: str, session: Session = Depends(get_session)) ->
     return {"success": True, "data": timeline_service.build_timeline(session, project)}
 
 
-@router.post("/projects/{project_id}/subtitles/zh")
-def create_zh_srt(
+@router.post("/projects/{project_id}/subtitles/srt")
+def create_srt(
     project_id: str,
     session: Session = Depends(get_session),
 ) -> dict:
@@ -32,8 +32,8 @@ def create_zh_srt(
         with task_control.controlled(project_id, "subtitles"):
             project = project_service.ensure_output_filename(session, project)
             segments = timeline_service.build_timeline(session, project)["segments"]
-            zh_path = srt_service.create_full_srt(project, _load_segments_for_srt(session, project.id))
-            project.status = "zh_subtitle_created"
+            srt_path = srt_service.create_full_srt(project, _load_segments_for_srt(session, project.id))
+            project.status = "narration_ready"
             project.updated_at = datetime.utcnow().isoformat()
             session.add(project)
             session.commit()
@@ -42,7 +42,7 @@ def create_zh_srt(
     return {
         "success": True,
         "data": {
-            "zh_path": str(zh_path),
+            "srt_path": str(srt_path),
             "segments": len(segments),
         },
     }

@@ -76,6 +76,6 @@ def _create_subtitles(session: Session, project: Project) -> None:
         ).all()
     )
     srt_service.create_full_srt(project, segments)
-    project.status = "zh_subtitle_created"
+    project.status = "narration_ready"
     session.add(project)
     session.commit()

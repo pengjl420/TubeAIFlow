@@ -56,11 +56,11 @@ class ProjectSettingsTests(unittest.TestCase):
                 ))
                 session.add(Segment(
                     id="segment-1", segment_id="0001", project_id="project-id",
-                    segment_index=1, text_zh="第一段", duration=61.25,
+                    segment_index=1, text="第一段", duration=61.25,
                 ))
                 session.add(Segment(
                     id="segment-2", segment_id="0002", project_id="project-id",
-                    segment_index=2, text_zh="第二段", duration=2.5,
+                    segment_index=2, text="第二段", duration=2.5,
                 ))
                 session.add(TaskRun(
                     id="task-id", project_id="project-id", queue_sequence=1,
@@ -158,7 +158,6 @@ class ProjectSettingsTests(unittest.TestCase):
                 )
 
             config = json.loads(result.config_json or "{}")
-            self.assertNotIn("include_translation", config)
             self.assertFalse(config["include_video"])
 
     def test_switching_to_qwen_resets_completed_segments(self) -> None:
@@ -169,7 +168,7 @@ class ProjectSettingsTests(unittest.TestCase):
                 project_id="project-id",
                 segment_id="0001",
                 segment_index=1,
-                text_zh="测试",
+                text="测试",
                 status="completed",
                 audio_path="old.wav",
                 duration=1.2,

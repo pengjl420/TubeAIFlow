@@ -13,7 +13,6 @@ from app.models.narration import Segment
 from app.infrastructure import process_runner as task_control
 from app.infrastructure.ffmpeg import probe_duration
 from app.infrastructure.project_layout import ensure_project_dirs, get_project_work_dir, load_project_config
-from app.services.narration import srt_service
 
 
 logger = logging.getLogger(__name__)
@@ -69,7 +68,6 @@ def generate_project_tts(session: Session, project: Project) -> list[Segment]:
             segment.duration = probe_duration(output_path)
             segment.status = "completed"
             segment.error_message = None
-            srt_service.create_segment_srt(project, segment)
         else:
             segment.status = "failed"
             segment.error_message = result.get("error", f"{_engine_label(engine)} did not create an audio file")
@@ -120,7 +118,6 @@ def regenerate_segment_tts(session: Session, project: Project, segment: Segment)
         segment.duration = probe_duration(output_path)
         segment.status = "completed"
         segment.error_message = None
-        srt_service.create_segment_srt(project, segment)
     else:
         segment.status = "failed"
         segment.error_message = result.get("error", f"{_engine_label(engine)} did not create an audio file")
@@ -386,7 +383,7 @@ def _prepare_batch_files(
             [
                 {
                     "segment_id": item.segment_id,
-                    "text": item.text_zh,
+                    "text": item.text,
                     "output_path": str(audio_dir / f"{item.segment_id}.wav"),
                 }
                 for item in segments

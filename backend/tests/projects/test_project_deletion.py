@@ -59,7 +59,7 @@ class ProjectDeletionTests(unittest.TestCase):
             project_id=project.id,
             segment_id="0001",
             segment_index=1,
-            text_zh="测试",
+            text="测试",
         )
         with Session(self.engine) as session:
             session.add(project)

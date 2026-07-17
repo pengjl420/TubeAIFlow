@@ -9,7 +9,6 @@ from app.models.project import Project
 from app.models.narration import Segment
 from app.infrastructure.ffmpeg import probe_duration, run_ffmpeg
 from app.infrastructure.project_layout import ensure_project_dirs, get_final_audio_path, get_project_work_dir
-from app.services.narration import srt_service
 
 
 logger = logging.getLogger(__name__)
@@ -73,7 +72,6 @@ def merge_project_audio(session: Session, project: Project) -> Path:
         if segment.duration is None:
             segment.duration = probe_duration(Path(segment.audio_path))
             session.add(segment)
-    srt_service.create_full_srt(project, list(audio_segments))
     project.status = "audio_merged"
     project.updated_at = datetime.utcnow().isoformat()
     session.add(project)

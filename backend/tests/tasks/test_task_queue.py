@@ -189,7 +189,78 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertIn("compensation_count", columns)
         self.assertIn("uq_task_runs_active_project", indexes)
         self.assertIn("uq_task_runs_single_running", indexes)
-        self.assertEqual(versions, [(1,), (2,)])
+        self.assertEqual(versions, [(1,), (2,), (3,)])
+
+    def test_source_subtitle_migration_removes_bilingual_schema_and_config(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            engine = create_sqlalchemy_engine(f"sqlite:///{Path(directory) / 'legacy-subtitles.db'}")
+            with engine.begin() as connection:
+                connection.exec_driver_sql(
+                    "CREATE TABLE projects (id VARCHAR PRIMARY KEY, status VARCHAR, config_json VARCHAR)"
+                )
+                connection.exec_driver_sql(
+                    "INSERT INTO projects (id, status, config_json) VALUES "
+                    "('p1', 'zh_subtitle_created', "
+                    "'{\"include_translation\": false, \"include_video\": true}')"
+                )
+                connection.exec_driver_sql(
+                    """
+                    CREATE TABLE segments (
+                        id VARCHAR PRIMARY KEY,
+                        segment_id VARCHAR NOT NULL,
+                        project_id VARCHAR NOT NULL,
+                        segment_index INTEGER NOT NULL,
+                        text_zh VARCHAR NOT NULL,
+                        text_en VARCHAR,
+                        audio_path VARCHAR,
+                        duration FLOAT,
+                        start_time FLOAT,
+                        end_time FLOAT,
+                        status VARCHAR NOT NULL,
+                        error_message VARCHAR,
+                        created_at VARCHAR NOT NULL,
+                        updated_at VARCHAR NOT NULL
+                    )
+                    """
+                )
+                connection.exec_driver_sql(
+                    """
+                    INSERT INTO segments (
+                        id, segment_id, project_id, segment_index, text_zh, text_en,
+                        status, created_at, updated_at
+                    ) VALUES ('s1', '0001', 'p1', 1, '原文', 'translation', 'pending', 'now', 'now')
+                    """
+                )
+                connection.exec_driver_sql(
+                    "CREATE TABLE subtitle_templates "
+                    "(id VARCHAR PRIMARY KEY, name VARCHAR, language VARCHAR, config_json VARCHAR)"
+                )
+
+            with patch.object(database, "engine", engine):
+                database._apply_migrations()
+                columns = {column["name"] for column in inspect(engine).get_columns("segments")}
+                tables = set(inspect(engine).get_table_names())
+                with engine.connect() as connection:
+                    segment_text = connection.exec_driver_sql(
+                        "SELECT text FROM segments WHERE id = 's1'"
+                    ).scalar_one()
+                    config_json = connection.exec_driver_sql(
+                        "SELECT config_json FROM projects WHERE id = 'p1'"
+                    ).scalar_one()
+                    project_status = connection.exec_driver_sql(
+                        "SELECT status FROM projects WHERE id = 'p1'"
+                    ).scalar_one()
+            engine.dispose()
+
+        self.assertEqual(segment_text, "原文")
+        self.assertEqual(columns, {
+            "id", "segment_id", "project_id", "segment_index", "text", "audio_path",
+            "duration", "start_time", "end_time", "status", "error_message",
+            "created_at", "updated_at",
+        })
+        self.assertNotIn("subtitle_templates", tables)
+        self.assertNotIn("include_translation", config_json)
+        self.assertEqual(project_status, "narration_ready")
 
 
 class TaskApiTests(unittest.TestCase):

@@ -1,4 +1,5 @@
 from collections.abc import Generator
+import json
 
 from sqlmodel import Session, SQLModel, create_engine
 
@@ -56,6 +57,7 @@ def _apply_migrations() -> None:
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_task_runs_single_running "
             "ON task_runs (status) WHERE status = 'running'",
         ],
+        3: [],
     }
     with engine.begin() as connection:
         connection.exec_driver_sql(
@@ -73,10 +75,98 @@ def _apply_migrations() -> None:
                 continue
             for statement in statements:
                 connection.exec_driver_sql(statement)
+            if version == 3:
+                _migrate_source_subtitles(connection)
             connection.exec_driver_sql(
                 "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
                 (version, utc_now_iso()),
             )
+
+
+def _migrate_source_subtitles(connection) -> None:
+    """Collapse legacy bilingual subtitle storage into one source-text field."""
+    segment_table = connection.exec_driver_sql(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'segments'"
+    ).first()
+    if segment_table:
+        columns = {
+            row[1] for row in connection.exec_driver_sql("PRAGMA table_info(segments)").fetchall()
+        }
+        if "text_zh" in columns or "text_en" in columns:
+            source_column = "text" if "text" in columns else "text_zh"
+            connection.exec_driver_sql("DROP TABLE IF EXISTS segments_source_migration")
+            connection.exec_driver_sql(
+                """
+                CREATE TABLE segments_source_migration (
+                    id VARCHAR NOT NULL PRIMARY KEY,
+                    segment_id VARCHAR NOT NULL,
+                    project_id VARCHAR NOT NULL,
+                    segment_index INTEGER NOT NULL,
+                    text VARCHAR NOT NULL,
+                    audio_path VARCHAR,
+                    duration FLOAT,
+                    start_time FLOAT,
+                    end_time FLOAT,
+                    status VARCHAR NOT NULL,
+                    error_message VARCHAR,
+                    created_at VARCHAR NOT NULL,
+                    updated_at VARCHAR NOT NULL
+                )
+                """
+            )
+            connection.exec_driver_sql(
+                f"""
+                INSERT INTO segments_source_migration (
+                    id, segment_id, project_id, segment_index, text, audio_path,
+                    duration, start_time, end_time, status, error_message, created_at, updated_at
+                )
+                SELECT
+                    id, segment_id, project_id, segment_index, {source_column}, audio_path,
+                    duration, start_time, end_time, status, error_message, created_at, updated_at
+                FROM segments
+                """
+            )
+            connection.exec_driver_sql("DROP TABLE segments")
+            connection.exec_driver_sql("ALTER TABLE segments_source_migration RENAME TO segments")
+            connection.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_segments_segment_id ON segments (segment_id)"
+            )
+            connection.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_segments_project_id ON segments (project_id)"
+            )
+
+    connection.exec_driver_sql("DROP TABLE IF EXISTS subtitle_templates")
+
+    project_table = connection.exec_driver_sql(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'projects'"
+    ).first()
+    if not project_table:
+        return
+    project_columns = {
+        row[1] for row in connection.exec_driver_sql("PRAGMA table_info(projects)").fetchall()
+    }
+    if "status" in project_columns:
+        connection.exec_driver_sql(
+            "UPDATE projects SET status = 'narration_ready' "
+            "WHERE status IN ('zh_subtitle_created', 'en_subtitle_created')"
+        )
+    if "config_json" not in project_columns:
+        return
+    rows = connection.exec_driver_sql(
+        "SELECT id, config_json FROM projects WHERE config_json IS NOT NULL"
+    ).fetchall()
+    for project_id, raw_config in rows:
+        try:
+            config = json.loads(raw_config)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if not isinstance(config, dict) or "include_translation" not in config:
+            continue
+        config.pop("include_translation", None)
+        connection.exec_driver_sql(
+            "UPDATE projects SET config_json = ? WHERE id = ?",
+            (json.dumps(config, ensure_ascii=False), project_id),
+        )
 
 
 def create_db_and_tables() -> None:

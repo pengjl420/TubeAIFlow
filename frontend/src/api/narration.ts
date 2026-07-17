@@ -8,7 +8,7 @@ export async function listSegments(projectId: string): Promise<Segment[]> {
 export async function updateSegment(
   projectId: string,
   segmentId: string,
-  payload: Partial<Pick<Segment, 'text_zh'>>,
+  payload: Partial<Pick<Segment, 'text'>>,
 ): Promise<Segment> {
   return unwrap<Segment>(await apiClient.put(`/projects/${projectId}/segments/${segmentId}`, payload))
 }
@@ -54,9 +54,9 @@ export async function createTimeline(projectId: string) {
   return unwrap(await apiClient.post(`/projects/${projectId}/timeline`))
 }
 
-export async function createZhSrt(projectId: string) {
+export async function createSrt(projectId: string) {
   return unwrap<{
-    zh_path: string
+    srt_path: string
     segments: number
-  }>(await apiClient.post(`/projects/${projectId}/subtitles/zh`, undefined, { timeout: 0 }))
+  }>(await apiClient.post(`/projects/${projectId}/subtitles/srt`, undefined, { timeout: 0 }))
 }

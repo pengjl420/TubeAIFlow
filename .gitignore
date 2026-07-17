@@ -10,6 +10,7 @@ dist/
 *.log
 *.tsbuildinfo
 .downloads/
+models/
 reports/
 backend/workspace/app.db
 backend/workspace/backend.lock

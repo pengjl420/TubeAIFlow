@@ -153,10 +153,12 @@ def get_project_outputs(project_id: str, session: Session = Depends(get_session)
     final_srt_path = get_final_srt_path(project, get_settings().workspace_dir)
     final_video_path = get_final_video_path(project, get_settings().workspace_dir)
     output_files = []
+    seen_paths: set[Path] = set()
     if work_dir.is_dir():
         for path in sorted(work_dir.rglob("*")):
             if not path.is_file():
                 continue
+            seen_paths.add(path.resolve())
             stat = path.stat()
             output_files.append(
                 {
@@ -167,35 +169,15 @@ def get_project_outputs(project_id: str, session: Session = Depends(get_session)
                     "modified_at": stat.st_mtime,
                 }
             )
-    if final_audio_path.is_file():
-        stat = final_audio_path.stat()
+    for final_path in (final_audio_path, final_video_path, final_srt_path):
+        if not final_path.is_file() or final_path.resolve() in seen_paths:
+            continue
+        stat = final_path.stat()
         output_files.append(
             {
-                "name": final_audio_path.name,
-                "path": str(final_audio_path),
-                "relative_path": final_audio_path.name,
-                "size": stat.st_size,
-                "modified_at": stat.st_mtime,
-            }
-        )
-    if final_video_path.is_file():
-        stat = final_video_path.stat()
-        output_files.append(
-            {
-                "name": final_video_path.name,
-                "path": str(final_video_path),
-                "relative_path": final_video_path.name,
-                "size": stat.st_size,
-                "modified_at": stat.st_mtime,
-            }
-        )
-    if final_srt_path.is_file():
-        stat = final_srt_path.stat()
-        output_files.append(
-            {
-                "name": final_srt_path.name,
-                "path": str(final_srt_path),
-                "relative_path": final_srt_path.name,
+                "name": final_path.name,
+                "path": str(final_path),
+                "relative_path": final_path.name,
                 "size": stat.st_size,
                 "modified_at": stat.st_mtime,
             }

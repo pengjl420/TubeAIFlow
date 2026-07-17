@@ -890,7 +890,7 @@ onBeforeUnmount(() => {
             </button>
           </div>
           <dl class="output-path-list">
-            <div><dt>根目录</dt><dd>{{ outputs?.output_dir || project.output_dir || '暂无输出目录' }}</dd></div>
+            <div><dt>项目文件夹</dt><dd>{{ outputs?.work_dir || outputs?.output_dir || project.output_dir || '暂无输出目录' }}</dd></div>
             <div><dt>完整音频</dt><dd>{{ finalAudioPath || '生成后自动创建' }}</dd></div>
             <div><dt>字幕</dt><dd>{{ finalSrtPath || '生成后自动创建' }}</dd></div>
             <div v-if="includeVideo"><dt>最终视频</dt><dd>{{ finalVideoPath || '生成后自动创建' }}</dd></div>

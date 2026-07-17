@@ -106,6 +106,7 @@ class ProjectSettingsTests(unittest.TestCase):
             config = json.loads(result.config_json or "{}")
             self.assertEqual(result.name, "New name")
             self.assertEqual(result.output_dir, str(output_dir.resolve()))
+            self.assertEqual(config["project_directory_name"], "New_name")
             self.assertEqual(config["output_filename"], "voice_file")
             self.assertEqual(config["media_video_dir"], str(video_dir.resolve()))
             self.assertEqual(session.commits, 1)

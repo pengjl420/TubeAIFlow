@@ -145,14 +145,14 @@ class IntelligentVideoPipelineTests(unittest.TestCase):
             )
             session.commit()
             settings = SimpleNamespace(workspace_dir=self.root)
+            project_dir = self.root / "Project"
             audio = self.root / "Project.wav"
             video = self.root / "Project.mp4"
             subtitle = self.root / "Project.srt"
+            project_dir.mkdir(parents=True)
             for path in (audio, video, subtitle):
                 path.write_bytes(b"data")
-            scene_path = (
-                self.root / "projects" / project.id / "renders" / "scenes" / "scene_0001.mp4"
-            )
+            scene_path = project_dir / "renders" / "scenes" / "scene_0001.mp4"
             scene_path.parent.mkdir(parents=True, exist_ok=True)
             scene_path.write_bytes(b"scene")
 
@@ -170,7 +170,7 @@ class IntelligentVideoPipelineTests(unittest.TestCase):
 
             self.assertTrue(report["passed"])
             self.assertEqual(report["issues"], [])
-            self.assertTrue((self.root / "projects" / project.id / "reports" / "qa.json").is_file())
+            self.assertTrue((project_dir / "reports" / "qa.json").is_file())
 
     def _project_with_scene(self, session: Session) -> tuple[Project, VisualScene]:
         project = Project(id="project-1", name="Project", output_dir=str(self.root))

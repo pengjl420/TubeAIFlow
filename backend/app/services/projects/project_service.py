@@ -368,6 +368,12 @@ def update_output_settings(
     directory.mkdir(parents=True, exist_ok=True)
 
     config = load_project_config(project)
+    if not str(config.get("project_directory_name") or "").strip():
+        config["project_directory_name"] = _available_project_directory_name(
+            directory,
+            project.name,
+            project.id,
+        )
     config["output_filename"] = safe_filename_stem(output_filename or project.name or _timestamp_stem())
     project.output_dir = str(directory)
     project.config_json = json.dumps(config, ensure_ascii=False)
@@ -430,6 +436,12 @@ def update_project_settings(
     previous_tts_engine = str(config.get("tts_engine") or DEFAULT_TTS_ENGINE).strip().lower()
     previous_reference_audio_text = str(config.get("reference_audio_text") or "").strip()
     previous_voice_profile_id = str(config.get("voice_profile_id") or "")
+    if not str(config.get("project_directory_name") or "").strip():
+        config["project_directory_name"] = _available_project_directory_name(
+            output_directory,
+            project_name,
+            project.id,
+        )
     config["output_filename"] = safe_filename_stem(output_filename or project_name or _timestamp_stem())
     config["tts_engine"] = normalized_tts_engine
     config["reference_audio_text"] = normalized_reference_audio_text
@@ -504,3 +516,13 @@ def _reset_tts_segments(session: Session, project_id: str) -> bool:
 
 def _timestamp_stem() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+
+def _available_project_directory_name(output_root: Path, project_name: str, project_id: str) -> str:
+    base = safe_filename_stem(project_name or project_id)
+    candidate = base
+    suffix = 2
+    while (output_root / candidate).exists():
+        candidate = safe_filename_stem(f"{base}-{suffix}")
+        suffix += 1
+    return candidate

@@ -13,7 +13,9 @@ def get_project_output_dir(project: Project, workspace_dir: Path) -> Path:
 
 
 def get_project_work_dir(project: Project, workspace_dir: Path) -> Path:
-    return project_dir(workspace_dir, project.id).resolve()
+    if not project.output_dir:
+        return project_dir(workspace_dir, project.id).resolve()
+    return get_project_output_dir(project, workspace_dir) / get_project_directory_name(project)
 
 
 def get_legacy_project_work_dir(project: Project, workspace_dir: Path) -> Path:
@@ -53,6 +55,12 @@ def ensure_project_dirs(base_dir: Path) -> None:
 def get_output_stem(project: Project) -> str:
     config = load_project_config(project)
     configured = str(config.get("output_filename") or "").strip()
+    return safe_filename_stem(configured or project.name or project.id)
+
+
+def get_project_directory_name(project: Project) -> str:
+    config = load_project_config(project)
+    configured = str(config.get("project_directory_name") or "").strip()
     return safe_filename_stem(configured or project.name or project.id)
 
 

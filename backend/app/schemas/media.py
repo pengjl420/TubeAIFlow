@@ -1,8 +1,41 @@
-from pydantic import BaseModel, Field
+from typing import Literal
+
+from pydantic import BaseModel, Field, model_validator
+
+
+LibraryRole = Literal["semantic", "themed_fallback", "landscape_fallback"]
+ReviewStatus = Literal["pending", "approved", "rejected"]
 
 
 class AssetImportRequest(BaseModel):
     directory: str = Field(min_length=1)
+    library_role: LibraryRole = "semantic"
+    fallback_category: str = Field(default="", max_length=60)
+    mood: str = Field(default="", max_length=60)
+
+    @model_validator(mode="after")
+    def validate_fallback_category(self):
+        if self.library_role == "themed_fallback" and not self.fallback_category.strip():
+            raise ValueError("主题兜底素材必须填写兜底类别")
+        self.fallback_category = self.fallback_category.strip()
+        self.mood = self.mood.strip()
+        return self
+
+
+class AssetUpdateRequest(BaseModel):
+    library_role: LibraryRole
+    fallback_category: str = Field(default="", max_length=60)
+    mood: str = Field(default="", max_length=60)
+    review_status: ReviewStatus = "approved"
+    enabled: bool = True
+
+    @model_validator(mode="after")
+    def validate_fallback_category(self):
+        if self.library_role == "themed_fallback" and not self.fallback_category.strip():
+            raise ValueError("主题兜底素材必须填写兜底类别")
+        self.fallback_category = self.fallback_category.strip()
+        self.mood = self.mood.strip()
+        return self
 
 
 class SceneAssignmentRequest(BaseModel):

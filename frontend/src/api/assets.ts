@@ -1,7 +1,9 @@
 import { API_BASE_URL, apiClient, unwrap } from './client'
 import type {
   AssetImportResult,
+  LibraryRole,
   MediaAsset,
+  ReviewStatus,
   SceneCandidate,
   SceneSearchResult,
 } from '../types/media'
@@ -11,8 +13,31 @@ export async function listAssets(): Promise<MediaAsset[]> {
   return result.assets
 }
 
-export async function importAssets(directory: string): Promise<AssetImportResult> {
-  return unwrap(await apiClient.post('/assets/import', { directory }, { timeout: 300_000 }))
+export async function importAssets(
+  directory: string,
+  libraryRole: LibraryRole,
+  fallbackCategory = '',
+  mood = '',
+): Promise<AssetImportResult> {
+  return unwrap(await apiClient.post('/assets/import', {
+    directory,
+    library_role: libraryRole,
+    fallback_category: fallbackCategory,
+    mood,
+  }, { timeout: 300_000 }))
+}
+
+export async function updateAsset(
+  mediaId: string,
+  input: {
+    library_role: LibraryRole
+    fallback_category: string
+    mood: string
+    review_status: ReviewStatus
+    enabled: boolean
+  },
+): Promise<MediaAsset> {
+  return unwrap(await apiClient.patch(`/assets/${encodeURIComponent(mediaId)}`, input))
 }
 
 export async function ingestAsset(mediaId: string): Promise<{ asset: MediaAsset; errors: Array<{ shot_id: string; error: string }> }> {

@@ -6,7 +6,15 @@ from sqlmodel import Session, select
 
 from app.integrations.vision.embedding import MODEL_NAME
 from app.integrations.vision.vector_index import search as vector_search
-from app.models.media import MediaFile, MediaShot, SceneAssignment, SceneCandidate
+from app.models.media import (
+    LIBRARY_ROLE_LANDSCAPE_FALLBACK,
+    LIBRARY_ROLE_SEMANTIC,
+    LIBRARY_ROLE_THEMED_FALLBACK,
+    MediaFile,
+    MediaShot,
+    SceneAssignment,
+    SceneCandidate,
+)
 from app.models.project import Project
 from app.models.storyboard import VisualScene
 from app.schemas.media import SceneAssignmentRequest
@@ -53,6 +61,20 @@ def search_scene_candidates(
             result = _search_available_candidates(session, project, scene_id)
         if result["status"] == "QUALIFIED":
             break
+    if result["status"] != "QUALIFIED":
+        added = _append_fallback_candidates(
+            session, project, scene, storyboard, LIBRARY_ROLE_THEMED_FALLBACK
+        )
+        if not added and storyboard.allow_landscape_fallback:
+            added = _append_fallback_candidates(
+                session, project, scene, storyboard, LIBRARY_ROLE_LANDSCAPE_FALLBACK
+            )
+        if added:
+            result = {
+                "scene_id": scene.id,
+                "status": "FALLBACK_REQUIRED",
+                "candidates": list_scene_candidates(session, project.id, scene.id),
+            }
     result["online_search"] = attempts
     return result
 
@@ -81,7 +103,14 @@ def _search_available_candidates(
     rows = session.exec(
         select(MediaShot, MediaFile)
         .join(MediaFile, MediaFile.id == MediaShot.media_file_id)
-        .where(MediaShot.status == "ready", MediaFile.status == "ready")
+        .where(
+            MediaShot.status == "ready",
+            MediaShot.library_role == LIBRARY_ROLE_SEMANTIC,
+            MediaFile.status == "ready",
+            MediaFile.library_role == LIBRARY_ROLE_SEMANTIC,
+            MediaFile.review_status == "approved",
+            MediaFile.enabled == True,  # noqa: E712
+        )
     ).all()
     vector_query = " ".join(
         [
@@ -124,6 +153,9 @@ def _search_available_candidates(
             media_shot_id=shot.id,
             source=media_file.provider,
             query=storyboard.primary_query,
+            selection_stage=(
+                "local_semantic" if media_file.provider == "local" else "remote_semantic"
+            ),
             **scored,
         )
         session.add(candidate)
@@ -174,6 +206,10 @@ def assign_candidate(
     shot = session.get(MediaShot, candidate.media_shot_id)
     if not shot:
         raise ValueError("候选素材镜头不存在")
+    media_file = session.get(MediaFile, shot.media_file_id)
+    if not media_file:
+        raise ValueError("候选素材文件不存在")
+    _validate_candidate_role(scene, candidate, shot, media_file)
     if payload.trim_end_ms is not None and payload.trim_end_ms <= payload.trim_start_ms:
         raise ValueError("素材裁剪结束时间必须晚于开始时间")
     if shot.end_ms is not None and payload.trim_start_ms >= shot.end_ms - shot.start_ms:
@@ -204,6 +240,9 @@ def assign_candidate(
     assignment.playback_speed = payload.playback_speed
     assignment.transition = payload.transition
     assignment.manual_confirmed = True
+    assignment.selection_stage = candidate.selection_stage
+    assignment.selection_reason = _selection_reason(candidate.selection_stage)
+    assignment.is_fallback = candidate.is_fallback
     assignment.updated_at = now
     scene.status = "assigned"
     scene.updated_at = now
@@ -222,7 +261,131 @@ def assign_candidate(
         "playback_speed": assignment.playback_speed,
         "transition": assignment.transition,
         "manual_confirmed": assignment.manual_confirmed,
+        "selection_stage": assignment.selection_stage,
+        "selection_reason": assignment.selection_reason,
+        "is_fallback": assignment.is_fallback,
     }
+
+
+def _append_fallback_candidates(
+    session: Session,
+    project: Project,
+    scene: VisualScene,
+    storyboard: StoryboardContent,
+    library_role: str,
+) -> int:
+    existing_shot_ids = {
+        item.media_shot_id
+        for item in session.exec(
+            select(SceneCandidate).where(SceneCandidate.scene_id == scene.id)
+        ).all()
+    }
+    rows = session.exec(
+        select(MediaShot, MediaFile)
+        .join(MediaFile, MediaFile.id == MediaShot.media_file_id)
+        .where(
+            MediaShot.status == "ready",
+            MediaShot.library_role == library_role,
+            MediaFile.status == "ready",
+            MediaFile.library_role == library_role,
+            MediaFile.review_status == "approved",
+            MediaFile.enabled == True,  # noqa: E712
+        )
+    ).all()
+    ranked = []
+    for shot, media_file in rows:
+        if shot.id in existing_shot_ids:
+            continue
+        if (
+            library_role == LIBRARY_ROLE_THEMED_FALLBACK
+            and shot.fallback_category
+            and shot.fallback_category.casefold() != storyboard.fallback_category.casefold()
+        ):
+            continue
+        category_score = _fallback_match_score(
+            storyboard.fallback_category,
+            shot.fallback_category,
+            shot.description,
+            shot.tags_json,
+        )
+        mood_score = _fallback_match_score(
+            storyboard.fallback_mood,
+            shot.mood,
+            shot.description,
+            shot.tags_json,
+        )
+        technical_score = _technical_score(media_file)
+        total_score = technical_score * 0.5 + category_score * 0.35 + mood_score * 0.15
+        ranked.append((total_score, shot, media_file, category_score, mood_score, technical_score))
+    ranked.sort(key=lambda item: item[0], reverse=True)
+
+    added = 0
+    for total_score, shot, media_file, category_score, mood_score, technical_score in ranked[:5]:
+        session.add(
+            SceneCandidate(
+                id=f"candidate_{uuid4().hex}",
+                project_id=project.id,
+                scene_id=scene.id,
+                media_shot_id=shot.id,
+                source=media_file.provider,
+                query=storyboard.fallback_category,
+                semantic_score=0,
+                text_score=round(category_score, 4),
+                tag_score=round(mood_score, 4),
+                technical_score=round(technical_score, 4),
+                total_score=round(total_score, 4),
+                status="QUALIFIED",
+                selection_stage=library_role,
+                is_fallback=True,
+                conflicts_json="[]",
+            )
+        )
+        added += 1
+    if added:
+        session.commit()
+    return added
+
+
+def _fallback_match_score(expected: str, *values: str) -> float:
+    expected_tokens = _tokens(expected)
+    if not expected_tokens:
+        return 0.5
+    combined = " ".join(values)
+    if expected.casefold() in combined.casefold():
+        return 1.0
+    actual_tokens = _tokens(combined)
+    return len(expected_tokens & actual_tokens) / len(expected_tokens)
+
+
+def _validate_candidate_role(
+    scene: VisualScene,
+    candidate: SceneCandidate,
+    shot: MediaShot,
+    media_file: MediaFile,
+) -> None:
+    if media_file.status != "ready" or media_file.review_status != "approved" or not media_file.enabled:
+        raise ValueError("候选素材当前未审核通过或已停用")
+    expected_role = {
+        "local_semantic": LIBRARY_ROLE_SEMANTIC,
+        "remote_semantic": LIBRARY_ROLE_SEMANTIC,
+        LIBRARY_ROLE_THEMED_FALLBACK: LIBRARY_ROLE_THEMED_FALLBACK,
+        LIBRARY_ROLE_LANDSCAPE_FALLBACK: LIBRARY_ROLE_LANDSCAPE_FALLBACK,
+    }.get(candidate.selection_stage)
+    if expected_role and (shot.library_role != expected_role or media_file.library_role != expected_role):
+        raise ValueError("候选素材角色与当前选择阶段不匹配")
+    if candidate.selection_stage == LIBRARY_ROLE_LANDSCAPE_FALLBACK:
+        storyboard = StoryboardContent.model_validate_json(scene.storyboard_json)
+        if not storyboard.allow_landscape_fallback:
+            raise ValueError("当前场景不允许使用纯风景最终兜底")
+
+
+def _selection_reason(stage: str) -> str:
+    return {
+        "local_semantic": "本地语义素材命中",
+        "remote_semantic": "在线语义素材命中",
+        LIBRARY_ROLE_THEMED_FALLBACK: "语义素材无合格结果，使用主题化兜底",
+        LIBRARY_ROLE_LANDSCAPE_FALLBACK: "语义和主题兜底均无结果，使用纯风景最终兜底",
+    }.get(stage, "人工确认素材")
 
 
 def _score_candidate(
@@ -329,6 +492,8 @@ def _serialize_candidate(
             "total": candidate.total_score,
         },
         "status": candidate.status,
+        "selection_stage": candidate.selection_stage,
+        "is_fallback": candidate.is_fallback,
         "conflicts": json.loads(candidate.conflicts_json),
         "retrieval": {
             "vector_model": MODEL_NAME if shot.vector_id is not None else None,
@@ -344,5 +509,8 @@ def _serialize_candidate(
             "width": media_file.width,
             "height": media_file.height,
             "provider": media_file.provider,
+            "library_role": media_file.library_role,
+            "fallback_category": media_file.fallback_category,
+            "mood": media_file.mood,
         },
     }

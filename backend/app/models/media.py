@@ -3,6 +3,16 @@ from sqlmodel import Field, SQLModel
 from app.shared.time import utc_now_iso
 
 
+LIBRARY_ROLE_SEMANTIC = "semantic"
+LIBRARY_ROLE_THEMED_FALLBACK = "themed_fallback"
+LIBRARY_ROLE_LANDSCAPE_FALLBACK = "landscape_fallback"
+LIBRARY_ROLES = {
+    LIBRARY_ROLE_SEMANTIC,
+    LIBRARY_ROLE_THEMED_FALLBACK,
+    LIBRARY_ROLE_LANDSCAPE_FALLBACK,
+}
+
+
 class MediaFile(SQLModel, table=True):
     __tablename__ = "media_files"
 
@@ -17,6 +27,11 @@ class MediaFile(SQLModel, table=True):
     duration_ms: int | None = None
     width: int | None = None
     height: int | None = None
+    library_role: str = Field(default=LIBRARY_ROLE_SEMANTIC, index=True)
+    fallback_category: str = ""
+    mood: str = ""
+    review_status: str = Field(default="approved", index=True)
+    enabled: bool = Field(default=True, index=True)
     status: str = Field(default="ready", index=True)
     metadata_json: str = "{}"
     created_at: str = Field(default_factory=utc_now_iso)
@@ -35,6 +50,9 @@ class MediaShot(SQLModel, table=True):
     tags_json: str = "[]"
     thumbnail_path: str | None = None
     vector_id: int | None = None
+    library_role: str = Field(default=LIBRARY_ROLE_SEMANTIC, index=True)
+    fallback_category: str = ""
+    mood: str = ""
     status: str = Field(default="ready", index=True)
     technical_json: str = "{}"
     created_at: str = Field(default_factory=utc_now_iso)
@@ -67,6 +85,8 @@ class SceneCandidate(SQLModel, table=True):
     technical_score: float = 0
     total_score: float = 0
     status: str = Field(default="LOW_RELEVANCE", index=True)
+    selection_stage: str = Field(default="local_semantic", index=True)
+    is_fallback: bool = False
     conflicts_json: str = "[]"
     created_at: str = Field(default_factory=utc_now_iso)
 
@@ -84,6 +104,9 @@ class SceneAssignment(SQLModel, table=True):
     playback_speed: float = 1.0
     transition: str = "cut"
     manual_confirmed: bool = True
+    selection_stage: str = Field(default="manual", index=True)
+    selection_reason: str = ""
+    is_fallback: bool = False
     created_at: str = Field(default_factory=utc_now_iso)
     updated_at: str = Field(default_factory=utc_now_iso)
 

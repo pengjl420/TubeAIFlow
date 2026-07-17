@@ -21,6 +21,7 @@ export interface StoryboardContent {
   alternative_queries: string[]
   fallback_category: string
   fallback_mood: string
+  allow_landscape_fallback: boolean
   must_include: string[]
   avoid: string[]
   confidence: number

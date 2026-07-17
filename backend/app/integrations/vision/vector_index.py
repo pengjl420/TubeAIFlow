@@ -46,6 +46,23 @@ def search(query: str) -> dict[str, float]:
     return scores
 
 
+def remove_shot(media_shot_id: str) -> None:
+    """Remove a shot that is no longer eligible for semantic retrieval."""
+    with _INDEX_LOCK:
+        path = _index_path()
+        payload = _read_index(path)
+        remove_ids = [
+            vector_id
+            for vector_id, item in payload["vectors"].items()
+            if item.get("media_shot_id") == media_shot_id
+        ]
+        if not remove_ids:
+            return
+        for vector_id in remove_ids:
+            payload["vectors"].pop(vector_id, None)
+        _write_index(path, payload)
+
+
 def _index_path() -> Path:
     directory = get_settings().workspace_dir / "indexes"
     directory.mkdir(parents=True, exist_ok=True)

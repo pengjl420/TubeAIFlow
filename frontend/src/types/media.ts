@@ -5,6 +5,9 @@ export interface MediaKeyframe {
   url: string
 }
 
+export type LibraryRole = 'semantic' | 'themed_fallback' | 'landscape_fallback'
+export type ReviewStatus = 'pending' | 'approved' | 'rejected'
+
 export interface MediaShot {
   id: string
   shot_index: number
@@ -17,6 +20,9 @@ export interface MediaShot {
   keyframes: MediaKeyframe[]
   vector_id: number | null
   vector_model: string | null
+  library_role: LibraryRole
+  fallback_category: string
+  mood: string
   status: string
   technical: Record<string, unknown>
 }
@@ -33,6 +39,11 @@ export interface MediaAsset {
   duration_ms: number | null
   width: number | null
   height: number | null
+  library_role: LibraryRole
+  fallback_category: string
+  mood: string
+  review_status: ReviewStatus
+  enabled: boolean
   status: string
   created_at: string
   shots: MediaShot[]
@@ -52,6 +63,8 @@ export interface SceneCandidate {
     total: number
   }
   status: 'NO_RESULT' | 'LOW_RELEVANCE' | 'QUALIFIED' | 'FALLBACK_REQUIRED'
+  selection_stage: 'local_semantic' | 'remote_semantic' | 'themed_fallback' | 'landscape_fallback'
+  is_fallback: boolean
   conflicts: string[]
   retrieval: {
     vector_model: string | null
@@ -67,6 +80,9 @@ export interface SceneCandidate {
     width: number | null
     height: number | null
     provider: string
+    library_role: LibraryRole
+    fallback_category: string
+    mood: string
   }
 }
 

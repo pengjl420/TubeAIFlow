@@ -3,6 +3,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import BatchCreate from './pages/batches/BatchCreate.vue'
 import BatchDetail from './pages/batches/BatchDetail.vue'
 import BatchList from './pages/batches/BatchList.vue'
+import AssetLibrary from './pages/assets/AssetLibrary.vue'
 import ProjectConfig from './pages/projects/ProjectConfig.vue'
 import ProjectCreate from './pages/projects/ProjectCreate.vue'
 import ProjectShell from './pages/projects/ProjectShell.vue'
@@ -21,6 +22,7 @@ const router = createRouter({
     { path: '/batches', component: BatchList },
     { path: '/batches/new', component: BatchCreate },
     { path: '/batches/:id', component: BatchDetail },
+    { path: '/assets', component: AssetLibrary },
     { path: '/projects/new', component: ProjectCreate },
     { path: '/projects/:id', component: ProjectShell },
     { path: '/projects/:id/storyboard', component: ProjectStoryboardWorkspace },
@@ -35,6 +37,8 @@ const router = createRouter({
 router.afterEach((to) => {
   const section = to.path.startsWith('/voices')
     ? '参考音频'
+    : to.path.startsWith('/assets')
+      ? '本地素材库'
     : to.path.startsWith('/batches')
       ? '批量生产'
       : to.path.startsWith('/settings')

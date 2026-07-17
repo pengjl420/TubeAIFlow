@@ -3,6 +3,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from sqlmodel import Session, SQLModel, create_engine
+
+from app.models.media import MediaFile
 from app.services.rendering import rough_cut_service as video_service
 
 
@@ -91,6 +94,42 @@ class VideoServiceTests(unittest.TestCase):
         for item in selected:
             self.assertAlmostEqual(item.clip_duration, 4.0)
         self.assertGreater(sum(item.clip_duration for item in selected), 5.0)
+
+    def test_rough_cut_pool_never_returns_semantic_assets(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            landscape_path = root / "landscape.mp4"
+            semantic_path = root / "semantic.mp4"
+            landscape_path.write_bytes(b"landscape")
+            semantic_path.write_bytes(b"semantic")
+            engine = create_engine(f"sqlite:///{root / 'media.db'}")
+            SQLModel.metadata.create_all(engine)
+            with Session(engine) as session:
+                session.add_all(
+                    [
+                        MediaFile(
+                            id="landscape",
+                            path=str(landscape_path),
+                            filename=landscape_path.name,
+                            media_type="video",
+                            file_hash="landscape",
+                            library_role="landscape_fallback",
+                        ),
+                        MediaFile(
+                            id="semantic",
+                            path=str(semantic_path),
+                            filename=semantic_path.name,
+                            media_type="video",
+                            file_hash="semantic",
+                            library_role="semantic",
+                        ),
+                    ]
+                )
+                session.commit()
+                selected = video_service.list_rough_cut_video_files(session, root)
+            engine.dispose()
+
+        self.assertEqual(selected, [landscape_path])
 
 
 if __name__ == "__main__":

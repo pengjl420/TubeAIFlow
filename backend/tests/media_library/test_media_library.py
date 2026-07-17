@@ -204,6 +204,73 @@ class MediaLibraryTests(unittest.TestCase):
         self.assertTrue(saved_shot.thumbnail_path)
         self.assertEqual(result["asset"]["shots"][0]["vector_model"], "local-hash-v1")
 
+    def test_landscape_assets_only_appear_as_an_allowed_final_fallback(self) -> None:
+        storyboard = StoryboardContent(
+            visual_summary="A reflective transition",
+            visual_type="transition",
+            scene_category="transition",
+            mood="reflective",
+            shot_preference="wide",
+            primary_query="reflective transition",
+            fallback_category="transition",
+            fallback_mood="reflective",
+            allow_landscape_fallback=True,
+            confidence=0.8,
+        )
+        project = Project(id="fallback-project", name="Fallback")
+        scene = VisualScene(
+            id="fallback-scene",
+            project_id=project.id,
+            scene_index=1,
+            start_ms=0,
+            end_ms=5000,
+            narration="Time passed.",
+            storyboard_json=storyboard.model_dump_json(),
+        )
+        media_file = MediaFile(
+            id="landscape-file",
+            path=str(self.root / "mountain.mp4"),
+            filename="mountain.mp4",
+            media_type="video",
+            file_hash="landscape-hash",
+            duration_ms=5000,
+            width=1920,
+            height=1080,
+            library_role="landscape_fallback",
+            fallback_category="landscape",
+            mood="reflective",
+        )
+        shot = MediaShot(
+            id="landscape-shot",
+            media_file_id=media_file.id,
+            shot_index=1,
+            start_ms=0,
+            end_ms=5000,
+            description="quiet mountain sunset",
+            tags_json='["mountain", "sunset", "reflective"]',
+            library_role="landscape_fallback",
+            fallback_category="landscape",
+            mood="reflective",
+        )
+
+        with Session(self.engine) as session:
+            session.add_all([project, scene, media_file, shot])
+            session.commit()
+            with patch.object(retrieval_service.media_provider_service, "PROVIDER_ORDER", []):
+                allowed = retrieval_service.search_scene_candidates(session, project, scene.id)
+            self.assertEqual(allowed["status"], "FALLBACK_REQUIRED")
+            self.assertEqual(allowed["candidates"][0]["selection_stage"], "landscape_fallback")
+            self.assertTrue(allowed["candidates"][0]["is_fallback"])
+
+            storyboard.allow_landscape_fallback = False
+            scene.storyboard_json = storyboard.model_dump_json()
+            session.add(scene)
+            session.commit()
+            with patch.object(retrieval_service.media_provider_service, "PROVIDER_ORDER", []):
+                blocked = retrieval_service.search_scene_candidates(session, project, scene.id)
+            self.assertEqual(blocked["status"], "NO_RESULT")
+            self.assertEqual(blocked["candidates"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

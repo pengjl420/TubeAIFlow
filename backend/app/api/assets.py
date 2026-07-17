@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse
 from sqlmodel import Session
 
 from app.database import get_session
-from app.schemas.media import AssetImportRequest, SceneAssignmentRequest
+from app.schemas.media import AssetImportRequest, AssetUpdateRequest, SceneAssignmentRequest
 from app.models.media import MediaKeyframe, MediaShot
 from app.services.media_library import ingestion_service, retrieval_service
 from app.services.projects import project_service
@@ -17,9 +17,14 @@ router = APIRouter(tags=["assets"])
 @router.get("/assets")
 def list_assets(
     limit: int = Query(default=200, ge=1, le=1000),
+    library_role: str | None = Query(default=None),
     session: Session = Depends(get_session),
 ) -> dict:
-    return {"success": True, "data": {"assets": ingestion_service.list_assets(session, limit)}}
+    try:
+        assets = ingestion_service.list_assets(session, limit, library_role)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"success": False, "error": str(exc)}) from exc
+    return {"success": True, "data": {"assets": assets}}
 
 
 @router.post("/assets/import")
@@ -28,8 +33,30 @@ def import_assets(
     session: Session = Depends(get_session),
 ) -> dict:
     try:
-        data = ingestion_service.import_directory(session, payload.directory)
+        data = ingestion_service.import_directory(
+            session,
+            payload.directory,
+            payload.library_role,
+            payload.fallback_category,
+            payload.mood,
+        )
     except (OSError, ValueError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"success": False, "error": str(exc)},
+        ) from exc
+    return {"success": True, "data": data}
+
+
+@router.patch("/assets/{media_id}")
+def update_asset(
+    media_id: str,
+    payload: AssetUpdateRequest,
+    session: Session = Depends(get_session),
+) -> dict:
+    try:
+        data = ingestion_service.update_asset(session, media_id, payload)
+    except ValueError as exc:
         raise HTTPException(
             status_code=400,
             detail={"success": False, "error": str(exc)},

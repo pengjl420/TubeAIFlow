@@ -1,10 +1,7 @@
 from collections.abc import Callable
-from pathlib import Path
-
 from sqlmodel import Session, select
 
-from app.infrastructure.project_layout import load_project_config
-from app.models.media import MediaShot, SceneAssignment
+from app.models.media import LIBRARY_ROLE_SEMANTIC, SceneAssignment
 from app.models.project import Project
 from app.models.storyboard import SubtitleCue, VisualScene
 from app.services.media_library import ingestion_service, retrieval_service
@@ -125,12 +122,10 @@ def _scenes(session: Session, project_id: str) -> list[VisualScene]:
 
 
 def _ingest_configured_assets(session: Session, project: Project) -> None:
-    config = load_project_config(project)
-    directory_value = str(config.get("media_video_dir") or "").strip()
-    if directory_value:
-        directory = Path(directory_value).expanduser().resolve()
-        if directory.is_dir():
-            ingestion_service.import_directory(session, directory)
-    for asset in ingestion_service.list_assets(session, limit=1000):
+    # media_video_dir belongs to the landscape rough-cut mode. Intelligent
+    # synthesis only ingests assets explicitly classified for semantic search.
+    for asset in ingestion_service.list_assets(
+        session, limit=1000, library_role=LIBRARY_ROLE_SEMANTIC
+    ):
         if any(shot.get("vector_id") is None for shot in asset["shots"]):
             ingestion_service.ingest_asset(session, asset["id"])

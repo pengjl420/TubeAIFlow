@@ -10,9 +10,15 @@ from sqlmodel import Session, select
 from app.config import get_settings
 from app.infrastructure.ffmpeg import probe_media, run_ffmpeg
 from app.integrations.vision.embedding import MODEL_NAME
-from app.integrations.vision.vector_index import upsert_shot
-from app.models.media import MediaFile, MediaKeyframe, MediaShot
-from app.schemas.media import RemoteMediaCandidate
+from app.integrations.vision.vector_index import remove_shot, upsert_shot
+from app.models.media import (
+    LIBRARY_ROLE_SEMANTIC,
+    LIBRARY_ROLES,
+    MediaFile,
+    MediaKeyframe,
+    MediaShot,
+)
+from app.schemas.media import AssetUpdateRequest, RemoteMediaCandidate
 from app.shared.time import utc_now_iso
 
 
@@ -22,7 +28,15 @@ SHOT_TARGET_MS = 12_000
 MIN_TAIL_MS = 1_500
 
 
-def import_directory(session: Session, directory: str) -> dict:
+def import_directory(
+    session: Session,
+    directory: str,
+    library_role: str = LIBRARY_ROLE_SEMANTIC,
+    fallback_category: str = "",
+    mood: str = "",
+) -> dict:
+    if library_role not in LIBRARY_ROLES:
+        raise ValueError(f"未知素材角色：{library_role}")
     root = Path(directory).expanduser().resolve()
     if not root.is_dir():
         raise ValueError(f"素材目录不存在：{root}")
@@ -43,7 +57,13 @@ def import_directory(session: Session, directory: str) -> dict:
             if existing:
                 skipped.append({"path": str(path), "reason": "duplicate", "media_id": existing.id})
                 continue
-            media_file = _create_media_file(path, file_hash)
+            media_file = _create_media_file(
+                path,
+                file_hash,
+                library_role=library_role,
+                fallback_category=fallback_category,
+                mood=mood,
+            )
             session.add(media_file)
             for shot in _create_shots(media_file):
                 session.add(shot)
@@ -85,6 +105,7 @@ def import_remote_asset(
         provider=candidate.provider,
         provider_asset_id=candidate.asset_id,
         source_metadata=candidate.model_dump(mode="json"),
+        library_role=LIBRARY_ROLE_SEMANTIC,
     )
     description = " ".join([candidate.title, candidate.query]).strip()
     tags = list(dict.fromkeys([*candidate.tags, *_tags(description)]))
@@ -98,9 +119,18 @@ def import_remote_asset(
     return media_file, True
 
 
-def list_assets(session: Session, limit: int = 200) -> list[dict]:
+def list_assets(
+    session: Session,
+    limit: int = 200,
+    library_role: str | None = None,
+) -> list[dict]:
+    statement = select(MediaFile)
+    if library_role:
+        if library_role not in LIBRARY_ROLES:
+            raise ValueError(f"未知素材角色：{library_role}")
+        statement = statement.where(MediaFile.library_role == library_role)
     media_files = session.exec(
-        select(MediaFile).order_by(MediaFile.created_at.desc()).limit(limit)
+        statement.order_by(MediaFile.created_at.desc()).limit(limit)
     ).all()
     result = []
     for media_file in media_files:
@@ -127,6 +157,40 @@ def get_asset(session: Session, media_id: str) -> dict:
     item = _serialize_media_file(media_file)
     item["shots"] = [serialize_shot(session, shot) for shot in shots]
     return item
+
+
+def update_asset(
+    session: Session,
+    media_id: str,
+    payload: AssetUpdateRequest,
+) -> dict:
+    media_file = session.get(MediaFile, media_id)
+    if not media_file:
+        raise ValueError("素材不存在")
+    shots = session.exec(
+        select(MediaShot).where(MediaShot.media_file_id == media_file.id)
+    ).all()
+    media_file.library_role = payload.library_role
+    media_file.fallback_category = payload.fallback_category
+    media_file.mood = payload.mood
+    media_file.review_status = payload.review_status
+    media_file.enabled = payload.enabled
+    media_file.updated_at = utc_now_iso()
+    session.add(media_file)
+    for shot in shots:
+        shot.library_role = payload.library_role
+        shot.fallback_category = payload.fallback_category
+        shot.mood = payload.mood
+        if payload.library_role != LIBRARY_ROLE_SEMANTIC and shot.vector_id is not None:
+            remove_shot(shot.id)
+            shot.vector_id = None
+            technical = _safe_json_object(shot.technical_json)
+            technical["vector_model"] = None
+            shot.technical_json = json.dumps(technical, ensure_ascii=False)
+        shot.updated_at = utc_now_iso()
+        session.add(shot)
+    session.commit()
+    return get_asset(session, media_id)
 
 
 def ingest_asset(session: Session, media_id: str) -> dict:
@@ -168,6 +232,9 @@ def _create_media_file(
     provider: str = "local",
     provider_asset_id: str | None = None,
     source_metadata: dict | None = None,
+    library_role: str = LIBRARY_ROLE_SEMANTIC,
+    fallback_category: str = "",
+    mood: str = "",
 ) -> MediaFile:
     media_type = "video" if path.suffix.lower() in VIDEO_EXTENSIONS else "image"
     metadata = probe_media(path)
@@ -186,6 +253,9 @@ def _create_media_file(
         duration_ms=metadata.get("duration_ms"),
         width=metadata.get("width"),
         height=metadata.get("height"),
+        library_role=library_role,
+        fallback_category=fallback_category,
+        mood=mood,
         metadata_json=json.dumps(metadata, ensure_ascii=False),
         created_at=now,
         updated_at=now,
@@ -211,6 +281,9 @@ def _create_shots(media_file: MediaFile) -> list[MediaShot]:
             end_ms=end_ms,
             description=description,
             tags_json=json.dumps(tags, ensure_ascii=False),
+            library_role=media_file.library_role,
+            fallback_category=media_file.fallback_category,
+            mood=media_file.mood,
             technical_json=json.dumps(technical, ensure_ascii=False),
             created_at=now,
             updated_at=now,
@@ -261,6 +334,11 @@ def _serialize_media_file(media_file: MediaFile) -> dict:
         "duration_ms": media_file.duration_ms,
         "width": media_file.width,
         "height": media_file.height,
+        "library_role": media_file.library_role,
+        "fallback_category": media_file.fallback_category,
+        "mood": media_file.mood,
+        "review_status": media_file.review_status,
+        "enabled": media_file.enabled,
         "status": media_file.status,
         "created_at": media_file.created_at,
     }
@@ -295,7 +373,13 @@ def _ingest_shot(
     searchable_text = " ".join(
         [shot.description, media_file.filename, *json.loads(shot.tags_json)]
     )
-    shot.vector_id = upsert_shot(shot.id, searchable_text)
+    if shot.library_role == LIBRARY_ROLE_SEMANTIC:
+        shot.vector_id = upsert_shot(shot.id, searchable_text)
+        vector_model = MODEL_NAME
+    else:
+        remove_shot(shot.id)
+        shot.vector_id = None
+        vector_model = None
     shot.thumbnail_path = frames[len(frames) // 2].path if frames else None
     shot.status = "ready"
     shot.updated_at = now
@@ -303,7 +387,7 @@ def _ingest_shot(
     technical.update(
         {
             "keyframe_count": len(frames),
-            "vector_model": MODEL_NAME,
+            "vector_model": vector_model,
             "ingestion_error": None,
         }
     )
@@ -389,6 +473,9 @@ def serialize_shot(session: Session, shot: MediaShot) -> dict:
         ],
         "vector_id": shot.vector_id,
         "vector_model": technical.get("vector_model"),
+        "library_role": shot.library_role,
+        "fallback_category": shot.fallback_category,
+        "mood": shot.mood,
         "status": shot.status,
         "technical": technical,
     }

@@ -24,6 +24,7 @@ class StoryboardContent(BaseModel):
     alternative_queries: list[str] = Field(default_factory=list, max_length=5)
     fallback_category: str = Field(min_length=1)
     fallback_mood: str = Field(min_length=1)
+    allow_landscape_fallback: bool = False
     must_include: list[str] = Field(default_factory=list)
     avoid: list[str] = Field(default_factory=list)
     confidence: float = Field(ge=0, le=1)

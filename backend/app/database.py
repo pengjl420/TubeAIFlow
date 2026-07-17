@@ -231,6 +231,27 @@ def _apply_migrations() -> None:
             "CREATE INDEX IF NOT EXISTS ix_media_query_cache_expires_at "
             "ON media_query_cache (expires_at)",
         ],
+        8: [
+            "ALTER TABLE media_files ADD COLUMN library_role VARCHAR NOT NULL DEFAULT 'semantic'",
+            "ALTER TABLE media_files ADD COLUMN fallback_category VARCHAR NOT NULL DEFAULT ''",
+            "ALTER TABLE media_files ADD COLUMN mood VARCHAR NOT NULL DEFAULT ''",
+            "ALTER TABLE media_files ADD COLUMN review_status VARCHAR NOT NULL DEFAULT 'approved'",
+            "ALTER TABLE media_files ADD COLUMN enabled BOOLEAN NOT NULL DEFAULT 1",
+            "CREATE INDEX IF NOT EXISTS ix_media_files_library_role ON media_files (library_role)",
+            "CREATE INDEX IF NOT EXISTS ix_media_files_review_status ON media_files (review_status)",
+            "CREATE INDEX IF NOT EXISTS ix_media_files_enabled ON media_files (enabled)",
+            "ALTER TABLE media_shots ADD COLUMN library_role VARCHAR NOT NULL DEFAULT 'semantic'",
+            "ALTER TABLE media_shots ADD COLUMN fallback_category VARCHAR NOT NULL DEFAULT ''",
+            "ALTER TABLE media_shots ADD COLUMN mood VARCHAR NOT NULL DEFAULT ''",
+            "CREATE INDEX IF NOT EXISTS ix_media_shots_library_role ON media_shots (library_role)",
+            "ALTER TABLE scene_candidates ADD COLUMN selection_stage VARCHAR NOT NULL DEFAULT 'local_semantic'",
+            "ALTER TABLE scene_candidates ADD COLUMN is_fallback BOOLEAN NOT NULL DEFAULT 0",
+            "CREATE INDEX IF NOT EXISTS ix_scene_candidates_selection_stage ON scene_candidates (selection_stage)",
+            "ALTER TABLE scene_assignments ADD COLUMN selection_stage VARCHAR NOT NULL DEFAULT 'manual'",
+            "ALTER TABLE scene_assignments ADD COLUMN selection_reason VARCHAR NOT NULL DEFAULT ''",
+            "ALTER TABLE scene_assignments ADD COLUMN is_fallback BOOLEAN NOT NULL DEFAULT 0",
+            "CREATE INDEX IF NOT EXISTS ix_scene_assignments_selection_stage ON scene_assignments (selection_stage)",
+        ],
     }
     with engine.begin() as connection:
         connection.exec_driver_sql(

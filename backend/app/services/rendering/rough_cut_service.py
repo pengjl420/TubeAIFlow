@@ -9,10 +9,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.config import get_settings
 from app.models.project import Project
+from app.models.media import LIBRARY_ROLE_LANDSCAPE_FALLBACK, MediaFile
 from app.infrastructure.ffmpeg import probe_duration, run_ffmpeg
 from app.infrastructure.project_layout import (
     ensure_project_dirs,
@@ -21,6 +22,7 @@ from app.infrastructure.project_layout import (
     get_output_stem,
     get_project_work_dir,
 )
+from app.services.media_library import ingestion_service
 
 
 logger = logging.getLogger(__name__)
@@ -109,7 +111,13 @@ def _compose_video(session: Session, project: Project) -> Path:
     session.add(project)
     session.commit()
 
-    source_paths = scan_video_files(media_dir)
+    ingestion_service.import_directory(
+        session,
+        str(media_dir),
+        library_role=LIBRARY_ROLE_LANDSCAPE_FALLBACK,
+        fallback_category="landscape",
+    )
+    source_paths = list_rough_cut_video_files(session, media_dir)
     write_video_progress(progress_path, "running", "selecting", 12, message="Selecting video materials")
     grouped_paths = group_video_files(source_paths)
     selected = select_videos_for_duration(grouped_paths, target_duration)
@@ -229,6 +237,30 @@ def scan_video_files(media_dir: Path) -> list[Path]:
     if not paths:
         raise ValueError("No supported video files found in material directory")
     return sorted(paths, key=lambda item: str(item).lower())
+
+
+def list_rough_cut_video_files(session: Session, media_dir: Path) -> list[Path]:
+    """Return only approved landscape-pool videos inside the configured directory."""
+    root = media_dir.resolve()
+    media_files = session.exec(
+        select(MediaFile).where(
+            MediaFile.media_type == "video",
+            MediaFile.library_role == LIBRARY_ROLE_LANDSCAPE_FALLBACK,
+            MediaFile.review_status == "approved",
+            MediaFile.enabled == True,  # noqa: E712
+            MediaFile.status == "ready",
+        )
+    ).all()
+    paths = []
+    for media_file in media_files:
+        path = Path(media_file.path).resolve()
+        if path.is_file() and path.is_relative_to(root):
+            paths.append(path)
+    if not paths:
+        raise ValueError(
+            "风景空镜池中没有可用视频；普通语义素材不会被快速空镜流程使用"
+        )
+    return sorted(set(paths), key=lambda item: str(item).lower())
 
 
 def group_video_files(paths: list[Path]) -> dict[str, list[Path]]:
@@ -417,6 +449,8 @@ def write_selected_manifest(path: Path, selected: list[SelectedVideo], target_du
     data = {
         "target_duration": target_duration,
         "selected_duration": sum(item.clip_duration for item in selected),
+        "selection_mode": "landscape_rough_cut",
+        "required_library_role": LIBRARY_ROLE_LANDSCAPE_FALLBACK,
         "items": [
             {
                 "title_group": item.title_group,

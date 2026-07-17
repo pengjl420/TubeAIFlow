@@ -1898,8 +1898,9 @@ main {
 .media-review-metrics span { color: var(--ink-soft); font-size: 11px; }
 .media-import-bar { align-items: end; display: grid; gap: 18px; grid-template-columns: 190px minmax(0, 1fr); }
 .media-import-bar h2 { margin: 4px 0 0; }
-.media-directory-control { display: flex; gap: 9px; }
+.media-directory-control { display: flex; flex-wrap: wrap; gap: 9px; }
 .media-directory-control input { flex: 1; min-width: 180px; }
+.media-directory-control .filter-select { min-width: 170px; }
 .media-review-layout { align-items: start; display: grid; gap: 18px; grid-template-columns: 310px minmax(0, 1fr); }
 .scene-review-rail { display: grid; gap: 8px; max-height: calc(100vh - 120px); overflow: auto; position: sticky; top: 20px; }
 .scene-review-item {
@@ -1963,6 +1964,16 @@ main {
 .asset-index-head > div { display: grid; gap: 4px; min-width: 0; }
 .asset-index-head strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .asset-index-head small { color: var(--ink-soft); }
+.asset-classification-controls {
+  align-items: end;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 9px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 14px;
+  padding-top: 14px;
+}
+.asset-classification-controls .checkbox-field { min-height: 42px; }
 .asset-shot-list { display: grid; gap: 8px; margin-top: 14px; }
 .asset-shot-row { align-items: center; border-top: 1px solid var(--line); display: grid; gap: 10px; grid-template-columns: 92px 1fr; padding-top: 8px; }
 .asset-shot-row img, .asset-shot-placeholder { aspect-ratio: 16 / 9; background: var(--surface-soft); border-radius: 6px; object-fit: cover; width: 92px; }
@@ -1970,15 +1981,68 @@ main {
 .asset-shot-row > span { display: grid; gap: 3px; }
 .asset-shot-row small { color: var(--ink-soft); }
 
+.asset-library-page { display: grid; gap: 18px; }
+.asset-library-hero { align-items: end; display: flex; gap: 24px; justify-content: space-between; }
+.asset-library-hero h1 { margin: 5px 0 8px; }
+.asset-library-hero p { color: var(--ink-soft); margin: 0; }
+.asset-library-metrics { display: grid; gap: 12px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.asset-library-metrics > div {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  display: grid;
+  gap: 5px;
+  padding: 14px 16px;
+}
+.asset-library-metrics span { color: var(--ink-soft); font-size: 11px; }
+.asset-library-metrics strong { color: var(--teal); font-size: 24px; }
+.asset-import-panel { display: grid; gap: 16px; }
+.asset-import-panel .section-head p { color: var(--ink-soft); margin: 6px 0 0; }
+.asset-import-form { align-items: end; display: grid; gap: 12px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.asset-directory-field { grid-column: span 3; }
+.asset-directory-field .inline-form { display: flex; gap: 8px; }
+.asset-directory-field .inline-form input { flex: 1; }
+.vector-help-panel { align-items: center; display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr) 360px; }
+.vector-help-panel h2 { margin: 4px 0 8px; }
+.vector-help-panel p { color: var(--ink-soft); margin: 0; }
+.vector-model-note { background: var(--teal-soft); border-radius: 10px; display: grid; gap: 4px; padding: 13px 15px; }
+.vector-model-note span, .vector-model-note small { color: var(--ink-soft); }
+.vector-model-note strong { color: var(--teal); }
+.asset-library-toolbar { align-items: end; display: flex; flex-wrap: wrap; gap: 10px; }
+.asset-library-toolbar .search-field { flex: 1; min-width: 260px; }
+.asset-library-grid { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.asset-library-card { overflow: hidden; padding: 0; }
+.asset-library-preview { aspect-ratio: 16 / 7; background: #eaf0f3; position: relative; }
+.asset-library-preview img { height: 100%; object-fit: cover; width: 100%; }
+.asset-library-preview .status-pill { position: absolute; right: 12px; top: 12px; }
+.asset-preview-placeholder { align-items: center; color: var(--ink-soft); display: flex; height: 100%; justify-content: center; }
+.asset-library-card-body { display: grid; gap: 14px; padding: 16px; }
+.asset-card-title { align-items: start; display: flex; gap: 12px; justify-content: space-between; }
+.asset-card-title > div { display: grid; gap: 4px; min-width: 0; }
+.asset-card-title strong, .asset-card-title small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.asset-card-title small { color: var(--ink-soft); }
+.asset-card-title > span { background: var(--surface-soft); border-radius: 7px; flex: 0 0 auto; font-size: 11px; padding: 6px 8px; }
+.asset-card-meta { color: var(--ink-soft); display: flex; flex-wrap: wrap; font-size: 11px; gap: 8px 14px; }
+.asset-card-settings { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.asset-card-settings .checkbox-field { align-self: end; min-height: 42px; }
+.asset-card-actions { display: flex; gap: 9px; justify-content: flex-end; }
+
 @media (max-width: 1180px) {
   .media-review-layout { grid-template-columns: 250px minmax(0, 1fr); }
   .candidate-grid { grid-template-columns: 1fr; }
+  .asset-import-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .asset-directory-field { grid-column: span 2; }
+  .asset-library-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 900px) {
   .media-review-layout { grid-template-columns: 1fr; }
   .scene-review-rail { max-height: 380px; position: static; }
   .asset-index-grid { grid-template-columns: 1fr; }
+  .asset-classification-controls { grid-template-columns: 1fr; }
+  .asset-library-hero { align-items: start; flex-direction: column; }
+  .asset-library-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .vector-help-panel { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 680px) {
@@ -1987,6 +2051,9 @@ main {
   .media-import-bar { grid-template-columns: 1fr; }
   .media-directory-control { align-items: stretch; flex-direction: column; }
   .score-breakdown { grid-template-columns: repeat(2, 1fr); }
+  .asset-import-form, .asset-card-settings { grid-template-columns: 1fr; }
+  .asset-directory-field { grid-column: auto; }
+  .asset-directory-field .inline-form, .asset-card-actions { align-items: stretch; flex-direction: column; }
 }
 
 .empty-icon {

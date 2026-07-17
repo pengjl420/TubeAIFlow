@@ -10,11 +10,12 @@ import {
   listAssets,
   listSceneCandidates,
   searchSceneCandidates,
+  updateAsset,
 } from '../../api/assets'
 import { getProject, selectDirectory } from '../../api/projects'
 import { getStoryboard } from '../../api/storyboard'
 import { startVideoWorkflow } from '../../api/tasks'
-import type { MediaAsset, SceneCandidate } from '../../types/media'
+import type { LibraryRole, MediaAsset, SceneCandidate } from '../../types/media'
 import type { Project } from '../../types/project'
 import type { VisualScene } from '../../types/storyboard'
 import { formatDuration } from '../../utils/time'
@@ -28,10 +29,15 @@ const assets = ref<MediaAsset[]>([])
 const candidates = ref<SceneCandidate[]>([])
 const selectedSceneId = ref('')
 const importDirectory = ref('')
+const importRole = ref<LibraryRole>('semantic')
+const importFallbackCategory = ref('')
+const importMood = ref('')
+const roleFilter = ref<'all' | LibraryRole>('all')
 const loading = ref(false)
 const searching = ref(false)
 const importing = ref(false)
 const indexingId = ref('')
+const updatingId = ref('')
 const assigningId = ref('')
 const continuing = ref(false)
 const message = ref('')
@@ -42,6 +48,9 @@ const indexedShotCount = computed(() => assets.value.flatMap((asset) => asset.sh
 const keyframeCount = computed(() => assets.value.flatMap((asset) => asset.shots).reduce((sum, shot) => sum + shot.keyframes.length, 0))
 const assignedCount = computed(() => scenes.value.filter((scene) => scene.status === 'assigned' || scene.status === 'rendered').length)
 const reviewComplete = computed(() => scenes.value.length > 0 && assignedCount.value === scenes.value.length)
+const filteredAssets = computed(() => roleFilter.value === 'all'
+  ? assets.value
+  : assets.value.filter((asset) => asset.library_role === roleFilter.value))
 
 async function load() {
   loading.value = true
@@ -55,8 +64,6 @@ async function load() {
     project.value = loadedProject
     scenes.value = loadedScenes
     assets.value = loadedAssets
-    const configuredDirectory = loadedProject.config?.media_video_dir
-    importDirectory.value = typeof configuredDirectory === 'string' ? configuredDirectory : ''
     if (loadedScenes.length) await selectScene(loadedScenes[0].id)
   } catch (err) {
     error.value = err instanceof Error ? err.message : '素材审核工作区加载失败'
@@ -95,7 +102,16 @@ async function importAndIndex() {
   error.value = ''
   message.value = '正在扫描素材目录…'
   try {
-    const result = await importAssets(importDirectory.value.trim())
+    if (importRole.value === 'themed_fallback' && !importFallbackCategory.value.trim()) {
+      error.value = '主题兜底素材必须填写兜底类别'
+      return
+    }
+    const result = await importAssets(
+      importDirectory.value.trim(),
+      importRole.value,
+      importFallbackCategory.value.trim(),
+      importMood.value.trim(),
+    )
     const targets = new Map<string, string>()
     for (const asset of result.imported) targets.set(asset.id, asset.filename)
     for (const skipped of result.skipped) targets.set(skipped.media_id, skipped.path.split(/[\\/]/).pop() || skipped.path)
@@ -137,6 +153,46 @@ async function buildIndex(asset: MediaAsset) {
   } finally {
     indexingId.value = ''
   }
+}
+
+async function saveAssetClassification(asset: MediaAsset) {
+  updatingId.value = asset.id
+  error.value = ''
+  try {
+    const updated = await updateAsset(asset.id, {
+      library_role: asset.library_role,
+      fallback_category: asset.fallback_category,
+      mood: asset.mood,
+      review_status: asset.review_status,
+      enabled: asset.enabled,
+    })
+    const index = assets.value.findIndex((item) => item.id === asset.id)
+    if (index >= 0) assets.value[index] = updated
+    message.value = asset.library_role === 'semantic'
+      ? `${asset.filename} 已归入语义素材池；如尚无向量，请重建索引`
+      : `${asset.filename} 的素材角色已更新，且不会参与普通语义向量召回`
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '素材分类保存失败'
+  } finally {
+    updatingId.value = ''
+  }
+}
+
+function roleLabel(role: LibraryRole) {
+  return {
+    semantic: '语义素材',
+    themed_fallback: '主题兜底',
+    landscape_fallback: '纯风景最终兜底',
+  }[role]
+}
+
+function selectionStageLabel(stage: SceneCandidate['selection_stage']) {
+  return {
+    local_semantic: '本地语义命中',
+    remote_semantic: '在线语义命中',
+    themed_fallback: '主题兜底',
+    landscape_fallback: '纯风景最终兜底',
+  }[stage]
 }
 
 async function searchCandidates() {
@@ -237,6 +293,21 @@ onMounted(load)
         <h2>本地素材入库</h2>
       </div>
       <div class="media-directory-control">
+        <select v-model="importRole" class="filter-select" aria-label="导入素材角色">
+          <option value="semantic">语义素材</option>
+          <option value="themed_fallback">主题化兜底</option>
+          <option value="landscape_fallback">纯风景最终兜底</option>
+        </select>
+        <input
+          v-if="importRole === 'themed_fallback'"
+          v-model="importFallbackCategory"
+          placeholder="兜底类别，例如 business"
+        />
+        <input
+          v-if="importRole !== 'semantic'"
+          v-model="importMood"
+          placeholder="情绪标签，例如 reflective"
+        />
         <input v-model="importDirectory" readonly placeholder="选择包含视频或图片的目录" />
         <button class="secondary-button" :disabled="importing" @click="chooseDirectory">选择目录</button>
         <button class="primary-button" :disabled="importing || !importDirectory" @click="importAndIndex">
@@ -320,6 +391,7 @@ onMounted(load)
                 <span>{{ candidate.media.width || '—' }} × {{ candidate.media.height || '—' }}</span>
                 <span>{{ formatMilliseconds(candidate.shot.end_ms === null ? null : candidate.shot.end_ms - candidate.shot.start_ms) }}</span>
                 <span>{{ candidate.retrieval.vector_model || '未建立向量' }}</span>
+                <span>{{ selectionStageLabel(candidate.selection_stage) }}</span>
               </div>
               <button class="primary-button candidate-assign" :disabled="candidate.status !== 'QUALIFIED' || assigningId === candidate.id" @click="assign(candidate)">
                 {{ assigningId === candidate.id ? '确认中…' : candidate.status === 'QUALIFIED' ? '确认使用此镜头' : '需人工处理冲突' }}
@@ -332,13 +404,58 @@ onMounted(load)
 
     <div class="section-toolbar compact-title media-library-title">
       <div><span class="section-eyebrow">ASSET INDEX</span><h2>素材库索引状态</h2><p>检查每个原始文件的镜头、预览帧和向量状态。</p></div>
-      <span class="status-pill is-neutral">{{ assets.length }} 个文件</span>
+      <div class="page-title-actions">
+        <select v-model="roleFilter" class="filter-select" aria-label="素材池筛选">
+          <option value="all">全部素材池</option>
+          <option value="semantic">语义素材</option>
+          <option value="themed_fallback">主题兜底</option>
+          <option value="landscape_fallback">纯风景最终兜底</option>
+        </select>
+        <span class="status-pill is-neutral">{{ filteredAssets.length }} / {{ assets.length }}</span>
+      </div>
     </div>
     <div class="asset-index-grid">
-      <article v-for="asset in assets" :key="asset.id" class="panel asset-index-card">
+      <article v-for="asset in filteredAssets" :key="asset.id" class="panel asset-index-card">
         <div class="asset-index-head">
-          <div><strong>{{ asset.filename }}</strong><small>{{ asset.width || '—' }} × {{ asset.height || '—' }} · {{ asset.shots.length }} 个镜头</small></div>
+          <div>
+            <strong>{{ asset.filename }}</strong>
+            <small>{{ asset.width || '—' }} × {{ asset.height || '—' }} · {{ asset.shots.length }} 个镜头</small>
+            <small>{{ roleLabel(asset.library_role) }} · {{ asset.provider }} · {{ asset.review_status }}</small>
+          </div>
           <button class="secondary-button" :disabled="indexingId === asset.id" @click="buildIndex(asset)">{{ indexingId === asset.id ? '处理中…' : '重建预览与索引' }}</button>
+        </div>
+        <div class="asset-classification-controls">
+          <label class="field">
+            <span>素材角色</span>
+            <select v-model="asset.library_role">
+              <option value="semantic">语义素材</option>
+              <option value="themed_fallback">主题兜底</option>
+              <option value="landscape_fallback">纯风景最终兜底</option>
+            </select>
+          </label>
+          <label v-if="asset.library_role !== 'semantic'" class="field">
+            <span>兜底类别</span>
+            <input v-model="asset.fallback_category" placeholder="landscape / business" />
+          </label>
+          <label v-if="asset.library_role !== 'semantic'" class="field">
+            <span>情绪</span>
+            <input v-model="asset.mood" placeholder="neutral / reflective" />
+          </label>
+          <label class="field">
+            <span>审核状态</span>
+            <select v-model="asset.review_status">
+              <option value="approved">已审核</option>
+              <option value="pending">待审核</option>
+              <option value="rejected">已拒绝</option>
+            </select>
+          </label>
+          <label class="checkbox-field">
+            <input v-model="asset.enabled" type="checkbox" />
+            <span>启用</span>
+          </label>
+          <button class="secondary-button" :disabled="updatingId === asset.id" @click="saveAssetClassification(asset)">
+            {{ updatingId === asset.id ? '保存中…' : '保存分类' }}
+          </button>
         </div>
         <div class="asset-shot-list">
           <div v-for="shot in asset.shots" :key="shot.id" class="asset-shot-row">

@@ -207,7 +207,7 @@ Return JSON only, with root format {"scenes":[...]}.
 For every input scene return exactly one object using the same scene_id and these fields:
 scene_id, visual_summary, visual_type, entities, locations, time_period, scene_category,
 mood, shot_preference, primary_query, alternative_queries, fallback_category,
-fallback_mood, must_include, avoid, confidence.
+fallback_mood, allow_landscape_fallback, must_include, avoid, confidence.
 entities, locations, alternative_queries, must_include and avoid MUST always be JSON arrays
 of strings. Use [] when there are no values. Never return a single string for these fields.
 All visual descriptions and search queries must be concise English suitable for stock-footage search.
@@ -215,10 +215,13 @@ Use concrete visible subjects, actions, settings and eras. Do not translate or r
 Do not claim a person's identity when it cannot be visually verified.
 alternative_queries must contain 1-3 progressively broader English queries.
 confidence must be a number from 0 to 1.
+allow_landscape_fallback must be false for concrete people, brands, products, landmarks,
+locations or historical events whose visible subject is essential; otherwise it may be true
+for transitions, time passing, reflection, summaries and abstract emotional narration.
 Example field shapes:
 {"entities":[],"locations":[],"alternative_queries":["shipping terminal workers"],
 "must_include":["container terminal"],"avoid":["close-ups of individuals"],
-"confidence":0.82}
+"allow_landscape_fallback":false,"confidence":0.82}
 """.strip()
 
 

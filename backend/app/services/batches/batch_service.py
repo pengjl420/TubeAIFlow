@@ -10,7 +10,7 @@ from app.models.project import Project
 from app.infrastructure.project_layout import get_output_stem, safe_filename_stem
 from app.services.projects import project_service
 from app.services.tasks import task_service
-from app.shared.time import utc_now_iso
+from app.shared.time import elapsed_seconds, utc_now_iso
 
 
 MAX_SCRIPT_FILES = 100
@@ -226,14 +226,30 @@ def delete_batch(session: Session, batch: BatchJob) -> dict:
 
 def serialize_batch(session: Session, batch: BatchJob, include_items: bool = True) -> dict:
     data = batch.model_dump()
+    data["workflow_duration_seconds"] = elapsed_seconds(batch.started_at, batch.finished_at)
     if not include_items:
         return data
     items = []
-    for item in get_batch_items(session, batch.id):
+    batch_items = get_batch_items(session, batch.id)
+    project_metrics = project_service.get_project_metrics(
+        session, [item.project_id for item in batch_items]
+    )
+    latest_tasks = {
+        task.batch_item_id: task
+        for task in task_service.list_batch_tasks(session, batch.id)
+        if task.batch_item_id
+    }
+    for item in batch_items:
         row = item.model_dump()
         project = session.get(Project, item.project_id)
         row["project_name"] = project.name if project else item.original_filename
         row["project_status"] = project.status if project else "missing"
+        row.update(project_metrics.get(item.project_id, {}))
+        task = latest_tasks.get(item.id)
+        if task:
+            row["workflow_started_at"] = task.started_at
+            row["workflow_finished_at"] = task.finished_at
+            row["workflow_duration_seconds"] = elapsed_seconds(task.started_at, task.finished_at)
         items.append(row)
     data["items"] = items
     return data

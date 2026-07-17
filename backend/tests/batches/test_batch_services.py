@@ -12,6 +12,7 @@ from app.api import batches
 from app.database import get_session
 from app.models.batch import BatchItem, BatchJob
 from app.models.project import Project
+from app.models.narration import Segment
 from app.models.task import TaskRun
 from app.services.batches import batch_service
 from app.services.tasks import task_service, task_worker
@@ -32,6 +33,45 @@ class BatchFileTests(unittest.TestCase):
             batch_service.decode_script_file("a.txt", b"abc\x00def")
         with self.assertRaisesRegex(ValueError, "不支持"):
             batch_service.decode_script_file("a.docx", b"content")
+
+    def test_batch_detail_includes_per_project_audio_and_run_timing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            engine = create_engine(f"sqlite:///{Path(directory) / 'batch-metrics.db'}")
+            SQLModel.metadata.create_all(engine)
+            with Session(engine) as session:
+                batch = BatchJob(
+                    id="batch", name="Batch", total=1, status="completed",
+                    started_at="2026-07-17T03:00:00+00:00",
+                    finished_at="2026-07-17T03:03:00+00:00",
+                )
+                session.add(batch)
+                session.add(Project(id="project", name="Project"))
+                session.add(BatchItem(
+                    id="item", batch_id="batch", project_id="project", order_index=1,
+                    original_filename="script.txt", status="completed",
+                ))
+                session.add(Segment(
+                    id="segment", segment_id="0001", project_id="project",
+                    segment_index=1, text_zh="文案", duration=12.5,
+                ))
+                session.add(TaskRun(
+                    id="task", project_id="project", batch_id="batch", batch_item_id="item",
+                    queue_sequence=1, status="completed",
+                    started_at="2026-07-17T03:01:00+00:00",
+                    finished_at="2026-07-17T03:02:30+00:00",
+                ))
+                session.commit()
+
+                response = batch_service.serialize_batch(session, batch)
+
+            self.assertEqual(response["workflow_duration_seconds"], 180.0)
+            self.assertEqual(response["items"][0]["audio_duration_seconds"], 12.5)
+            self.assertEqual(response["items"][0]["workflow_duration_seconds"], 90.0)
+            self.assertEqual(
+                response["items"][0]["workflow_started_at"],
+                "2026-07-17T03:01:00+00:00",
+            )
+            engine.dispose()
 
 
 class GenerationCheckpointTests(unittest.TestCase):

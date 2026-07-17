@@ -13,4 +13,9 @@ export interface Project {
   config_json?: string
   created_at: string
   updated_at: string
+  audio_duration_seconds?: number
+  workflow_started_at?: string | null
+  workflow_finished_at?: string | null
+  workflow_duration_seconds?: number | null
+  latest_task_status?: string | null
 }

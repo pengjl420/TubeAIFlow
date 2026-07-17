@@ -27,7 +27,7 @@ from app.infrastructure.project_layout import (
 )
 from app.services.narration.segmenter import split_script
 from app.services.narration.text_cleaner import clean_script
-from app.shared.time import utc_now_iso
+from app.shared.time import elapsed_seconds, utc_now_iso
 
 
 DEFAULT_TTS_ENGINE = "qwen3_tts"
@@ -65,17 +65,66 @@ def create_project(session: Session, name: str, config: dict | None = None) -> P
     return project
 
 
-def project_response(project: Project) -> dict:
+def project_response(project: Project, metrics: dict | None = None) -> dict:
     """Return the API representation while keeping config_json for old clients."""
     return {
         **project.model_dump(),
         "config": load_project_config(project),
+        **(metrics or _empty_project_metrics()),
     }
 
 
 def list_projects(session: Session) -> list[dict]:
-    projects = session.exec(select(Project).order_by(Project.created_at.desc())).all()
-    return [project_response(project) for project in projects]
+    projects = list(session.exec(select(Project).order_by(Project.created_at.desc())).all())
+    metrics = get_project_metrics(session, [project.id for project in projects])
+    return [project_response(project, metrics.get(project.id)) for project in projects]
+
+
+def get_project_response(session: Session, project: Project) -> dict:
+    metrics = get_project_metrics(session, [project.id])
+    return project_response(project, metrics.get(project.id))
+
+
+def get_project_metrics(session: Session, project_ids: list[str]) -> dict[str, dict]:
+    """Aggregate persisted audio and latest-run timing without probing files per request."""
+    if not project_ids:
+        return {}
+    metrics = {project_id: _empty_project_metrics() for project_id in project_ids}
+    segments = session.exec(select(Segment).where(Segment.project_id.in_(project_ids))).all()
+    for segment in segments:
+        if segment.duration is not None:
+            metrics[segment.project_id]["audio_duration_seconds"] += max(0.0, float(segment.duration))
+
+    tasks = session.exec(
+        select(TaskRun)
+        .where(TaskRun.project_id.in_(project_ids))
+        .order_by(TaskRun.queue_sequence)
+    ).all()
+    latest_tasks: dict[str, TaskRun] = {}
+    for task in tasks:
+        latest_tasks[task.project_id] = task
+    for project_id, task in latest_tasks.items():
+        metrics[project_id].update(
+            {
+                "workflow_started_at": task.started_at,
+                "workflow_finished_at": task.finished_at,
+                "workflow_duration_seconds": elapsed_seconds(task.started_at, task.finished_at),
+                "latest_task_status": task.status,
+            }
+        )
+    for item in metrics.values():
+        item["audio_duration_seconds"] = round(item["audio_duration_seconds"], 3)
+    return metrics
+
+
+def _empty_project_metrics() -> dict:
+    return {
+        "audio_duration_seconds": 0.0,
+        "workflow_started_at": None,
+        "workflow_finished_at": None,
+        "workflow_duration_seconds": None,
+        "latest_task_status": None,
+    }
 
 
 def get_project(session: Session, project_id: str) -> Project | None:

@@ -31,6 +31,7 @@ import {
 import AudioPlayer from '../../components/common/AudioPlayer.vue'
 import type { Segment } from '../../types/narration'
 import type { Project } from '../../types/project'
+import { formatDateTime, formatDuration } from '../../utils/time'
 
 const route = useRoute()
 const projectId = String(route.params.id)
@@ -85,6 +86,24 @@ const oneClickTotalElapsed = computed(() => {
   return Math.max(0, end - oneClickStartedAt.value)
 })
 
+const audioDurationSeconds = computed(() => {
+  const segmentTotal = segments.value.reduce((total, segment) => total + (segment.duration || 0), 0)
+  return segmentTotal || project.value?.audio_duration_seconds || 0
+})
+
+const workflowStartedAt = computed(() => (
+  projectTask.value?.started_at || project.value?.workflow_started_at || null
+))
+
+const workflowDurationSeconds = computed(() => {
+  const task = projectTask.value
+  if (task?.started_at && task.status === 'running' && !task.finished_at) {
+    const started = Date.parse(task.started_at)
+    if (Number.isFinite(started)) return Math.max(0, (timerNow.value - started) / 1000)
+  }
+  return task?.workflow_duration_seconds ?? project.value?.workflow_duration_seconds ?? null
+})
+
 function formatElapsed(milliseconds: number) {
   const totalSeconds = Math.floor(milliseconds / 1000)
   const hours = Math.floor(totalSeconds / 3600)
@@ -100,9 +119,8 @@ function beginOneClickStage(stage: string) {
   timerNow.value = oneClickStageStartedAt.value
 }
 
-function startOneClickTimer() {
+function startOneClickTimer(startedAt = Date.now()) {
   stopOneClickTimer()
-  const startedAt = Date.now()
   oneClickStartedAt.value = startedAt
   oneClickStageStartedAt.value = startedAt
   oneClickFinishedAt.value = 0
@@ -378,13 +396,13 @@ function applyProjectTaskStatus(task: ProjectTaskStatus) {
     const recoveryNotice = task.compensation_count
       ? `（已自动恢复 ${task.compensation_count} 次）`
       : ''
-    if (!oneClickStartedAt.value) {
-      const started = Date.parse(task.started_at || task.created_at || '')
-      oneClickStartedAt.value = Number.isFinite(started) ? started : Date.now()
+    if (!oneClickStartedAt.value && task.started_at) {
+      const started = Date.parse(task.started_at)
+      if (Number.isFinite(started)) {
+        startOneClickTimer(started)
+      }
       oneClickStageStartedAt.value = Date.now()
       oneClickFinishedAt.value = 0
-      startOneClickTimer()
-      oneClickStartedAt.value = Number.isFinite(started) ? started : oneClickStartedAt.value
     }
     if (oneClickStage.value !== label) beginOneClickStage(label)
     message.value = task.status === 'queued'
@@ -394,7 +412,8 @@ function applyProjectTaskStatus(task: ProjectTaskStatus) {
   }
 
   if (oneClickGenerating.value || oneClickStartedAt.value) {
-    oneClickFinishedAt.value = Date.now()
+    const finished = Date.parse(task.finished_at || '')
+    oneClickFinishedAt.value = Number.isFinite(finished) ? finished : Date.now()
     timerNow.value = oneClickFinishedAt.value
   }
   stopOneClickTimer()
@@ -706,6 +725,13 @@ onBeforeUnmount(() => {
         <p>在同一条生产线上编辑脚本、生成配音字幕并输出成片。</p>
       </div>
       <RouterLink class="secondary-button" :to="`/projects/${project.id}/config`">项目设置</RouterLink>
+    </div>
+
+    <div class="project-metrics-strip" aria-label="项目时间与时长">
+      <div><span>项目创建时间</span><strong>{{ formatDateTime(project.created_at) }}</strong></div>
+      <div><span>实际开始时间</span><strong>{{ formatDateTime(workflowStartedAt, '尚未开始') }}</strong></div>
+      <div><span>音频文件时长</span><strong>{{ formatDuration(audioDurationSeconds || null, '未生成') }}</strong></div>
+      <div><span>完整流程用时</span><strong>{{ formatDuration(workflowDurationSeconds, workflowStartedAt ? '计算中' : '未开始') }}</strong></div>
     </div>
 
     <div class="workflow-rail" aria-label="项目生产阶段">

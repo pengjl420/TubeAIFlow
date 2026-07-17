@@ -12,6 +12,7 @@ export interface ProjectTaskStatus {
   created_at?: string
   started_at?: string | null
   finished_at?: string | null
+  workflow_duration_seconds?: number | null
   compensation_count?: number
 }
 

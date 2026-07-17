@@ -13,6 +13,10 @@ export interface BatchItem {
   error_message?: string | null
   started_at?: string | null
   finished_at?: string | null
+  audio_duration_seconds?: number
+  workflow_started_at?: string | null
+  workflow_finished_at?: string | null
+  workflow_duration_seconds?: number | null
 }
 
 export interface BatchJob {
@@ -27,6 +31,7 @@ export interface BatchJob {
   updated_at: string
   started_at?: string | null
   finished_at?: string | null
+  workflow_duration_seconds?: number | null
   items?: BatchItem[]
 }
 

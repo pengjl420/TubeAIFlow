@@ -8,7 +8,7 @@ from sqlmodel import Session, select
 from app.infrastructure.project_layout import load_project_config
 from app.models.project import Project
 from app.models.task import TaskRun
-from app.shared.time import utc_now_iso
+from app.shared.time import elapsed_seconds, utc_now_iso
 
 
 ACTIVE_STATUSES = {"queued", "running", "paused"}
@@ -173,6 +173,7 @@ def serialize_task(session: Session, task: TaskRun | None) -> dict:
             "stage": task.current_stage,
             "cancelled": task.status == "cancelled" or task.cancel_requested,
             "queue_position": queue_position,
+            "workflow_duration_seconds": elapsed_seconds(task.started_at, task.finished_at),
         }
     )
     return data

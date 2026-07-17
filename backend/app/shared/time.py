@@ -6,6 +6,22 @@ def utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def elapsed_seconds(started_at: str | None, finished_at: str | None = None) -> float | None:
+    """Return wall-clock seconds after the task actually started, excluding queue wait."""
+    if not started_at:
+        return None
+    try:
+        started = datetime.fromisoformat(started_at)
+        finished = datetime.fromisoformat(finished_at) if finished_at else datetime.now(UTC)
+    except (TypeError, ValueError):
+        return None
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=UTC)
+    if finished.tzinfo is None:
+        finished = finished.replace(tzinfo=UTC)
+    return round(max(0.0, (finished - started).total_seconds()), 3)
+
+
 def seconds_to_ass_time(seconds: float) -> str:
     centiseconds = int(round(seconds * 100))
     hours = centiseconds // 360000

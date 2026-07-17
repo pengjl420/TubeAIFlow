@@ -123,7 +123,7 @@ def get_project(project_id: str, session: Session = Depends(get_session)) -> dic
     project = project_service.get_project(session, project_id)
     if not project:
         fail("Project not found", 404)
-    return ok(project_service.project_response(project))
+    return ok(project_service.get_project_response(session, project))
 
 
 @router.delete("/projects/{project_id}")

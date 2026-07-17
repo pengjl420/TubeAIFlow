@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import { deleteBatch, getBatch, pauseBatch, retryBatchItem, startBatch, type BatchJob } from '../../api/batches'
 import { confirmAction, showToast } from '../../services/feedback'
+import { formatDateTime, formatDuration } from '../../utils/time'
 
 const route = useRoute()
 const router = useRouter()
@@ -21,6 +22,9 @@ const percent = computed(() => {
 
 const canPause = computed(() => batch.value?.status === 'queued' || batch.value?.status === 'running')
 const canResume = computed(() => batch.value?.status === 'paused' || batch.value?.status === 'draft')
+const totalAudioDuration = computed(() => (
+  (batch.value?.items || []).reduce((total, item) => total + (item.audio_duration_seconds || 0), 0)
+))
 
 const statusLabels: Record<string, string> = {
   draft: '草稿', queued: '排队中', running: '执行中', paused: '已暂停',
@@ -147,7 +151,7 @@ onBeforeUnmount(() => {
       <div>
         <span class="page-kicker">BATCH DETAIL</span>
         <h1>{{ batch.name }}</h1>
-        <span class="muted">创建于 {{ new Date(batch.created_at).toLocaleString() }}</span>
+        <span class="muted">创建于 {{ formatDateTime(batch.created_at) }}</span>
       </div>
       <div class="page-title-actions">
         <button v-if="canPause" class="danger-button" :disabled="acting" @click="pause">终止当前任务并暂停</button>
@@ -174,12 +178,18 @@ onBeforeUnmount(() => {
         <span>失败 {{ batch.failed }}</span>
         <span>待处理 {{ Math.max(0, batch.total - batch.completed - batch.failed) }}</span>
       </div>
+      <div class="generation-timing batch-timing">
+        <div><span class="muted">批次创建时间</span><strong>{{ formatDateTime(batch.created_at) }}</strong></div>
+        <div><span class="muted">实际开始时间</span><strong>{{ formatDateTime(batch.started_at, '尚未开始') }}</strong></div>
+        <div><span class="muted">批次流程用时</span><strong>{{ formatDuration(batch.workflow_duration_seconds, batch.started_at ? '计算中' : '未开始') }}</strong></div>
+        <div><span class="muted">音频总时长</span><strong>{{ formatDuration(totalAudioDuration || null, '未生成') }}</strong></div>
+      </div>
       <p v-if="error" class="error">{{ error }}</p>
     </div>
 
     <div class="panel batch-items-panel">
       <div class="batch-item-table batch-item-head">
-        <span>顺序</span><span>文件 / 项目</span><span>状态</span><span>当前阶段</span><span>操作</span>
+        <span>顺序</span><span>文件 / 项目</span><span>状态</span><span>当前阶段</span><span>音频时长</span><span>实际执行</span><span>操作</span>
       </div>
       <div v-for="item in batch.items || []" :key="item.id" class="batch-item-table batch-item-row">
         <span>#{{ item.order_index }}</span>
@@ -190,6 +200,11 @@ onBeforeUnmount(() => {
         </div>
         <span class="status-pill">{{ item.status }}</span>
         <span>{{ stageLabel(item.current_stage) }}</span>
+        <strong class="tabular-number">{{ formatDuration(item.audio_duration_seconds || null, '未生成') }}</strong>
+        <div class="batch-item-timing">
+          <span>开始 {{ formatDateTime(item.workflow_started_at, '尚未开始') }}</span>
+          <strong>用时 {{ formatDuration(item.workflow_duration_seconds, item.workflow_started_at ? '计算中' : '未开始') }}</strong>
+        </div>
         <div class="batch-item-actions">
           <RouterLink class="mini-button" :to="`/projects/${item.project_id}`">查看项目</RouterLink>
           <button v-if="item.status === 'failed'" class="mini-button" :disabled="acting" @click="retry(item.id)">重试</button>

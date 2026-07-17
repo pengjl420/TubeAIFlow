@@ -5,8 +5,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from sqlmodel import Session, SQLModel, create_engine
+
 from app.models.project import Project
 from app.models.narration import Segment
+from app.models.task import TaskRun
 from app.services.projects import project_service
 
 
@@ -40,6 +43,41 @@ class ProjectSettingsTests(unittest.TestCase):
 
         self.assertEqual(response["config"]["reference_audio_filename"], "narrator.wav")
         self.assertEqual(response["config_json"], project.config_json)
+
+    def test_project_metrics_use_audio_durations_and_actual_task_start(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            engine = create_engine(f"sqlite:///{Path(directory) / 'metrics.db'}")
+            SQLModel.metadata.create_all(engine)
+            with Session(engine) as session:
+                session.add(Project(
+                    id="project-id",
+                    name="Name",
+                    created_at="2026-07-17T01:00:00+00:00",
+                ))
+                session.add(Segment(
+                    id="segment-1", segment_id="0001", project_id="project-id",
+                    segment_index=1, text_zh="第一段", duration=61.25,
+                ))
+                session.add(Segment(
+                    id="segment-2", segment_id="0002", project_id="project-id",
+                    segment_index=2, text_zh="第二段", duration=2.5,
+                ))
+                session.add(TaskRun(
+                    id="task-id", project_id="project-id", queue_sequence=1,
+                    status="completed",
+                    created_at="2026-07-17T02:00:00+00:00",
+                    started_at="2026-07-17T03:00:00+00:00",
+                    finished_at="2026-07-17T03:01:30+00:00",
+                ))
+                session.commit()
+
+                response = project_service.list_projects(session)[0]
+
+            self.assertEqual(response["audio_duration_seconds"], 63.75)
+            self.assertEqual(response["workflow_started_at"], "2026-07-17T03:00:00+00:00")
+            self.assertEqual(response["workflow_duration_seconds"], 90.0)
+            self.assertNotEqual(response["created_at"], response["workflow_started_at"])
+            engine.dispose()
 
     def test_update_project_settings_saves_all_page_fields_together(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

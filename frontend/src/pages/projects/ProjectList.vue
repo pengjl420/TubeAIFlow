@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { deleteProject, listProjects } from '../../api/projects'
 import { cancelProjectTask } from '../../api/tasks'
 import { confirmAction, showToast } from '../../services/feedback'
 import type { Project } from '../../types/project'
+import { formatDateTime, formatDuration } from '../../utils/time'
 
 const projects = ref<Project[]>([])
 const loading = ref(false)
@@ -16,7 +17,9 @@ const actingProjectId = ref('')
 const batchDeleting = ref(false)
 const selectedProjectIds = ref<Set<string>>(new Set())
 const message = ref('')
+const clockNow = ref(Date.now())
 const router = useRouter()
+let clockTimer: number | undefined
 
 const statusLabels: Record<string, string> = {
   created: '待开始',
@@ -96,6 +99,14 @@ function isEditable(project: Project) {
 
 function isGenerating(project: Project) {
   return generatingStatuses.has(project.status)
+}
+
+function projectWorkflowDuration(project: Project) {
+  if (project.workflow_started_at && !project.workflow_finished_at && project.latest_task_status === 'running') {
+    const started = Date.parse(project.workflow_started_at)
+    if (Number.isFinite(started)) return Math.max(0, (clockNow.value - started) / 1000)
+  }
+  return project.workflow_duration_seconds
 }
 
 function openProject(projectId: string) {
@@ -256,12 +267,6 @@ async function removeSelectedProjects() {
   batchDeleting.value = false
 }
 
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat('zh-CN', {
-    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
-  }).format(new Date(value))
-}
-
 async function loadProjects() {
   loading.value = true
   error.value = ''
@@ -282,7 +287,16 @@ async function loadProjects() {
   }
 }
 
-onMounted(loadProjects)
+onMounted(() => {
+  void loadProjects()
+  clockTimer = window.setInterval(() => {
+    clockNow.value = Date.now()
+  }, 1000)
+})
+
+onBeforeUnmount(() => {
+  if (clockTimer !== undefined) window.clearInterval(clockTimer)
+})
 </script>
 
 <template>
@@ -409,11 +423,15 @@ onMounted(loadProjects)
             <strong>{{ voiceProfileName(project) }}</strong>
             <span v-if="ttsEngineName(project)" class="project-engine">{{ ttsEngineName(project) }}</span>
           </p>
+          <div class="project-runtime-metrics">
+            <span><small>音频时长</small><strong>{{ formatDuration(project.audio_duration_seconds || null, '未生成') }}</strong></span>
+            <span><small>流程用时</small><strong>{{ formatDuration(projectWorkflowDuration(project), project.workflow_started_at ? '计算中' : '未开始') }}</strong></span>
+          </div>
         </div>
         <div class="project-card-footer">
           <div class="project-card-times">
-            <span>创建于 {{ formatDate(project.created_at) }}</span>
-            <span>更新于 {{ formatDate(project.updated_at || project.created_at) }}</span>
+            <span>创建于 {{ formatDateTime(project.created_at) }}</span>
+            <span>实际开始于 {{ formatDateTime(project.workflow_started_at, '尚未开始') }}</span>
           </div>
           <div class="project-card-actions">
             <RouterLink v-if="isEditable(project)" class="text-button" :to="`/projects/${project.id}/config`" @click.stop>修改</RouterLink>

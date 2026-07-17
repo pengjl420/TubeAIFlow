@@ -4,7 +4,6 @@ export interface Segment {
   project_id: string
   segment_index: number
   text_zh: string
-  text_en?: string
   status: string
   audio_path?: string
   duration?: number

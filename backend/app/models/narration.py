@@ -11,7 +11,6 @@ class Segment(SQLModel, table=True):
     project_id: str = Field(index=True)
     segment_index: int
     text_zh: str
-    text_en: str | None = None
     audio_path: str | None = None
     duration: float | None = None
     start_time: float | None = None

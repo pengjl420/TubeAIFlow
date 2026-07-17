@@ -154,12 +154,11 @@ class ProjectSettingsTests(unittest.TestCase):
                     str(root / "output"),
                     "voice",
                     "",
-                    include_translation=True,
                     include_video=False,
                 )
 
             config = json.loads(result.config_json or "{}")
-            self.assertTrue(config["include_translation"])
+            self.assertNotIn("include_translation", config)
             self.assertFalse(config["include_video"])
 
     def test_switching_to_qwen_resets_completed_segments(self) -> None:

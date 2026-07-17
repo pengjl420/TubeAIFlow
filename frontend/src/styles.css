@@ -1901,6 +1901,28 @@ main {
   padding: 10px 12px;
 }
 
+.ffmpeg-install-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-soft);
+}
+
+.ffmpeg-install-row > div {
+  display: grid;
+  gap: 5px;
+}
+
+.ffmpeg-install-row small {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
 .deepseek-key-row {
   border-top: 1px solid #e7e9e3;
   margin-top: 18px;
@@ -2151,6 +2173,8 @@ main {
 }
 
 @media (max-width: 680px) {
+  .ffmpeg-install-row { align-items: stretch; flex-direction: column; }
+  .ffmpeg-install-row .secondary-button { width: 100%; }
   .sidebar {
     bottom: 0;
     flex-direction: row;

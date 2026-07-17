@@ -42,3 +42,17 @@ def clear_secret(payload: ClearSecretRequest, session: Session = Depends(get_ses
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"success": False, "error": str(exc)}) from exc
     return {"success": True, "data": data}
+
+
+@router.get("/settings/ffmpeg/status")
+def get_ffmpeg_status() -> dict:
+    return {"success": True, "data": system_settings_service.get_ffmpeg_status()}
+
+
+@router.post("/settings/ffmpeg/install")
+def install_ffmpeg(session: Session = Depends(get_session)) -> dict:
+    try:
+        data = system_settings_service.install_ffmpeg(session)
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail={"success": False, "error": str(exc)}) from exc
+    return {"success": True, "data": data}

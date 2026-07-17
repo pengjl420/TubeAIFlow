@@ -19,10 +19,7 @@ DEFAULT_STYLE = {
     "margin_v": 80,
 }
 
-EN_STYLE = {**DEFAULT_STYLE, "font": "Arial", "font_size": 48, "margin_v": 70}
-
-
-def create_ass(project: Project, language: str) -> Path:
+def create_ass(project: Project) -> Path:
     base_dir = get_project_work_dir(project, get_settings().workspace_dir)
     timeline_path = base_dir / "timeline" / f"{get_output_stem(project)}_timeline.json"
     if not timeline_path.exists():
@@ -32,13 +29,12 @@ def create_ass(project: Project, language: str) -> Path:
         raise ValueError("timeline.json does not exist")
     timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
 
-    style = EN_STYLE if language == "en" else DEFAULT_STYLE
-    lines = [_ass_header(style)]
+    lines = [_ass_header(DEFAULT_STYLE)]
     for item in timeline["segments"]:
-        text = item.get("text_en") if language == "en" else item.get("text_zh")
+        text = item.get("text_zh")
         if not text:
             continue
-        wrapped = wrap_subtitle_text(text, language)
+        wrapped = wrap_subtitle_text(text, "zh")
         start = seconds_to_ass_time(float(item["start"]))
         end = seconds_to_ass_time(float(item["end"]))
         lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{_escape_ass(wrapped)}")
@@ -46,7 +42,7 @@ def create_ass(project: Project, language: str) -> Path:
     ensure_project_dirs(base_dir)
     subtitles_dir = base_dir / "subtitles"
     subtitles_dir.mkdir(parents=True, exist_ok=True)
-    output_path = subtitles_dir / f"{get_output_stem(project)}_{language}.ass"
+    output_path = subtitles_dir / f"{get_output_stem(project)}.ass"
     output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return output_path
 

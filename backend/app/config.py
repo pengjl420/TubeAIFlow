@@ -20,10 +20,9 @@ class Settings(BaseModel):
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-v4-flash"
-    translation_timeout_seconds: float = Field(default=60.0, gt=0, le=600)
-    translation_batch_size: int = Field(default=30, ge=1, le=200)
-    translation_max_tokens: int = Field(default=8192, ge=1, le=65536)
-    translation_retry_count: int = Field(default=1, ge=0, le=10)
+    deepseek_timeout_seconds: float = Field(default=60.0, gt=0, le=600)
+    deepseek_max_tokens: int = Field(default=8192, ge=1, le=65536)
+    deepseek_retry_count: int = Field(default=1, ge=0, le=10)
     qwen_tts_root: Path | None = None
     qwen_tts_python: Path | None = None
     qwen_tts_model_dir: Path | None = None

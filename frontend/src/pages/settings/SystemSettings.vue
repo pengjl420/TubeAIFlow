@@ -4,14 +4,19 @@ import { onMounted, ref } from 'vue'
 import { rememberApiAddress } from '../../api/client'
 import {
   clearSystemSecret,
+  getFfmpegStatus,
   getSystemSettings,
+  installFfmpeg,
   saveSystemSettings,
+  type FfmpegStatus,
   type SystemSettings,
 } from '../../api/settings'
 
 const settings = ref<SystemSettings | null>(null)
 const loading = ref(false)
 const saving = ref(false)
+const installingFfmpeg = ref(false)
+const ffmpegStatus = ref<FfmpegStatus | null>(null)
 const error = ref('')
 const message = ref('')
 
@@ -20,10 +25,27 @@ async function load() {
   error.value = ''
   try {
     settings.value = await getSystemSettings()
+    ffmpegStatus.value = await getFfmpegStatus()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '系统设置加载失败'
   } finally {
     loading.value = false
+  }
+}
+
+async function downloadFfmpeg() {
+  installingFfmpeg.value = true
+  error.value = ''
+  message.value = ''
+  try {
+    const result = await installFfmpeg()
+    settings.value = result.settings
+    ffmpegStatus.value = result.status
+    message.value = `FFmpeg ${result.status.version || ''} 已安装，路径已自动保存。`
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'FFmpeg 自动安装失败'
+  } finally {
+    installingFfmpeg.value = false
   }
 }
 
@@ -110,6 +132,26 @@ onMounted(load)
             <input v-model="settings.ffprobe_path" placeholder="ffprobe" />
             <small>已加入系统 PATH 时填写 <code>ffprobe</code>；否则填写 <code>ffprobe.exe</code> 的完整路径，用于读取真实音频时长。</small>
           </label>
+        </div>
+        <div class="ffmpeg-install-row">
+          <div>
+            <strong>{{ ffmpegStatus?.installed ? 'FFmpeg 已可用' : '未检测到可用的 FFmpeg' }}</strong>
+            <small v-if="ffmpegStatus?.installed">
+              {{ ffmpegStatus.version ? `版本 ${ffmpegStatus.version}` : '版本未知' }}；FFmpeg 与 FFprobe 路径已检测通过。
+            </small>
+            <small v-else-if="ffmpegStatus?.platform_supported">
+              可自动下载适用于 Windows 64 位的 release essentials 构建，并将两个可执行文件路径写入当前配置。
+            </small>
+            <small v-else>自动安装目前仅支持 Windows 10/11 64 位系统。</small>
+          </div>
+          <button
+            class="secondary-button"
+            type="button"
+            :disabled="installingFfmpeg || ffmpegStatus?.platform_supported === false"
+            @click="downloadFfmpeg"
+          >
+            {{ installingFfmpeg ? '正在下载并校验…' : (ffmpegStatus?.installed ? '重新检测并安装最新版' : '自动下载安装') }}
+          </button>
         </div>
         <div class="notice">系统设置数据库固定保存在 <code>backend/workspace/app.db</code>，不会随着“工作目录”一起移动。</div>
         </div>
@@ -275,7 +317,7 @@ onMounted(load)
           <span class="settings-disclosure-icon" aria-hidden="true">⌄</span>
         </summary>
         <div class="settings-disclosure-content">
-        <p class="section-description">DeepSeek 为系统提供通用 AI 能力，当前用于英文字幕翻译，后续也可支持分镜生成、内容理解等智能功能。请先在 DeepSeek 开放平台创建 API Key，再在此配置。</p>
+        <p class="section-description">DeepSeek 作为系统通用 AI 能力平台，为后续的分镜生成、内容理解等智能功能提供基础。请先在 DeepSeek 开放平台创建 API Key，再在此配置。</p>
         <div class="form-grid">
           <label class="field full-width">
             <span>DeepSeek API 地址</span>
@@ -288,27 +330,22 @@ onMounted(load)
               <option value="deepseek-v4-flash">DeepSeek V4 Flash（推荐，速度快、成本低）</option>
               <option value="deepseek-v4-pro">DeepSeek V4 Pro（质量优先、成本较高）</option>
             </select>
-            <small>字幕批量翻译推荐 Flash；更重视复杂语境和表达质量时可选择 Pro。</small>
+            <small>一般任务推荐 Flash；更重视复杂推理和表达质量时可选择 Pro。</small>
           </label>
           <label class="field">
             <span>请求超时（秒）</span>
-            <input v-model.number="settings.translation_timeout_seconds" type="number" min="1" max="600" />
-            <small>单次请求最多等待多久，默认 60 秒。网络较慢或批量较大时可适当增加。</small>
-          </label>
-          <label class="field">
-            <span>每批字幕数量</span>
-            <input v-model.number="settings.translation_batch_size" type="number" min="1" max="200" />
-            <small>每次发送的字幕条数，默认 30。过大会增加超时和返回格式错误概率。</small>
+            <input v-model.number="settings.deepseek_timeout_seconds" type="number" min="1" max="600" />
+            <small>单次 DeepSeek 请求最多等待多久，默认 60 秒。</small>
           </label>
           <label class="field">
             <span>最大输出 Token</span>
-            <input v-model.number="settings.translation_max_tokens" type="number" min="1" max="65536" />
-            <small>限制单次翻译响应长度，通常保持默认值即可；字幕很多且返回被截断时再提高。</small>
+            <input v-model.number="settings.deepseek_max_tokens" type="number" min="1" max="65536" />
+            <small>限制单次 DeepSeek 响应长度，通常保持默认值即可。</small>
           </label>
           <label class="field">
             <span>失败重试次数</span>
-            <input v-model.number="settings.translation_retry_count" type="number" min="0" max="10" />
-            <small>请求失败或返回内容不完整时自动重试，建议设置为 1～2 次。</small>
+            <input v-model.number="settings.deepseek_retry_count" type="number" min="0" max="10" />
+            <small>DeepSeek 请求失败时自动重试，建议设置为 1～2 次。</small>
           </label>
         </div>
         <div class="secret-row deepseek-key-row">

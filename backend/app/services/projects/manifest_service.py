@@ -6,7 +6,6 @@ from app.config import get_settings
 from app.models.project import Project
 from app.infrastructure.project_layout import (
     ensure_project_dirs,
-    get_final_en_srt_path,
     get_final_srt_path,
     get_final_video_path,
     get_output_stem,
@@ -31,10 +30,8 @@ def create_manifest(project: Project) -> Path:
             "audio": str(base_dir / "audio"),
             "subtitles": str(base_dir / "subtitles"),
             "final_srt": str(get_final_srt_path(project, get_settings().workspace_dir)),
-            "final_en_srt": str(get_final_en_srt_path(project, get_settings().workspace_dir)),
             "final_video": str(get_final_video_path(project, get_settings().workspace_dir)),
             "timeline": str(base_dir / "timeline" / f"{stem}_timeline.json"),
-            "translation": str(base_dir / "translation" / f"{stem}_translation.json"),
             "selected_videos": str(base_dir / "video" / "selected_videos.json"),
         },
     }

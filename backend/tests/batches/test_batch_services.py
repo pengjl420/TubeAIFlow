@@ -102,25 +102,21 @@ class GenerationCheckpointTests(unittest.TestCase):
         compose_video.assert_not_called()
         self.assertEqual(stages, ["subtitles", "completed"])
 
-    def test_workflow_skips_translation_when_project_disables_it(self) -> None:
+    def test_workflow_creates_source_subtitles(self) -> None:
         session = MagicMock()
         session.exec.return_value.all.return_value = []
-        project = Project(id="p1", name="Project", config_json='{"include_translation":false}')
+        project = Project(id="p1", name="Project")
         with (
             patch.object(narration_generation.timeline_service, "build_timeline"),
             patch.object(
                 narration_generation.srt_service,
-                "create_full_srt_with_cues",
-                return_value=(Path("zh.srt"), []),
-            ),
-            patch.object(
-                narration_generation.translation_service,
-                "translate_subtitle_cues",
-            ) as translate,
+                "create_full_srt",
+                return_value=Path("subtitles.srt"),
+            ) as create_srt,
         ):
             narration_generation._create_subtitles(session, project)
 
-        translate.assert_not_called()
+        create_srt.assert_called_once()
         self.assertEqual(project.status, "zh_subtitle_created")
 
 

@@ -10,10 +10,9 @@ export interface SystemSettings {
   deepseek_api_key_configured: boolean
   deepseek_base_url: string
   deepseek_model: string
-  translation_timeout_seconds: number
-  translation_batch_size: number
-  translation_max_tokens: number
-  translation_retry_count: number
+  deepseek_timeout_seconds: number
+  deepseek_max_tokens: number
+  deepseek_retry_count: number
   qwen_tts_root: string | null
   qwen_tts_python: string | null
   qwen_tts_model_dir: string | null
@@ -38,6 +37,19 @@ export interface SystemSettings {
   cosyvoice_instruction: string
 }
 
+export interface FfmpegStatus {
+  installed: boolean
+  ffmpeg_path: string | null
+  ffprobe_path: string | null
+  version: string | null
+  platform_supported: boolean
+}
+
+export interface FfmpegInstallResult {
+  settings: SystemSettings
+  status: FfmpegStatus
+}
+
 export async function getSystemSettings(): Promise<SystemSettings> {
   return unwrap<SystemSettings>(await apiClient.get('/settings'))
 }
@@ -48,4 +60,14 @@ export async function saveSystemSettings(settings: SystemSettings): Promise<Syst
 
 export async function clearSystemSecret(field: string): Promise<SystemSettings> {
   return unwrap<SystemSettings>(await apiClient.post('/settings/clear-secret', { field }))
+}
+
+export async function getFfmpegStatus(): Promise<FfmpegStatus> {
+  return unwrap<FfmpegStatus>(await apiClient.get('/settings/ffmpeg/status'))
+}
+
+export async function installFfmpeg(): Promise<FfmpegInstallResult> {
+  return unwrap<FfmpegInstallResult>(await apiClient.post('/settings/ffmpeg/install', undefined, {
+    timeout: 10 * 60 * 1000,
+  }))
 }

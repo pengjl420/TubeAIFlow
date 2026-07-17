@@ -3,7 +3,6 @@ import unittest
 from app.services.narration.segmenter import split_script
 from app.services.narration.subtitle_splitter import split_timed_subtitle_cues, wrap_subtitle_text
 from app.services.narration.text_cleaner import clean_script
-from app.services.narration.translation_service import detect_text_language
 from app.shared.time import seconds_to_ass_time, seconds_to_srt_time
 
 
@@ -44,11 +43,6 @@ class TextServiceTests(unittest.TestCase):
         wrapped = wrap_subtitle_text(text, "en")
 
         self.assertEqual(wrapped.replace("\n", " "), text)
-
-    def test_translation_direction_uses_transcript_language(self) -> None:
-        self.assertEqual(detect_text_language("这是一份中文逐字稿"), "zh")
-        self.assertEqual(detect_text_language("This is an English transcript."), "en")
-
 
 class TimeFormatTests(unittest.TestCase):
     def test_time_format_rounding(self) -> None:

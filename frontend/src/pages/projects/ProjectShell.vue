@@ -185,21 +185,18 @@ const finalAudioPath = computed(() => {
   return outputs.value?.final_audio_path || fallbackFinalAudioPath()
 })
 
-const finalEnglishSrtPath = computed(() => {
+const finalSrtPath = computed(() => {
   if (!hasOutputFilename.value) return ''
   const dir = outputs.value?.output_dir || project.value?.output_dir || ''
-  if (!dir || !outputFilename.value.trim()) return outputs.value?.final_en_srt_path || ''
-  return outputs.value?.final_en_srt_path || `${dir.replace(/[\\/]$/, '')}\\${outputFilename.value.trim()}_en.srt`
+  if (!dir || !outputFilename.value.trim()) return outputs.value?.final_srt_path || ''
+  return outputs.value?.final_srt_path || `${dir.replace(/[\\/]$/, '')}\\${outputFilename.value.trim()}.srt`
 })
-
-const finalTranslatedSrtPath = computed(() => outputs.value?.final_translated_srt_path || finalEnglishSrtPath.value)
 
 const mediaVideoDir = computed(() => {
   const value = projectConfig.value.media_video_dir
   return typeof value === 'string' ? value : ''
 })
 
-const includeTranslation = computed(() => projectConfig.value.include_translation === true)
 const includeVideo = computed(() => projectConfig.value.include_video === true)
 
 const finalVideoPath = computed(() => {
@@ -595,14 +592,12 @@ async function mergeAudio() {
   try {
     await ensureFilenameSaved()
     const result = await mergeProjectAudio(projectId)
-    message.value = includeTranslation.value ? '正在生成原文和翻译字幕...' : '正在生成原文字幕...'
+    message.value = '正在生成字幕...'
     mergingAudio.value = false
     generatingSubtitles.value = true
-    const subtitles = await createZhSrt(projectId, includeTranslation.value)
+    await createZhSrt(projectId)
     await refreshAfterChange()
-    message.value = subtitles.translated_path
-      ? `完整音频已生成：${result.path}；翻译字幕已生成：${subtitles.translated_path}`
-      : `完整音频和原文字幕已生成：${result.path}`
+    message.value = `完整音频和字幕已生成：${result.path}`
   } catch (err) {
     error.value = err instanceof Error ? err.message : '完整音频合并失败'
   } finally {
@@ -870,7 +865,7 @@ onBeforeUnmount(() => {
           <dl class="output-path-list">
             <div><dt>根目录</dt><dd>{{ outputs?.output_dir || project.output_dir || '暂无输出目录' }}</dd></div>
             <div><dt>完整音频</dt><dd>{{ finalAudioPath || '生成后自动创建' }}</dd></div>
-            <div><dt>翻译字幕</dt><dd>{{ includeTranslation ? finalTranslatedSrtPath || '生成后自动创建' : '未启用' }}</dd></div>
+            <div><dt>字幕</dt><dd>{{ finalSrtPath || '生成后自动创建' }}</dd></div>
             <div v-if="includeVideo"><dt>最终视频</dt><dd>{{ finalVideoPath || '生成后自动创建' }}</dd></div>
           </dl>
         </div>

@@ -19,7 +19,6 @@ router = APIRouter(tags=["segments"])
 
 class SegmentUpdateRequest(BaseModel):
     text_zh: str | None = None
-    text_en: str | None = None
 
 
 @router.get("/projects/{project_id}/segments")
@@ -51,8 +50,6 @@ def update_segment(
         segment.text_zh = payload.text_zh
         segment.status = "pending"
         segment.error_message = None
-    if payload.text_en is not None:
-        segment.text_en = payload.text_en
     segment.updated_at = utc_now_iso()
     session.add(segment)
     session.commit()

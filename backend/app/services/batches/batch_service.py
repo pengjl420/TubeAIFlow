@@ -135,7 +135,6 @@ def create_batch(
             str(video_root) if video_root else "",
             normalized_tts_engine,
             normalized_reference_audio_text,
-            True,
             include_video,
             voice_profile_id=selected_profile.id if selected_profile else "",
         )

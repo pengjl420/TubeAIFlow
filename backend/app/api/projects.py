@@ -11,7 +11,7 @@ from app.database import get_session
 from app.infrastructure.file_storage import ensure_inside_any, project_dir
 from app.infrastructure.project_layout import (
     get_final_audio_path,
-    get_final_en_srt_path,
+    get_final_srt_path,
     get_final_video_path,
     get_output_stem,
     get_project_output_dir,
@@ -38,7 +38,6 @@ class ProjectSettingsRequest(BaseModel):
     output_dir: str
     output_filename: str = ""
     media_video_dir: str = ""
-    include_translation: bool = False
     include_video: bool = False
     tts_engine: str = project_service.DEFAULT_TTS_ENGINE
     reference_audio_text: str = ""
@@ -70,7 +69,6 @@ def create_project(
     output_dir: str = Form(r"D:\video_darft"),
     output_filename: str = Form(""),
     media_video_dir: str = Form(""),
-    include_translation: bool = Form(False),
     include_video: bool = Form(False),
     tts_engine: str = Form(project_service.DEFAULT_TTS_ENGINE),
     reference_audio_text: str = Form(""),
@@ -98,7 +96,6 @@ def create_project(
             media_video_dir,
             normalized_tts_engine,
             reference_audio_text,
-            include_translation,
             include_video,
             voice_profile_id,
         )
@@ -149,13 +146,7 @@ def get_project_outputs(project_id: str, session: Session = Depends(get_session)
     output_root = get_project_output_dir(project, get_settings().workspace_dir)
     work_dir = get_project_work_dir(project, get_settings().workspace_dir)
     final_audio_path = get_final_audio_path(project, get_settings().workspace_dir)
-    final_en_srt_path = get_final_en_srt_path(project, get_settings().workspace_dir)
-    final_zh_srt_path = output_root / f"{get_output_stem(project)}_zh.srt"
-    final_translated_srt_path = (
-        final_en_srt_path if final_en_srt_path.is_file()
-        else final_zh_srt_path if final_zh_srt_path.is_file()
-        else None
-    )
+    final_srt_path = get_final_srt_path(project, get_settings().workspace_dir)
     final_video_path = get_final_video_path(project, get_settings().workspace_dir)
     output_files = []
     if work_dir.is_dir():
@@ -194,24 +185,22 @@ def get_project_outputs(project_id: str, session: Session = Depends(get_session)
                 "modified_at": stat.st_mtime,
             }
         )
-    if final_en_srt_path.is_file():
-        stat = final_en_srt_path.stat()
+    if final_srt_path.is_file():
+        stat = final_srt_path.stat()
         output_files.append(
             {
-                "name": final_en_srt_path.name,
-                "path": str(final_en_srt_path),
-                "relative_path": final_en_srt_path.name,
+                "name": final_srt_path.name,
+                "path": str(final_srt_path),
+                "relative_path": final_srt_path.name,
                 "size": stat.st_size,
                 "modified_at": stat.st_mtime,
             }
         )
-
     return ok({
         "output_dir": str(output_root),
         "work_dir": str(work_dir),
         "final_audio_path": str(final_audio_path),
-        "final_en_srt_path": str(final_en_srt_path),
-        "final_translated_srt_path": str(final_translated_srt_path) if final_translated_srt_path else "",
+        "final_srt_path": str(final_srt_path),
         "final_video_path": str(final_video_path),
         "files": output_files,
     })
@@ -261,7 +250,6 @@ def save_project_settings(
             payload.media_video_dir,
             payload.tts_engine,
             payload.reference_audio_text,
-            payload.include_translation,
             payload.include_video,
             payload.voice_profile_id,
         ))

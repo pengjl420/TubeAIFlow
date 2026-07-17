@@ -62,6 +62,18 @@ def clear_secret(session: Session, field_name: str) -> dict:
     return get_public_settings()
 
 
+def get_ffmpeg_status() -> dict:
+    from app.services.settings.ffmpeg_installer_service import get_ffmpeg_status as get_status
+
+    return get_status()
+
+
+def install_ffmpeg(session: Session) -> dict:
+    from app.services.settings.ffmpeg_installer_service import install_ffmpeg as install
+
+    return install(session)
+
+
 def _validate_paths(settings: Settings) -> None:
     workspace = settings.workspace_dir.expanduser().resolve()
     workspace.mkdir(parents=True, exist_ok=True)

@@ -15,9 +15,7 @@ from app.infrastructure.recycle_bin import move_existing_to_recycle_bin
 from app.infrastructure.project_layout import (
     ensure_project_dirs,
     get_final_audio_path,
-    get_final_en_srt_path,
     get_final_srt_path,
-    get_final_translated_srt_path,
     get_final_video_path,
     get_output_stem,
     get_project_output_dir,
@@ -39,8 +37,6 @@ GENERATING_STATUSES = {
     "segmenting",
     "tts",
     "tts_running",
-    "translation",
-    "translating",
     "audio_merge",
     "subtitles",
     "rendering",
@@ -188,11 +184,8 @@ def _project_artifact_paths(project: Project) -> list[Path]:
         get_final_audio_path(project, settings.workspace_dir),
         output_root / f"{stem}.mp3",
         get_final_srt_path(project, settings.workspace_dir),
-        get_final_en_srt_path(project, settings.workspace_dir),
-        get_final_translated_srt_path(project, settings.workspace_dir, "zh"),
         output_root / f"{stem}.ass",
         output_root / f"{stem}_zh.ass",
-        output_root / f"{stem}_en.ass",
         get_final_video_path(project, settings.workspace_dir),
     ]
     return paths
@@ -347,7 +340,6 @@ def update_project_settings(
     media_video_dir: str,
     tts_engine: str = DEFAULT_TTS_ENGINE,
     reference_audio_text: str = "",
-    include_translation: bool = False,
     include_video: bool = False,
     voice_profile_id: str = "",
 ) -> Project:
@@ -390,7 +382,7 @@ def update_project_settings(
     config["output_filename"] = safe_filename_stem(output_filename or project_name or _timestamp_stem())
     config["tts_engine"] = normalized_tts_engine
     config["reference_audio_text"] = normalized_reference_audio_text
-    config["include_translation"] = include_translation
+    config.pop("include_translation", None)
     config["include_video"] = include_video
     if video_directory:
         config["media_video_dir"] = str(video_directory)

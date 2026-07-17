@@ -1,1 +1,1 @@
-export { createEnSrt, createTimeline, createZhSrt } from './narration'
+export { createTimeline, createZhSrt } from './narration'

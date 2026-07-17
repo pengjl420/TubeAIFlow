@@ -5,8 +5,7 @@ from sqlmodel import Session, select
 from app.models.project import Project
 from app.models.narration import Segment
 from app.infrastructure import process_runner as task_control
-from app.infrastructure.project_layout import load_project_config
-from app.services.narration import audio_service, srt_service, timeline_service, translation_service, tts_service
+from app.services.narration import audio_service, srt_service, timeline_service, tts_service
 from app.services.projects import project_service
 from app.services.rendering import rough_cut_service
 
@@ -47,7 +46,7 @@ def run_project_generation(
         on_stage_changed(stage)
 
     if stage == "subtitles":
-        with task_control.controlled(project.id, "translation"):
+        with task_control.controlled(project.id, "subtitles"):
             _create_subtitles(session, project)
         stage = "video" if include_video else "completed"
         on_stage_changed(stage)
@@ -76,13 +75,7 @@ def _create_subtitles(session: Session, project: Project) -> None:
             .order_by(Segment.segment_index)
         ).all()
     )
-    _, zh_cues = srt_service.create_full_srt_with_cues(project, segments)
-    config = load_project_config(project)
-    if bool(config.get("include_translation", False)):
-        _, translations, target_language = translation_service.translate_subtitle_cues(project, zh_cues)
-        srt_service.create_translated_srt(project, zh_cues, translations, target_language)
-        project.status = f"{target_language}_subtitle_created"
-    else:
-        project.status = "zh_subtitle_created"
+    srt_service.create_full_srt(project, segments)
+    project.status = "zh_subtitle_created"
     session.add(project)
     session.commit()

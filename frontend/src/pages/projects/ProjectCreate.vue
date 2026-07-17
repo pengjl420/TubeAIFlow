@@ -12,7 +12,6 @@ const voiceProfileId = ref('')
 const outputDir = ref('D:\\video_darft')
 const outputFilename = ref('')
 const mediaVideoDir = ref('')
-const includeTranslation = ref(false)
 const includeVideo = ref(false)
 const saving = ref(false)
 const selectingFolder = ref<'output' | 'video' | null>(null)
@@ -69,7 +68,6 @@ async function submit() {
       output_dir: outputDir.value.trim(),
       output_filename: outputFilename.value.trim(),
       media_video_dir: mediaVideoDir.value.trim(),
-      include_translation: includeTranslation.value,
       include_video: includeVideo.value,
     })
     router.push(`/projects/${project.id}`)
@@ -153,10 +151,6 @@ onMounted(async () => {
 
       <div class="panel form-section-card">
         <div class="section-head"><h2>一键生成选项</h2></div>
-        <label class="checkbox-field">
-          <input v-model="includeTranslation" type="checkbox" />
-          <span>翻译字幕<small>根据当前逐字稿语种自动选择目标语种；中文逐字稿翻译为英文。</small></span>
-        </label>
         <label class="checkbox-field">
           <input v-model="includeVideo" type="checkbox" />
           <span>生成视频<small>开启后，一键生成会在字幕完成后合并视频。</small></span>

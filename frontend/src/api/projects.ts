@@ -7,7 +7,6 @@ export interface CreateProjectInput {
   output_dir: string
   output_filename: string
   media_video_dir: string
-  include_translation: boolean
   include_video: boolean
 }
 
@@ -22,7 +21,6 @@ export async function createProject(input: CreateProjectInput): Promise<Project>
   form.append('output_dir', input.output_dir)
   form.append('output_filename', input.output_filename)
   form.append('media_video_dir', input.media_video_dir)
-  form.append('include_translation', String(input.include_translation))
   form.append('include_video', String(input.include_video))
   return unwrap<Project>(await apiClient.post('/projects', form))
 }
@@ -47,8 +45,7 @@ export interface ProjectOutputs {
   output_dir: string
   work_dir?: string
   final_audio_path?: string
-  final_en_srt_path?: string
-  final_translated_srt_path?: string
+  final_srt_path?: string
   final_video_path?: string
   files: ProjectOutputFile[]
 }
@@ -97,7 +94,6 @@ export interface ProjectSettingsInput {
   output_dir: string
   output_filename: string
   media_video_dir: string
-  include_translation: boolean
   include_video: boolean
   voice_profile_id: string
 }

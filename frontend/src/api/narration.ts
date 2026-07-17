@@ -8,7 +8,7 @@ export async function listSegments(projectId: string): Promise<Segment[]> {
 export async function updateSegment(
   projectId: string,
   segmentId: string,
-  payload: Partial<Pick<Segment, 'text_zh' | 'text_en'>>,
+  payload: Partial<Pick<Segment, 'text_zh'>>,
 ): Promise<Segment> {
   return unwrap<Segment>(await apiClient.put(`/projects/${projectId}/segments/${segmentId}`, payload))
 }
@@ -54,23 +54,9 @@ export async function createTimeline(projectId: string) {
   return unwrap(await apiClient.post(`/projects/${projectId}/timeline`))
 }
 
-export async function createZhSrt(projectId: string, includeTranslation = true) {
+export async function createZhSrt(projectId: string) {
   return unwrap<{
     zh_path: string
-    en_path: string | null
-    translated_path: string | null
-    target_language: 'en' | 'zh' | null
-    translation_path: string | null
     segments: number
-  }>(await apiClient.post(
-    `/projects/${projectId}/subtitles/zh`,
-    undefined,
-    { params: { include_translation: includeTranslation }, timeout: 0 },
-  ))
-}
-
-export async function createEnSrt(projectId: string) {
-  return unwrap<{ path: string; translation_path: string }>(
-    await apiClient.post(`/projects/${projectId}/subtitles/en`, undefined, { timeout: 0 }),
-  )
+  }>(await apiClient.post(`/projects/${projectId}/subtitles/zh`, undefined, { timeout: 0 }))
 }

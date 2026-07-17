@@ -24,16 +24,6 @@ def get_final_srt_path(project: Project, workspace_dir: Path) -> Path:
     return get_project_output_dir(project, workspace_dir) / f"{get_output_stem(project)}.srt"
 
 
-def get_final_en_srt_path(project: Project, workspace_dir: Path) -> Path:
-    return get_project_output_dir(project, workspace_dir) / f"{get_output_stem(project)}_en.srt"
-
-
-def get_final_translated_srt_path(project: Project, workspace_dir: Path, language: str) -> Path:
-    if language not in {"en", "zh"}:
-        raise ValueError("Translated subtitle language must be 'en' or 'zh'")
-    return get_project_output_dir(project, workspace_dir) / f"{get_output_stem(project)}_{language}.srt"
-
-
 def get_final_video_path(project: Project, workspace_dir: Path) -> Path:
     return get_project_output_dir(project, workspace_dir) / f"{get_output_stem(project)}.mp4"
 
@@ -47,7 +37,6 @@ def ensure_project_dirs(base_dir: Path) -> None:
         "subtitles/segments",
         "video/temp",
         "timeline",
-        "translation",
         "logs",
     ]:
         (base_dir / relative).mkdir(parents=True, exist_ok=True)

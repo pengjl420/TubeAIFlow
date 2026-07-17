@@ -32,8 +32,6 @@ const statusLabels: Record<string, string> = {
   tts_completed: '配音已生成',
   audio_merge: '音频合并中',
   audio_merged: '音频已合并',
-  translation: '字幕翻译中',
-  translating: '字幕翻译中',
   subtitles: '字幕生成中',
   zh_subtitle_created: '中文字幕已生成',
   en_subtitle_created: '英文字幕已生成',
@@ -51,7 +49,7 @@ const statusLabels: Record<string, string> = {
 const editableStatuses = new Set(['created', 'script_imported', 'segmented'])
 const generatingStatuses = new Set([
   'narration_in_progress', 'video_in_progress', 'segmenting', 'tts', 'tts_running',
-  'translation', 'translating', 'audio_merge', 'subtitles', 'rendering', 'video_composing',
+  'audio_merge', 'subtitles', 'rendering', 'video_composing',
 ])
 
 const filteredProjects = computed(() => {

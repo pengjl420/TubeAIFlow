@@ -16,6 +16,7 @@ backend/workspace/backend.lock
 backend/workspace/projects/*
 backend/workspace/voices/*
 backend/workspace/templates/*
+backend/workspace/tools/*
 workspace/projects/*
 workspace/voices/*
 workspace/templates/*

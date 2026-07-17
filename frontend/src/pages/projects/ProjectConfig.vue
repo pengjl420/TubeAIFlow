@@ -22,7 +22,6 @@ const voiceProfileId = ref('')
 const outputDir = ref('')
 const outputFilename = ref('')
 const mediaVideoDir = ref('')
-const includeTranslation = ref(false)
 const includeVideo = ref(false)
 const loading = ref(false)
 const saving = ref(false)
@@ -53,7 +52,6 @@ function fillForm() {
   outputDir.value = project.value.output_dir || ''
   const filename = projectConfig.value.output_filename
   const videoDir = projectConfig.value.media_video_dir
-  includeTranslation.value = projectConfig.value.include_translation === true
   includeVideo.value = projectConfig.value.include_video === true
   outputFilename.value = typeof filename === 'string' ? filename : ''
   mediaVideoDir.value = typeof videoDir === 'string' ? videoDir : ''
@@ -120,7 +118,6 @@ async function save() {
       output_dir: outputDir.value.trim(),
       output_filename: outputFilename.value.trim(),
       media_video_dir: mediaVideoDir.value.trim(),
-      include_translation: includeTranslation.value,
       include_video: includeVideo.value,
       voice_profile_id: voiceProfileId.value,
     })
@@ -187,10 +184,6 @@ onMounted(load)
 
       <div class="panel">
         <div class="section-head"><h2>一键生成选项</h2></div>
-        <label class="checkbox-field">
-          <input v-model="includeTranslation" type="checkbox" />
-          <span>翻译字幕<small>根据当前逐字稿语种自动选择目标语种；中文逐字稿翻译为英文。</small></span>
-        </label>
         <label class="checkbox-field">
           <input v-model="includeVideo" type="checkbox" />
           <span>生成视频<small>开启后，一键生成会在字幕完成后合并视频。</small></span>

@@ -86,3 +86,27 @@ class SceneAssignment(SQLModel, table=True):
     manual_confirmed: bool = True
     created_at: str = Field(default_factory=utc_now_iso)
     updated_at: str = Field(default_factory=utc_now_iso)
+
+
+class MediaProviderState(SQLModel, table=True):
+    __tablename__ = "media_provider_states"
+
+    provider: str = Field(primary_key=True)
+    status: str = Field(default="available", index=True)
+    rate_limit: int | None = None
+    remaining: int | None = None
+    reset_at: str | None = None
+    last_error: str | None = None
+    updated_at: str = Field(default_factory=utc_now_iso)
+
+
+class MediaQueryCache(SQLModel, table=True):
+    __tablename__ = "media_query_cache"
+
+    id: str = Field(primary_key=True)
+    provider: str = Field(index=True)
+    query: str
+    media_type: str = "video"
+    response_json: str = "[]"
+    expires_at: str = Field(index=True)
+    created_at: str = Field(default_factory=utc_now_iso)

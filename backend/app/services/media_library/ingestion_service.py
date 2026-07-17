@@ -12,6 +12,7 @@ from app.infrastructure.ffmpeg import probe_media, run_ffmpeg
 from app.integrations.vision.embedding import MODEL_NAME
 from app.integrations.vision.vector_index import upsert_shot
 from app.models.media import MediaFile, MediaKeyframe, MediaShot
+from app.schemas.media import RemoteMediaCandidate
 from app.shared.time import utc_now_iso
 
 
@@ -57,6 +58,44 @@ def import_directory(session: Session, directory: str) -> dict:
         "skipped": skipped,
         "errors": errors,
     }
+
+
+def import_remote_asset(
+    session: Session,
+    path: Path,
+    candidate: RemoteMediaCandidate,
+) -> tuple[MediaFile, bool]:
+    existing = session.exec(
+        select(MediaFile).where(
+            MediaFile.provider == candidate.provider,
+            MediaFile.provider_asset_id == candidate.asset_id,
+        )
+    ).first()
+    if existing:
+        return existing, False
+
+    file_hash = _sha256(path)
+    duplicate = session.exec(select(MediaFile).where(MediaFile.file_hash == file_hash)).first()
+    if duplicate:
+        return duplicate, False
+
+    media_file = _create_media_file(
+        path,
+        file_hash,
+        provider=candidate.provider,
+        provider_asset_id=candidate.asset_id,
+        source_metadata=candidate.model_dump(mode="json"),
+    )
+    description = " ".join([candidate.title, candidate.query]).strip()
+    tags = list(dict.fromkeys([*candidate.tags, *_tags(description)]))
+    shots = _create_shots(media_file)
+    for shot in shots:
+        shot.description = description or shot.description
+        shot.tags_json = json.dumps(tags, ensure_ascii=False)
+    session.add(media_file)
+    session.add_all(shots)
+    session.commit()
+    return media_file, True
 
 
 def list_assets(session: Session, limit: int = 200) -> list[dict]:
@@ -123,12 +162,22 @@ def ingest_asset(session: Session, media_id: str) -> dict:
     return {"asset": get_asset(session, media_id), "errors": errors}
 
 
-def _create_media_file(path: Path, file_hash: str) -> MediaFile:
+def _create_media_file(
+    path: Path,
+    file_hash: str,
+    provider: str = "local",
+    provider_asset_id: str | None = None,
+    source_metadata: dict | None = None,
+) -> MediaFile:
     media_type = "video" if path.suffix.lower() in VIDEO_EXTENSIONS else "image"
     metadata = probe_media(path)
+    if source_metadata:
+        metadata["source"] = source_metadata
     now = utc_now_iso()
     return MediaFile(
         id=f"media_{uuid4().hex}",
+        provider=provider,
+        provider_asset_id=provider_asset_id,
         path=str(path),
         filename=path.name,
         media_type=media_type,

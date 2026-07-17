@@ -196,7 +196,9 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertIn("media_keyframes", table_names)
         self.assertIn("scene_candidates", table_names)
         self.assertIn("scene_assignments", table_names)
-        self.assertEqual(versions, [(1,), (2,), (3,), (4,), (5,), (6,)])
+        self.assertIn("media_provider_states", table_names)
+        self.assertIn("media_query_cache", table_names)
+        self.assertEqual(versions, [(1,), (2,), (3,), (4,), (5,), (6,), (7,)])
 
     def test_source_subtitle_migration_removes_bilingual_schema_and_config(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -201,6 +201,36 @@ def _apply_migrations() -> None:
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_media_keyframes_shot_index "
             "ON media_keyframes (media_shot_id, frame_index)",
         ],
+        7: [
+            """
+            CREATE TABLE IF NOT EXISTS media_provider_states (
+                provider VARCHAR NOT NULL PRIMARY KEY,
+                status VARCHAR NOT NULL DEFAULT 'available',
+                rate_limit INTEGER,
+                remaining INTEGER,
+                reset_at VARCHAR,
+                last_error VARCHAR,
+                updated_at VARCHAR NOT NULL
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_media_provider_states_status "
+            "ON media_provider_states (status)",
+            """
+            CREATE TABLE IF NOT EXISTS media_query_cache (
+                id VARCHAR NOT NULL PRIMARY KEY,
+                provider VARCHAR NOT NULL,
+                query VARCHAR NOT NULL,
+                media_type VARCHAR NOT NULL DEFAULT 'video',
+                response_json VARCHAR NOT NULL DEFAULT '[]',
+                expires_at VARCHAR NOT NULL,
+                created_at VARCHAR NOT NULL
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_media_query_cache_provider "
+            "ON media_query_cache (provider)",
+            "CREATE INDEX IF NOT EXISTS ix_media_query_cache_expires_at "
+            "ON media_query_cache (expires_at)",
+        ],
     }
     with engine.begin() as connection:
         connection.exec_driver_sql(

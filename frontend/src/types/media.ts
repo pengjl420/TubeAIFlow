@@ -82,4 +82,11 @@ export interface SceneSearchResult {
   scene_id: string
   status: string
   candidates: SceneCandidate[]
+  online_search?: Array<{
+    provider: 'pexels' | 'pixabay'
+    status: string
+    reset_at?: string | null
+    downloaded: string[]
+    errors: Array<{ asset_id: string; error: string }>
+  }>
 }

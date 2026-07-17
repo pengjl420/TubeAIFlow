@@ -13,6 +13,7 @@ from app.schemas.media import SceneAssignmentRequest
 from app.schemas.storyboard import StoryboardContent
 from app.shared.time import utc_now_iso
 from app.services.media_library.ingestion_service import serialize_shot
+from app.services.media_library import media_provider_service, remote_retrieval_service
 
 
 MIN_LOCAL_RELEVANCE = 0.25
@@ -33,6 +34,30 @@ def clear_project_scene_data(session: Session, project_id: str) -> None:
 
 
 def search_scene_candidates(
+    session: Session, project: Project, scene_id: str
+) -> dict:
+    result = _search_available_candidates(session, project, scene_id)
+    if result["status"] == "QUALIFIED":
+        result["online_search"] = []
+        return result
+
+    scene = _require_scene(session, project.id, scene_id)
+    storyboard = StoryboardContent.model_validate_json(scene.storyboard_json)
+    attempts = []
+    for provider in media_provider_service.PROVIDER_ORDER:
+        attempt = remote_retrieval_service.fetch_provider_candidates(
+            session, provider, storyboard
+        )
+        attempts.append(attempt)
+        if attempt["downloaded"]:
+            result = _search_available_candidates(session, project, scene_id)
+        if result["status"] == "QUALIFIED":
+            break
+    result["online_search"] = attempts
+    return result
+
+
+def _search_available_candidates(
     session: Session, project: Project, scene_id: str
 ) -> dict:
     scene = _require_scene(session, project.id, scene_id)

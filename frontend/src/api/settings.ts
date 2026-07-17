@@ -13,6 +13,12 @@ export interface SystemSettings {
   deepseek_timeout_seconds: number
   deepseek_max_tokens: number
   deepseek_retry_count: number
+  pexels_api_key: string
+  pexels_api_key_configured: boolean
+  pixabay_api_key: string
+  pixabay_api_key_configured: boolean
+  media_search_cache_hours: number
+  media_search_download_limit: number
   qwen_tts_root: string | null
   qwen_tts_python: string | null
   qwen_tts_model_dir: string | null
@@ -50,6 +56,17 @@ export interface FfmpegInstallResult {
   status: FfmpegStatus
 }
 
+export interface MediaProviderStatus {
+  provider: 'pexels' | 'pixabay'
+  configured: boolean
+  status: 'unconfigured' | 'available' | 'cooldown' | 'error'
+  rate_limit: number | null
+  remaining: number | null
+  reset_at: string | null
+  last_error: string | null
+  updated_at: string | null
+}
+
 export async function getSystemSettings(): Promise<SystemSettings> {
   return unwrap<SystemSettings>(await apiClient.get('/settings'))
 }
@@ -60,6 +77,11 @@ export async function saveSystemSettings(settings: SystemSettings): Promise<Syst
 
 export async function clearSystemSecret(field: string): Promise<SystemSettings> {
   return unwrap<SystemSettings>(await apiClient.post('/settings/clear-secret', { field }))
+}
+
+export async function getMediaProviderStatuses(): Promise<MediaProviderStatus[]> {
+  const result = unwrap<{ providers: MediaProviderStatus[] }>(await apiClient.get('/settings/media-providers/status'))
+  return result.providers
 }
 
 export async function getFfmpegStatus(): Promise<FfmpegStatus> {

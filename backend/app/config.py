@@ -23,6 +23,10 @@ class Settings(BaseModel):
     deepseek_timeout_seconds: float = Field(default=60.0, gt=0, le=600)
     deepseek_max_tokens: int = Field(default=8192, ge=1, le=65536)
     deepseek_retry_count: int = Field(default=1, ge=0, le=10)
+    pexels_api_key: str = ""
+    pixabay_api_key: str = ""
+    media_search_cache_hours: int = Field(default=24, ge=24, le=168)
+    media_search_download_limit: int = Field(default=3, ge=1, le=5)
     qwen_tts_root: Path | None = None
     qwen_tts_python: Path | None = None
     qwen_tts_model_dir: Path | None = None

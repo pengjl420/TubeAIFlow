@@ -37,14 +37,23 @@ class SettingsModelTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unsupported Chatterbox"):
             Settings(chatterbox_t3_model="v4")
 
+    def test_media_search_cache_cannot_be_shorter_than_24_hours(self) -> None:
+        with self.assertRaises(ValueError):
+            Settings(media_search_cache_hours=23)
+
     def test_public_settings_never_expose_secret_values(self) -> None:
-        configured = Settings(deepseek_api_key="secret", workspace_dir=Path("workspace"))
+        configured = Settings(
+            deepseek_api_key="deepseek-secret",
+            pexels_api_key="pexels-secret",
+            pixabay_api_key="pixabay-secret",
+            workspace_dir=Path("workspace"),
+        )
         with patch("app.services.settings.system_settings_service.get_settings", return_value=configured):
             public = get_public_settings()
 
         for field_name in SECRET_FIELDS:
             self.assertEqual(public[field_name], "")
-        self.assertTrue(public["deepseek_api_key_configured"])
+            self.assertTrue(public[f"{field_name}_configured"])
 
     def test_legacy_deepseek_model_is_migrated(self) -> None:
         settings = Settings(deepseek_model="deepseek-chat")

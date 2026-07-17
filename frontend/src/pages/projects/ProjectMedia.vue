@@ -150,9 +150,12 @@ async function searchCandidates() {
   try {
     const result = await searchSceneCandidates(projectId, selectedScene.value.id)
     candidates.value = result.candidates
+    const onlineProviders = (result.online_search || [])
+      .filter((item) => item.downloaded.length)
+      .map((item) => item.provider === 'pexels' ? 'Pexels' : 'Pixabay')
     message.value = result.candidates.length
-      ? `已完成本地向量检索，返回 ${result.candidates.length} 个候选`
-      : '本地素材库没有可用候选'
+      ? `已完成素材检索，返回 ${result.candidates.length} 个候选${onlineProviders.length ? `（已补充 ${onlineProviders.join('、')} 素材）` : ''}`
+      : '本地与已配置的在线平台均没有可用候选'
   } catch (err) {
     error.value = err instanceof Error ? err.message : '素材检索失败'
   } finally {
@@ -269,7 +272,7 @@ onMounted(load)
           <div class="section-head">
             <div><span class="section-eyebrow">VECTOR QUERY</span><h2>{{ selectedScene.storyboard?.visual_summary || '待生成视觉查询' }}</h2></div>
             <button class="primary-button" :disabled="searching || !selectedScene.storyboard" @click="searchCandidates">
-              {{ searching ? '向量检索中…' : '检索本地素材' }}
+              {{ searching ? '正在检索素材…' : '检索素材' }}
             </button>
           </div>
           <p class="scene-narration">{{ selectedScene.narration }}</p>

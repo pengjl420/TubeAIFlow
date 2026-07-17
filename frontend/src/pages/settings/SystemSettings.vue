@@ -5,10 +5,12 @@ import { rememberApiAddress } from '../../api/client'
 import {
   clearSystemSecret,
   getFfmpegStatus,
+  getMediaProviderStatuses,
   getSystemSettings,
   installFfmpeg,
   saveSystemSettings,
   type FfmpegStatus,
+  type MediaProviderStatus,
   type SystemSettings,
 } from '../../api/settings'
 
@@ -17,6 +19,7 @@ const loading = ref(false)
 const saving = ref(false)
 const installingFfmpeg = ref(false)
 const ffmpegStatus = ref<FfmpegStatus | null>(null)
+const mediaProviderStatuses = ref<MediaProviderStatus[]>([])
 const error = ref('')
 const message = ref('')
 
@@ -24,8 +27,14 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    settings.value = await getSystemSettings()
-    ffmpegStatus.value = await getFfmpegStatus()
+    const [loadedSettings, loadedFfmpegStatus, loadedProviderStatuses] = await Promise.all([
+      getSystemSettings(),
+      getFfmpegStatus(),
+      getMediaProviderStatuses(),
+    ])
+    settings.value = loadedSettings
+    ffmpegStatus.value = loadedFfmpegStatus
+    mediaProviderStatuses.value = loadedProviderStatuses
   } catch (err) {
     error.value = err instanceof Error ? err.message : '系统设置加载失败'
   } finally {
@@ -56,6 +65,7 @@ async function save() {
   message.value = ''
   try {
     settings.value = await saveSystemSettings(settings.value)
+    mediaProviderStatuses.value = await getMediaProviderStatuses()
     rememberApiAddress(settings.value.app_host, settings.value.app_port)
     message.value = '系统设置已保存。监听地址或端口变更需要重启应用后生效。'
   } catch (err) {
@@ -65,15 +75,39 @@ async function save() {
   }
 }
 
-async function clearDeepSeekKey() {
+async function clearApiKey(field: 'deepseek_api_key' | 'pexels_api_key' | 'pixabay_api_key', label: string) {
   error.value = ''
   message.value = ''
   try {
-    settings.value = await clearSystemSecret('deepseek_api_key')
-    message.value = 'DeepSeek API Key 已清除'
+    settings.value = await clearSystemSecret(field)
+    mediaProviderStatuses.value = await getMediaProviderStatuses()
+    message.value = `${label} API Key 已清除`
   } catch (err) {
     error.value = err instanceof Error ? err.message : '密钥清除失败'
   }
+}
+
+function providerStatus(provider: 'pexels' | 'pixabay') {
+  return mediaProviderStatuses.value.find((item) => item.provider === provider)
+}
+
+function providerStatusLabel(provider: 'pexels' | 'pixabay') {
+  const status = providerStatus(provider)
+  if (!status?.configured) return '未配置'
+  if (status.status === 'cooldown') return '额度冷却中'
+  if (status.status === 'error') return '请求异常'
+  return '可用'
+}
+
+function providerQuotaText(provider: 'pexels' | 'pixabay') {
+  const status = providerStatus(provider)
+  if (!status?.configured) return '配置 API Key 后启用在线素材检索。'
+  const parts: string[] = []
+  if (status.remaining !== null) parts.push(`剩余请求 ${status.remaining}`)
+  if (status.rate_limit !== null) parts.push(`当前限制 ${status.rate_limit}`)
+  if (status.reset_at) parts.push(`重置时间 ${new Date(status.reset_at).toLocaleString()}`)
+  if (status.last_error) parts.push(status.last_error)
+  return parts.length ? parts.join('；') : '尚未发起请求，首次在线检索后显示配额状态。'
 }
 
 onMounted(load)
@@ -355,8 +389,57 @@ onMounted(load)
             <small>密钥只保存在本机数据库中，保存后页面不会再次显示明文。</small>
           </label>
           <span class="status-pill">{{ settings.deepseek_api_key_configured ? '已配置' : '未配置' }}</span>
-          <button v-if="settings.deepseek_api_key_configured" class="secondary-button" type="button" @click="clearDeepSeekKey">清除</button>
+          <button v-if="settings.deepseek_api_key_configured" class="secondary-button" type="button" @click="clearApiKey('deepseek_api_key', 'DeepSeek')">清除</button>
         </div>
+        </div>
+      </details>
+
+      <details class="panel settings-disclosure">
+        <summary>
+          <span class="settings-disclosure-heading"><strong>在线素材平台</strong><small>Pexels 与 Pixabay 素材检索</small></span>
+          <span class="settings-disclosure-icon" aria-hidden="true">⌄</span>
+        </summary>
+        <div class="settings-disclosure-content">
+          <p class="section-description">当本地素材库没有合格结果时，系统依次使用已配置的平台搜索在线素材。可以只配置其中一个平台；API Key 保存后不会再次显示明文。</p>
+          <div class="secret-row">
+            <label class="field">
+              <span>Pexels API Key</span>
+              <input v-model="settings.pexels_api_key" type="password" :placeholder="settings.pexels_api_key_configured ? '已配置；留空保持不变' : '请输入 API Key'" autocomplete="new-password" />
+              <small>
+                用于从 Pexels 搜索候选图片和视频，仅在本地素材不足时调用。
+                <a href="https://www.pexels.com/api/key/" target="_blank" rel="noopener noreferrer">获取 Pexels API Key</a>
+              </small>
+            </label>
+            <span class="status-pill">{{ providerStatusLabel('pexels') }}</span>
+            <button v-if="settings.pexels_api_key_configured" class="secondary-button" type="button" @click="clearApiKey('pexels_api_key', 'Pexels')">清除</button>
+          </div>
+          <div class="notice">Pexels：{{ providerQuotaText('pexels') }}</div>
+          <div class="secret-row">
+            <label class="field">
+              <span>Pixabay API Key</span>
+              <input v-model="settings.pixabay_api_key" type="password" :placeholder="settings.pixabay_api_key_configured ? '已配置；留空保持不变' : '请输入 API Key'" autocomplete="new-password" />
+              <small>
+                用于从 Pixabay 搜索候选图片和视频，仅在本地素材不足时调用。
+                <a href="https://pixabay.com/api/docs/#api_search_images" target="_blank" rel="noopener noreferrer">获取 Pixabay API Key</a>
+              </small>
+            </label>
+            <span class="status-pill">{{ providerStatusLabel('pixabay') }}</span>
+            <button v-if="settings.pixabay_api_key_configured" class="secondary-button" type="button" @click="clearApiKey('pixabay_api_key', 'Pixabay')">清除</button>
+          </div>
+          <div class="notice">Pixabay：{{ providerQuotaText('pixabay') }}</div>
+          <div class="form-grid">
+            <label class="field">
+              <span>查询缓存时长（小时）</span>
+              <input v-model.number="settings.media_search_cache_hours" type="number" min="24" max="168" />
+              <small>至少缓存 24 小时，避免相同查询重复消耗平台额度。</small>
+            </label>
+            <label class="field">
+              <span>每个平台最多下载候选数</span>
+              <input v-model.number="settings.media_search_download_limit" type="number" min="1" max="5" />
+              <small>推荐保持 3；先搜索和筛选，再只下载少量候选入库。</small>
+            </label>
+          </div>
+          <div class="notice">检索顺序固定为本地素材 → Pexels → Pixabay。平台返回 429 时会进入冷却并自动尝试下一平台，不会轮换同平台的其他 Key。</div>
         </div>
       </details>
     </div>

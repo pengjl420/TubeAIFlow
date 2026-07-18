@@ -1,14 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
 import {
   assetPreviewUrl,
+  deleteAsset,
+  deleteAssets,
   getAssetLibrary,
   importAssets,
   ingestAsset,
   updateAsset,
+  type AssetLibrarySummary,
 } from '../../api/assets'
 import { selectDirectory } from '../../api/projects'
+import { confirmAction } from '../../services/feedback'
 import type { LibraryRole, MediaAsset } from '../../types/media'
 import { formatDuration } from '../../utils/time'
 
@@ -17,6 +21,8 @@ const loading = ref(false)
 const importing = ref(false)
 const processingId = ref('')
 const bulkProcessing = ref(false)
+const deleting = ref(false)
+const selectedIds = ref<Set<string>>(new Set())
 const directory = ref('')
 const importRole = ref<LibraryRole>('semantic')
 const fallbackCategory = ref('')
@@ -26,12 +32,20 @@ const searchText = ref('')
 const message = ref('')
 const error = ref('')
 const currentVectorModel = ref('')
+const page = ref(1)
+const pageSize = ref(24)
+const total = ref(0)
+const summary = ref<AssetLibrarySummary>({
+  asset_count: 0,
+  shot_count: 0,
+  semantic_asset_count: 0,
+  indexed_shot_count: 0,
+  preview_shot_count: 0,
+})
+let loadRequestId = 0
+let searchTimer: ReturnType<typeof setTimeout> | undefined
 
-const allShots = computed(() => assets.value.flatMap((asset) => asset.shots))
 const semanticAssets = computed(() => assets.value.filter((asset) => asset.library_role === 'semantic'))
-const indexedShots = computed(() => allShots.value.filter(
-  (shot) => shot.vector_id !== null && shot.vector_model === currentVectorModel.value,
-))
 const pendingSemanticAssets = computed(() => semanticAssets.value.filter(
   (asset) => asset.enabled
     && asset.review_status === 'approved'
@@ -39,27 +53,35 @@ const pendingSemanticAssets = computed(() => semanticAssets.value.filter(
       (shot) => shot.vector_id === null || shot.vector_model !== currentVectorModel.value,
     ),
 ))
-const filteredAssets = computed(() => {
-  const query = searchText.value.trim().toLocaleLowerCase()
-  return assets.value.filter((asset) => {
-    if (roleFilter.value !== 'all' && asset.library_role !== roleFilter.value) return false
-    if (!query) return true
-    return [asset.filename, asset.path, asset.provider, asset.fallback_category, asset.mood]
-      .some((value) => value.toLocaleLowerCase().includes(query))
-  })
-})
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
+const selectedCount = computed(() => selectedIds.value.size)
+const allFilteredSelected = computed(() => (
+  assets.value.length > 0
+  && assets.value.every((asset) => selectedIds.value.has(asset.id))
+))
 
 async function loadAssets() {
+  const requestId = ++loadRequestId
   loading.value = true
   error.value = ''
   try {
-    const result = await getAssetLibrary()
+    const result = await getAssetLibrary({
+      page: page.value,
+      pageSize: pageSize.value,
+      libraryRole: roleFilter.value === 'all' ? undefined : roleFilter.value,
+      search: searchText.value,
+    })
+    if (requestId !== loadRequestId) return
     assets.value = result.assets
     currentVectorModel.value = result.vectorModel
+    total.value = result.total
+    summary.value = result.summary
+    const availableIds = new Set(result.assets.map((asset) => asset.id))
+    selectedIds.value = new Set([...selectedIds.value].filter((id) => availableIds.has(id)))
   } catch (err) {
     error.value = err instanceof Error ? err.message : '素材库加载失败'
   } finally {
-    loading.value = false
+    if (requestId === loadRequestId) loading.value = false
   }
 }
 
@@ -92,6 +114,7 @@ async function scanDirectory() {
       fallbackCategory.value.trim(),
       mood.value.trim(),
     )
+    page.value = 1
     await loadAssets()
     message.value = `扫描 ${result.discovered} 个文件，新入库 ${result.imported.length} 个，跳过重复 ${result.skipped.length} 个`
     if (result.errors.length) error.value = `${result.errors.length} 个文件入库失败，请检查格式和 FFmpeg 配置`
@@ -112,6 +135,7 @@ async function processAsset(asset: MediaAsset) {
   try {
     const result = await ingestAsset(asset.id)
     replaceAsset(result.asset)
+    await loadAssets()
     message.value = result.errors.length
       ? `${asset.filename} 已处理，但 ${result.errors.length} 个镜头失败`
       : `${asset.filename} 已完成${asset.library_role === 'semantic' ? '向量化和落库' : '预览处理'}`
@@ -141,6 +165,7 @@ async function processPendingSemanticAssets() {
       failedShots += result.errors.length
       completed += 1
     }
+    await loadAssets()
     message.value = `已完成 ${completed} 个语义素材文件的关键帧与向量落库`
     if (failedShots) error.value = `${failedShots} 个镜头处理失败，请逐项重试`
   } catch (err) {
@@ -163,6 +188,7 @@ async function saveClassification(asset: MediaAsset) {
       enabled: asset.enabled,
     })
     replaceAsset(updated)
+    await loadAssets()
     message.value = updated.library_role === 'semantic'
       ? `${updated.filename} 已归入语义素材池；点击向量化后才会参与检索`
       : `${updated.filename} 已归入${roleLabel(updated.library_role)}，不会参与普通语义召回`
@@ -170,6 +196,76 @@ async function saveClassification(asset: MediaAsset) {
     error.value = err instanceof Error ? err.message : '素材分类保存失败'
   } finally {
     processingId.value = ''
+  }
+}
+
+function setAssetSelected(mediaId: string, selected: boolean) {
+  const next = new Set(selectedIds.value)
+  if (selected) next.add(mediaId)
+  else next.delete(mediaId)
+  selectedIds.value = next
+}
+
+function onAssetSelectionChange(mediaId: string, event: Event) {
+  setAssetSelected(mediaId, (event.target as HTMLInputElement).checked)
+}
+
+function toggleFilteredSelection() {
+  const next = new Set(selectedIds.value)
+  if (allFilteredSelected.value) assets.value.forEach((asset) => next.delete(asset.id))
+  else assets.value.forEach((asset) => next.add(asset.id))
+  selectedIds.value = next
+}
+
+async function removeOne(asset: MediaAsset) {
+  const confirmed = await confirmAction({
+    eyebrow: '删除本地素材记录',
+    title: `删除“${asset.filename}”？`,
+    description: '将删除数据库记录、镜头向量和已生成的预览图。',
+    detail: '原始素材文件会保留在原路径，不会被删除。已使用该素材的场景需要重新选择素材。',
+    confirmText: '删除素材',
+    tone: 'danger',
+  })
+  if (!confirmed) return
+  deleting.value = true
+  error.value = ''
+  try {
+    const result = await deleteAsset(asset.id)
+    setAssetSelected(asset.id, false)
+    if (assets.value.length === 1 && page.value > 1) page.value -= 1
+    await loadAssets()
+    message.value = `已删除 1 条素材记录和 ${result.deleted_preview_files} 个预览图文件，原始素材已保留`
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '素材删除失败'
+  } finally {
+    deleting.value = false
+  }
+}
+
+async function removeSelected() {
+  const ids = [...selectedIds.value]
+  if (!ids.length) return
+  const confirmed = await confirmAction({
+    eyebrow: '批量删除本地素材记录',
+    title: `删除已选中的 ${ids.length} 个素材？`,
+    description: '将批量删除数据库记录、镜头向量和已生成的预览图。',
+    detail: '原始素材文件全部保留。已使用这些素材的场景需要重新选择素材。',
+    confirmText: `删除 ${ids.length} 个素材`,
+    tone: 'danger',
+  })
+  if (!confirmed) return
+  deleting.value = true
+  error.value = ''
+  try {
+    const result = await deleteAssets(ids)
+    selectedIds.value = new Set()
+    if (result.deleted_ids.length >= assets.value.length && page.value > 1) page.value -= 1
+    await loadAssets()
+    message.value = `已删除 ${result.deleted_ids.length} 条素材记录和 ${result.deleted_preview_files} 个预览图文件，原始素材已保留`
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '批量删除素材失败'
+  } finally {
+    deleting.value = false
   }
 }
 
@@ -200,9 +296,71 @@ function assetIndexedCount(asset: MediaAsset) {
   ).length
 }
 
+function assetPreviewCount(asset: MediaAsset) {
+  return asset.shots.filter((shot) => shot.thumbnail_url !== null).length
+}
+
+function vectorStatus(asset: MediaAsset) {
+  const shotCount = asset.shots.length
+  if (asset.library_role !== 'semantic') {
+    const previewCount = assetPreviewCount(asset)
+    return previewCount === shotCount && shotCount > 0
+      ? `无需向量 · 预览 ${previewCount}/${shotCount}`
+      : `无需向量 · 待生成预览 ${previewCount}/${shotCount}`
+  }
+  const indexedCount = assetIndexedCount(asset)
+  if (indexedCount === shotCount && shotCount > 0) return `向量已就绪 ${indexedCount}/${shotCount}`
+  if (!indexedCount) return `待生成向量 0/${shotCount}`
+  return `向量不完整 ${indexedCount}/${shotCount}`
+}
+
+const categoryOptions = [
+  ['business', '商业'], ['technology', '科技'], ['finance', '金融'], ['history', '历史'],
+  ['crisis', '危机'], ['travel', '旅行'], ['city', '城市'], ['transition', '转场'], ['landscape', '风景'],
+] as const
+const moodOptions = [
+  ['neutral', '中性'], ['serious', '严肃'], ['reflective', '沉思'], ['calm', '平静'],
+  ['hopeful', '希望'], ['tense', '紧张'], ['somber', '沉重'], ['curious', '好奇'], ['energetic', '活力'],
+] as const
+
+function optionLabel(options: readonly (readonly [string, string])[], value: string) {
+  return options.find(([key]) => key === value)?.[1] || value || '未设置'
+}
+
+function reviewStatusLabel(asset: MediaAsset) {
+  if (!asset.enabled) return '已停用'
+  return { approved: '已审核', pending: '待审核', rejected: '已拒绝' }[asset.review_status]
+}
+
+function goToPage(nextPage: number) {
+  const normalized = Math.min(totalPages.value, Math.max(1, nextPage))
+  if (normalized === page.value) return
+  page.value = normalized
+  loadAssets()
+}
+
 function formatMilliseconds(value: number | null) {
   return value === null ? '—' : formatDuration(value / 1000)
 }
+
+watch(roleFilter, () => {
+  page.value = 1
+  selectedIds.value = new Set()
+  loadAssets()
+})
+watch(pageSize, () => {
+  page.value = 1
+  selectedIds.value = new Set()
+  loadAssets()
+})
+watch(searchText, () => {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    page.value = 1
+    selectedIds.value = new Set()
+    loadAssets()
+  }, 300)
+})
 
 onMounted(loadAssets)
 </script>
@@ -218,16 +376,16 @@ onMounted(loadAssets)
       <div class="page-title-actions">
         <button class="secondary-button" :disabled="loading" @click="loadAssets">刷新</button>
         <button class="primary-button" :disabled="bulkProcessing || !pendingSemanticAssets.length" @click="processPendingSemanticAssets">
-          {{ bulkProcessing ? '批量向量化中…' : `向量化待处理素材（${pendingSemanticAssets.length}）` }}
+          {{ bulkProcessing ? '批量向量化中…' : `向量化本页待处理素材（${pendingSemanticAssets.length}）` }}
         </button>
       </div>
     </div>
 
     <div class="asset-library-metrics">
-      <div><span>素材文件</span><strong>{{ assets.length }}</strong></div>
-      <div><span>可检索镜头</span><strong>{{ allShots.length }}</strong></div>
-      <div><span>语义素材</span><strong>{{ semanticAssets.length }}</strong></div>
-      <div><span>已落库向量</span><strong>{{ indexedShots.length }}</strong></div>
+      <div><span>素材文件</span><strong>{{ summary.asset_count }}</strong></div>
+      <div><span>素材镜头</span><strong>{{ summary.shot_count }}</strong></div>
+      <div><span>语义素材</span><strong>{{ summary.semantic_asset_count }}</strong></div>
+      <div><span>向量 / 预览</span><strong>{{ summary.indexed_shot_count }} / {{ summary.preview_shot_count }}</strong></div>
     </div>
 
     <div v-if="error" class="alert alert-danger"><strong>操作未完成</strong><span>{{ error }}</span></div>
@@ -253,11 +411,17 @@ onMounted(loadAssets)
         </label>
         <label v-if="importRole === 'themed_fallback'" class="field asset-category-field">
           <span>兜底类别</span>
-          <input v-model="fallbackCategory" placeholder="business / technology / history" />
+          <select v-model="fallbackCategory">
+            <option value="">请选择类别</option>
+            <option v-for="([value, label]) in categoryOptions" :key="value" :value="value">{{ label }}</option>
+          </select>
         </label>
         <label v-if="importRole !== 'semantic'" class="field asset-mood-field">
           <span>情绪标签</span>
-          <input v-model="mood" placeholder="neutral / serious / reflective" />
+          <select v-model="mood">
+            <option value="">未设置</option>
+            <option v-for="([value, label]) in moodOptions" :key="value" :value="value">{{ label }}</option>
+          </select>
         </label>
         <label class="field asset-directory-field">
           <span>素材目录</span>
@@ -301,17 +465,38 @@ onMounted(loadAssets)
         <option value="themed_fallback">主题兜底</option>
         <option value="landscape_fallback">纯风景最终兜底</option>
       </select>
-      <span class="status-pill is-neutral">显示 {{ filteredAssets.length }} / {{ assets.length }}</span>
+      <select v-model="pageSize" class="filter-select" aria-label="每页素材数">
+        <option :value="18">每页 18 个</option>
+        <option :value="24">每页 24 个</option>
+        <option :value="36">每页 36 个</option>
+        <option :value="48">每页 48 个</option>
+      </select>
+      <button class="secondary-button" :disabled="!assets.length || deleting" @click="toggleFilteredSelection">
+        {{ allFilteredSelected ? '取消本页全选' : '全选本页' }}
+      </button>
+      <button class="danger-button" :disabled="!selectedCount || deleting || bulkProcessing || !!processingId" @click="removeSelected">
+        {{ deleting ? '删除中…' : `批量删除（${selectedCount}）` }}
+      </button>
+      <span class="status-pill is-neutral">第 {{ page }} / {{ totalPages }} 页 · 共 {{ total }} 个</span>
     </div>
 
-    <div v-if="!loading && !filteredAssets.length" class="empty-state panel">
+    <div v-if="!loading && !assets.length" class="empty-state panel">
       <h2>素材库暂无匹配内容</h2>
       <p>选择一个本地目录并完成“扫描并入库”。</p>
     </div>
 
     <div class="asset-library-grid">
-      <article v-for="asset in filteredAssets" :key="asset.id" class="panel asset-library-card">
+      <article v-for="asset in assets" :key="asset.id" class="panel asset-library-card">
         <div class="asset-library-preview">
+          <label class="asset-select-checkbox" @click.stop>
+            <input
+              type="checkbox"
+              :checked="selectedIds.has(asset.id)"
+              :disabled="deleting || processingId === asset.id"
+              @change="onAssetSelectionChange(asset.id, $event)"
+            />
+            <span>选择</span>
+          </label>
           <img
             v-if="asset.shots[0]?.thumbnail_url"
             :src="assetPreviewUrl(asset.shots[0].thumbnail_url)"
@@ -319,7 +504,7 @@ onMounted(loadAssets)
           />
           <div v-else class="asset-preview-placeholder">等待生成预览</div>
           <span class="status-pill" :class="asset.enabled && asset.review_status === 'approved' ? 'is-success' : 'is-warning'">
-            {{ asset.enabled ? asset.review_status : 'disabled' }}
+            {{ reviewStatusLabel(asset) }}
           </span>
         </div>
         <div class="asset-library-card-body">
@@ -332,7 +517,7 @@ onMounted(loadAssets)
             <span>{{ asset.width || '—' }} × {{ asset.height || '—' }}</span>
             <span>{{ formatMilliseconds(asset.duration_ms) }}</span>
             <span>{{ asset.shots.length }} 个镜头</span>
-            <span>{{ assetIndexedCount(asset) }}/{{ asset.shots.length }} 个向量</span>
+            <span class="asset-index-status">{{ vectorStatus(asset) }}</span>
           </div>
 
           <div class="asset-card-settings">
@@ -346,11 +531,24 @@ onMounted(loadAssets)
             </label>
             <label v-if="asset.library_role !== 'semantic'" class="field">
               <span>兜底类别</span>
-              <input v-model="asset.fallback_category" placeholder="landscape / business" />
+              <select v-if="asset.library_role === 'themed_fallback'" v-model="asset.fallback_category">
+                <option v-if="asset.fallback_category && !categoryOptions.some(([value]) => value === asset.fallback_category)" :value="asset.fallback_category">
+                  {{ optionLabel(categoryOptions, asset.fallback_category) }}
+                </option>
+                <option value="">请选择类别</option>
+                <option v-for="([value, label]) in categoryOptions" :key="value" :value="value">{{ label }}</option>
+              </select>
+              <span v-else class="asset-readonly-value">纯风景</span>
             </label>
             <label v-if="asset.library_role !== 'semantic'" class="field">
               <span>情绪</span>
-              <input v-model="asset.mood" placeholder="neutral / reflective" />
+              <select v-model="asset.mood">
+                <option v-if="asset.mood && !moodOptions.some(([value]) => value === asset.mood)" :value="asset.mood">
+                  {{ optionLabel(moodOptions, asset.mood) }}
+                </option>
+                <option value="">未设置</option>
+                <option v-for="([value, label]) in moodOptions" :key="value" :value="value">{{ label }}</option>
+              </select>
             </label>
             <label class="field">
               <span>审核状态</span>
@@ -367,6 +565,9 @@ onMounted(loadAssets)
           </div>
 
           <div class="asset-card-actions">
+            <button class="danger-button" :disabled="deleting || !!processingId || bulkProcessing" @click="removeOne(asset)">
+              删除
+            </button>
             <button class="secondary-button" :disabled="processingId === asset.id || bulkProcessing" @click="saveClassification(asset)">
               保存分类
             </button>
@@ -379,5 +580,13 @@ onMounted(loadAssets)
         </div>
       </article>
     </div>
+
+    <nav v-if="total > 0" class="asset-pagination" aria-label="素材分页">
+      <button class="secondary-button" :disabled="page <= 1 || loading" @click="goToPage(1)">首页</button>
+      <button class="secondary-button" :disabled="page <= 1 || loading" @click="goToPage(page - 1)">上一页</button>
+      <span>第 <strong>{{ page }}</strong> 页，共 {{ totalPages }} 页</span>
+      <button class="secondary-button" :disabled="page >= totalPages || loading" @click="goToPage(page + 1)">下一页</button>
+      <button class="secondary-button" :disabled="page >= totalPages || loading" @click="goToPage(totalPages)">末页</button>
+    </nav>
   </section>
 </template>

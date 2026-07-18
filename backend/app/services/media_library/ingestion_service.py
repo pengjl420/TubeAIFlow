@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from uuid import uuid4
 
-from sqlalchemy import delete
+from sqlalchemy import delete, func, or_
 from sqlmodel import Session, select
 
 from app.config import get_settings
@@ -18,7 +18,10 @@ from app.models.media import (
     MediaFile,
     MediaKeyframe,
     MediaShot,
+    SceneAssignment,
+    SceneCandidate,
 )
+from app.models.storyboard import VisualScene
 from app.schemas.media import AssetUpdateRequest, RemoteMediaCandidate
 from app.shared.time import utc_now_iso
 
@@ -150,6 +153,93 @@ def list_assets(
     return result
 
 
+def list_asset_page(
+    session: Session,
+    page: int = 1,
+    page_size: int = 24,
+    library_role: str | None = None,
+    search: str = "",
+) -> dict:
+    if library_role and library_role not in LIBRARY_ROLES:
+        raise ValueError(f"未知素材角色：{library_role}")
+
+    filters = []
+    if library_role:
+        filters.append(MediaFile.library_role == library_role)
+    normalized_search = search.strip()
+    if normalized_search:
+        pattern = f"%{normalized_search}%"
+        filters.append(
+            or_(
+                MediaFile.filename.ilike(pattern),
+                MediaFile.path.ilike(pattern),
+                MediaFile.provider.ilike(pattern),
+                MediaFile.fallback_category.ilike(pattern),
+                MediaFile.mood.ilike(pattern),
+            )
+        )
+
+    count_statement = select(func.count()).select_from(MediaFile)
+    page_statement = select(MediaFile)
+    for condition in filters:
+        count_statement = count_statement.where(condition)
+        page_statement = page_statement.where(condition)
+
+    total = int(session.exec(count_statement).one())
+    media_files = session.exec(
+        page_statement
+        .order_by(MediaFile.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).all()
+    assets = []
+    for media_file in media_files:
+        shots = session.exec(
+            select(MediaShot)
+            .where(MediaShot.media_file_id == media_file.id)
+            .order_by(MediaShot.shot_index)
+        ).all()
+        item = _serialize_media_file(media_file)
+        item["shots"] = [serialize_shot(session, shot) for shot in shots]
+        assets.append(item)
+
+    return {
+        "assets": assets,
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "summary": _asset_library_summary(session),
+    }
+
+
+def _asset_library_summary(session: Session) -> dict:
+    asset_count = int(session.exec(select(func.count()).select_from(MediaFile)).one())
+    shot_count = int(session.exec(select(func.count()).select_from(MediaShot)).one())
+    semantic_asset_count = int(session.exec(
+        select(func.count())
+        .select_from(MediaFile)
+        .where(MediaFile.library_role == LIBRARY_ROLE_SEMANTIC)
+    ).one())
+    indexed_shot_count = int(session.exec(
+        select(func.count())
+        .select_from(MediaShot)
+        .where(MediaShot.vector_id.is_not(None))
+        .where(func.json_extract(MediaShot.technical_json, "$.vector_model") == MODEL_NAME)
+    ).one())
+    preview_shot_count = int(session.exec(
+        select(func.count())
+        .select_from(MediaShot)
+        .where(MediaShot.thumbnail_path.is_not(None))
+    ).one())
+    return {
+        "asset_count": asset_count,
+        "shot_count": shot_count,
+        "semantic_asset_count": semantic_asset_count,
+        "indexed_shot_count": indexed_shot_count,
+        "preview_shot_count": preview_shot_count,
+    }
+
+
 def get_asset(session: Session, media_id: str) -> dict:
     media_file = session.get(MediaFile, media_id)
     if not media_file:
@@ -196,6 +286,96 @@ def update_asset(
         session.add(shot)
     session.commit()
     return get_asset(session, media_id)
+
+
+def delete_assets(session: Session, media_ids: list[str]) -> dict:
+    """Delete library records and generated previews while preserving source files."""
+    requested_ids = list(dict.fromkeys(media_ids))
+    media_files = session.exec(select(MediaFile).where(MediaFile.id.in_(requested_ids))).all()
+    found_ids = {media_file.id for media_file in media_files}
+    missing_ids = [media_id for media_id in requested_ids if media_id not in found_ids]
+    if not media_files:
+        return {
+            "deleted_ids": [],
+            "missing_ids": missing_ids,
+            "deleted_preview_files": 0,
+            "source_files_preserved": 0,
+        }
+
+    shot_rows = session.exec(
+        select(MediaShot).where(MediaShot.media_file_id.in_(found_ids))
+    ).all()
+    shot_ids = [shot.id for shot in shot_rows]
+    keyframes = (
+        session.exec(select(MediaKeyframe).where(MediaKeyframe.media_shot_id.in_(shot_ids))).all()
+        if shot_ids else []
+    )
+
+    deleted_preview_files = 0
+    for media_file in media_files:
+        media_shots = [shot for shot in shot_rows if shot.media_file_id == media_file.id]
+        media_keyframes = [frame for frame in keyframes if frame.media_shot_id in {shot.id for shot in media_shots}]
+        deleted_preview_files += _delete_preview_files(media_file, media_shots, media_keyframes)
+
+    for shot in shot_rows:
+        remove_shot(shot.id)
+
+    affected_scene_ids: set[str] = set()
+    if shot_ids:
+        assignments = session.exec(
+            select(SceneAssignment).where(SceneAssignment.media_shot_id.in_(shot_ids))
+        ).all()
+        affected_scene_ids = {assignment.scene_id for assignment in assignments}
+        session.exec(delete(SceneAssignment).where(SceneAssignment.media_shot_id.in_(shot_ids)))
+        session.exec(delete(SceneCandidate).where(SceneCandidate.media_shot_id.in_(shot_ids)))
+        session.exec(delete(MediaKeyframe).where(MediaKeyframe.media_shot_id.in_(shot_ids)))
+        session.exec(delete(MediaShot).where(MediaShot.id.in_(shot_ids)))
+    for scene_id in affected_scene_ids:
+        scene = session.get(VisualScene, scene_id)
+        if scene:
+            scene.status = "generated"
+            session.add(scene)
+    session.exec(delete(MediaFile).where(MediaFile.id.in_(found_ids)))
+    session.commit()
+    return {
+        "deleted_ids": [media_id for media_id in requested_ids if media_id in found_ids],
+        "missing_ids": missing_ids,
+        "deleted_preview_files": deleted_preview_files,
+        "source_files_preserved": len(media_files),
+    }
+
+
+def _delete_preview_files(
+    media_file: MediaFile,
+    shots: list[MediaShot],
+    keyframes: list[MediaKeyframe],
+) -> int:
+    preview_root = (get_settings().workspace_dir / "assets" / media_file.id).resolve()
+    source_path = Path(media_file.path).resolve()
+    candidates = {frame.path for frame in keyframes}
+    candidates.update(shot.thumbnail_path for shot in shots if shot.thumbnail_path)
+    deleted = 0
+    for value in candidates:
+        path = Path(value).resolve()
+        if path == source_path or not path.is_relative_to(preview_root):
+            continue
+        if path.is_file():
+            path.unlink()
+            deleted += 1
+
+    directories = sorted(
+        {Path(value).resolve().parent for value in candidates if value},
+        key=lambda path: len(path.parts),
+        reverse=True,
+    )
+    directories.append(preview_root)
+    for directory in directories:
+        if directory.is_relative_to(preview_root) and directory.is_dir():
+            try:
+                directory.rmdir()
+            except OSError:
+                pass
+    return deleted
 
 
 def ingest_asset(session: Session, media_id: str) -> dict:

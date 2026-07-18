@@ -5,8 +5,13 @@ from fastapi.responses import FileResponse
 from sqlmodel import Session
 
 from app.database import get_session
-from app.schemas.media import AssetImportRequest, AssetUpdateRequest, SceneAssignmentRequest
-from app.models.media import MediaKeyframe, MediaShot
+from app.schemas.media import (
+    AssetBatchDeleteRequest,
+    AssetImportRequest,
+    AssetUpdateRequest,
+    SceneAssignmentRequest,
+)
+from app.models.media import MediaFile, MediaKeyframe, MediaShot
 from app.services.media_library import ingestion_service, retrieval_service
 from app.services.projects import project_service
 
@@ -16,18 +21,26 @@ router = APIRouter(tags=["assets"])
 
 @router.get("/assets")
 def list_assets(
-    limit: int = Query(default=200, ge=1, le=1000),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=200, ge=1, le=1000),
     library_role: str | None = Query(default=None),
+    search: str = Query(default="", max_length=200),
     session: Session = Depends(get_session),
 ) -> dict:
     try:
-        assets = ingestion_service.list_assets(session, limit, library_role)
+        data = ingestion_service.list_asset_page(
+            session,
+            page=page,
+            page_size=page_size,
+            library_role=library_role,
+            search=search,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"success": False, "error": str(exc)}) from exc
     return {
         "success": True,
         "data": {
-            "assets": assets,
+            **data,
             "vector_model": ingestion_service.current_vector_model(),
         },
     }
@@ -66,6 +79,38 @@ def update_asset(
         raise HTTPException(
             status_code=400,
             detail={"success": False, "error": str(exc)},
+        ) from exc
+    return {"success": True, "data": data}
+
+
+@router.delete("/assets/batch")
+def delete_assets(
+    payload: AssetBatchDeleteRequest,
+    session: Session = Depends(get_session),
+) -> dict:
+    try:
+        data = ingestion_service.delete_assets(session, payload.media_ids)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={"success": False, "error": f"删除素材预览文件失败：{exc}"},
+        ) from exc
+    return {"success": True, "data": data}
+
+
+@router.delete("/assets/{media_id}")
+def delete_asset(media_id: str, session: Session = Depends(get_session)) -> dict:
+    if not session.get(MediaFile, media_id):
+        raise HTTPException(
+            status_code=404,
+            detail={"success": False, "error": "素材不存在"},
+        )
+    try:
+        data = ingestion_service.delete_assets(session, [media_id])
+    except OSError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={"success": False, "error": f"删除素材预览文件失败：{exc}"},
         ) from exc
     return {"success": True, "data": data}
 

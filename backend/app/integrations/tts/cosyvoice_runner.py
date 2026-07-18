@@ -5,12 +5,10 @@ import json
 import sys
 from pathlib import Path
 
-
-def write_json(path: Path, data) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = path.with_suffix(path.suffix + ".tmp")
-    temp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    temp_path.replace(path)
+try:
+    from .runner_io import write_json
+except ImportError:
+    from runner_io import write_json
 
 
 def progress_payload(total, segment_ids, results, current_segment_id, current_index, status) -> dict:
@@ -74,6 +72,7 @@ def main() -> int:
     results = []
     total = len(tasks)
     segment_ids = [task["segment_id"] for task in tasks]
+    write_json(result_file, results)
     write_json(progress_file, progress_payload(total, segment_ids, results, None, None, "running"))
 
     for index, task in enumerate(tasks, start=1):
@@ -103,12 +102,12 @@ def main() -> int:
         except Exception as exc:
             output_path.unlink(missing_ok=True)
             results.append({"segment_id": task["segment_id"], "success": False, "error": str(exc)})
+        write_json(result_file, results)
         write_json(
             progress_file,
             progress_payload(total, segment_ids, results, task["segment_id"], index, "running"),
         )
 
-    write_json(result_file, results)
     write_json(
         progress_file,
         progress_payload(

@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from app.models.media import MediaFile, MediaKeyframe, MediaShot, SceneAssignment
+from app.models.media import MediaFile, MediaKeyframe, MediaShot, SceneAssignment, SceneCandidate
 from app.models.project import Project
 from app.models.storyboard import VisualScene
 from app.schemas.media import SceneAssignmentRequest
@@ -54,6 +54,58 @@ class MediaLibraryTests(unittest.TestCase):
         self.assertEqual(len(result["imported"]), 1)
         self.assertEqual(len(result["skipped"]), 1)
         self.assertEqual([(shot.start_ms, shot.end_ms) for shot in shots], [(0, 12_000), (12_000, 25_000)])
+
+    def test_asset_library_page_filters_searches_and_returns_global_summary(self) -> None:
+        files = [
+            MediaFile(
+                id="media-city",
+                path=str(self.root / "city.mp4"),
+                filename="city.mp4",
+                media_type="video",
+                file_hash="city-hash",
+                library_role="semantic",
+                created_at="2026-01-02T00:00:00Z",
+            ),
+            MediaFile(
+                id="media-mountain",
+                path=str(self.root / "mountain.mp4"),
+                filename="mountain.mp4",
+                media_type="video",
+                file_hash="mountain-hash",
+                library_role="landscape_fallback",
+                fallback_category="landscape",
+                mood="calm",
+                created_at="2026-01-01T00:00:00Z",
+            ),
+        ]
+        shots = [
+            MediaShot(
+                id="shot-city",
+                media_file_id="media-city",
+                shot_index=1,
+                vector_id=12,
+                technical_json=json.dumps({"vector_model": ingestion_service.MODEL_NAME}),
+            ),
+            MediaShot(id="shot-mountain", media_file_id="media-mountain", shot_index=1),
+        ]
+
+        with Session(self.engine) as session:
+            session.add_all([*files, *shots])
+            session.commit()
+            result = ingestion_service.list_asset_page(
+                session,
+                page=1,
+                page_size=1,
+                library_role="landscape_fallback",
+                search="mountain",
+            )
+
+        self.assertEqual(result["total"], 1)
+        self.assertEqual([asset["id"] for asset in result["assets"]], ["media-mountain"])
+        self.assertEqual(result["summary"]["asset_count"], 2)
+        self.assertEqual(result["summary"]["shot_count"], 2)
+        self.assertEqual(result["summary"]["semantic_asset_count"], 1)
+        self.assertEqual(result["summary"]["indexed_shot_count"], 1)
 
     def test_scene_search_ranks_local_shots_and_persists_manual_assignment(self) -> None:
         storyboard = StoryboardContent(
@@ -208,6 +260,93 @@ class MediaLibraryTests(unittest.TestCase):
             "Qwen/Qwen3-VL-Embedding-2B",
         )
         self.assertEqual(len(indexed_images), 3)
+
+    def test_delete_assets_removes_records_and_previews_but_preserves_sources(self) -> None:
+        source = self.root / "source.mp4"
+        source.write_bytes(b"original-video")
+        workspace = self.root / "workspace"
+        preview_dir = workspace / "assets" / "media-delete" / "shot-delete"
+        preview_dir.mkdir(parents=True)
+        preview = preview_dir / "frame_01.jpg"
+        preview.write_bytes(b"preview")
+        media_file = MediaFile(
+            id="media-delete",
+            path=str(source),
+            filename=source.name,
+            media_type="video",
+            file_hash="delete-hash",
+        )
+        shot = MediaShot(
+            id="shot-delete",
+            media_file_id=media_file.id,
+            shot_index=1,
+            thumbnail_path=str(preview),
+            vector_id=7,
+        )
+        keyframe = MediaKeyframe(
+            id="frame-delete",
+            media_shot_id=shot.id,
+            frame_index=1,
+            timestamp_ms=0,
+            path=str(preview),
+        )
+        project = Project(id="delete-project", name="Delete")
+        scene = VisualScene(
+            id="delete-scene",
+            project_id=project.id,
+            scene_index=1,
+            start_ms=0,
+            end_ms=1000,
+            narration="Delete assigned media.",
+            status="assigned",
+        )
+        candidate = SceneCandidate(
+            id="delete-candidate",
+            project_id=project.id,
+            scene_id=scene.id,
+            media_shot_id=shot.id,
+        )
+        assignment = SceneAssignment(
+            id="delete-assignment",
+            project_id=project.id,
+            scene_id=scene.id,
+            media_shot_id=shot.id,
+            candidate_id=candidate.id,
+        )
+        media_id = media_file.id
+        shot_id = shot.id
+        keyframe_id = keyframe.id
+        candidate_id = candidate.id
+        assignment_id = assignment.id
+        scene_id = scene.id
+
+        with Session(self.engine) as session:
+            session.add_all([media_file, shot, keyframe, project, scene, candidate, assignment])
+            session.commit()
+            with (
+                patch.object(ingestion_service, "remove_shot") as remove_vector,
+                patch.object(
+                    ingestion_service,
+                    "get_settings",
+                    return_value=type("Settings", (), {"workspace_dir": workspace})(),
+                ),
+            ):
+                result = ingestion_service.delete_assets(session, [media_id, "missing"])
+
+            self.assertIsNone(session.get(MediaFile, media_id))
+            self.assertIsNone(session.get(MediaShot, shot_id))
+            self.assertIsNone(session.get(MediaKeyframe, keyframe_id))
+            self.assertIsNone(session.get(SceneCandidate, candidate_id))
+            self.assertIsNone(session.get(SceneAssignment, assignment_id))
+            self.assertEqual(session.get(VisualScene, scene_id).status, "generated")
+
+        self.assertEqual(result["deleted_ids"], [media_id])
+        self.assertEqual(result["missing_ids"], ["missing"])
+        self.assertEqual(result["deleted_preview_files"], 1)
+        self.assertEqual(result["source_files_preserved"], 1)
+        self.assertTrue(source.is_file())
+        self.assertFalse(preview.exists())
+        remove_vector.assert_called_once_with(shot_id)
 
     def test_landscape_assets_only_appear_as_an_allowed_final_fallback(self) -> None:
         storyboard = StoryboardContent(

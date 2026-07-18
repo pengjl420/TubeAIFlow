@@ -6,8 +6,8 @@ from sqlmodel import Session, select
 from app.database import get_session
 from app.config import get_settings
 from app.infrastructure import process_runner as task_control
-from app.infrastructure.project_layout import get_project_work_dir
-from app.infrastructure.project_layout import load_project_config
+from app.infrastructure.project_layout import get_project_work_dir, load_project_config
+from app.integrations.tts.runner_io import write_json
 from app.models.batch import BatchItem
 from app.models.task import TaskRun
 from app.services.projects import project_service
@@ -208,8 +208,6 @@ def _mark_progress_cancelled(project) -> None:
             if isinstance(data, dict) and data.get("status") == "running":
                 data["status"] = "cancelled"
                 data["message"] = "Task was stopped by the user"
-                temp_path = path.with_suffix(path.suffix + ".tmp")
-                temp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-                temp_path.replace(path)
+                write_json(path, data)
         except (OSError, json.JSONDecodeError):
             pass

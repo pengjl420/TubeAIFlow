@@ -38,6 +38,17 @@ class AssetUpdateRequest(BaseModel):
         return self
 
 
+class AssetBatchDeleteRequest(BaseModel):
+    media_ids: list[str] = Field(min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def normalize_media_ids(self):
+        self.media_ids = list(dict.fromkeys(media_id.strip() for media_id in self.media_ids if media_id.strip()))
+        if not self.media_ids:
+            raise ValueError("请至少选择一个要删除的素材")
+        return self
+
+
 class SceneAssignmentRequest(BaseModel):
     candidate_id: str = Field(min_length=1)
     trim_start_ms: int = Field(default=0, ge=0)

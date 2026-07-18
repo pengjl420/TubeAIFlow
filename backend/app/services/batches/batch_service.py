@@ -61,6 +61,7 @@ def create_batch(
     if len(scripts) > MAX_SCRIPT_FILES:
         raise ValueError(f"一次最多上传 {MAX_SCRIPT_FILES} 份逐字稿")
     selected_profile = None
+    cosyvoice_speed = 1.0
     if voice_profile_id.strip():
         from app.services.narration import voice_profile_service
 
@@ -70,6 +71,7 @@ def create_batch(
         profile_config = voice_profile_service.load_profile_config(selected_profile)
         tts_engine = str(profile_config.get("tts_engine") or DEFAULT_TTS_ENGINE)
         reference_audio_text = str(profile_config.get("reference_audio_text") or "")
+        cosyvoice_speed = voice_profile_service.profile_cosyvoice_speed(profile_config)
         reference_audio_filename = str(profile_config.get("original_filename") or "reference.wav")
     elif reference_audio is None:
         raise ValueError("请选择已配置的系统音色")
@@ -108,6 +110,7 @@ def create_batch(
                 "reference_audio_filename": reference_audio_filename,
                 "tts_engine": normalized_tts_engine,
                 "reference_audio_text": normalized_reference_audio_text,
+                "cosyvoice_speed": cosyvoice_speed,
                 "voice_profile_id": selected_profile.id if selected_profile else "",
             },
             ensure_ascii=False,
@@ -130,6 +133,7 @@ def create_batch(
             {
                 "tts_engine": normalized_tts_engine,
                 "reference_audio_text": normalized_reference_audio_text,
+                "cosyvoice_speed": cosyvoice_speed,
                 "voice_profile_id": selected_profile.id if selected_profile else "",
             },
         )

@@ -48,7 +48,6 @@ export interface SystemSettings {
   cosyvoice_python: string | null
   cosyvoice_model_dir: string | null
   cosyvoice_fp16: boolean
-  cosyvoice_speed: number
   cosyvoice_instruction: string
 }
 

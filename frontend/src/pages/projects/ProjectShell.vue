@@ -59,6 +59,9 @@ let pollTimer: number | undefined
 let videoPollTimer: number | undefined
 let oneClickTimer: number | undefined
 let taskPollTimer: number | undefined
+let ttsPolling = false
+let videoPolling = false
+let taskPolling = false
 
 const oneClickStage = ref('')
 const oneClickStartedAt = ref(0)
@@ -271,8 +274,9 @@ async function load() {
     await refreshProjectTaskStatus()
     if (projectTask.value && ['queued', 'running'].includes(projectTask.value.status)) {
       startTaskPolling()
+    } else if (ttsRunning.value) {
+      startPolling()
     }
-    if (ttsRunning.value) startPolling()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '项目加载失败'
   } finally {
@@ -448,41 +452,64 @@ async function refreshProjectTaskStatus() {
 
 function startTaskPolling() {
   stopTaskPolling()
-  taskPollTimer = window.setInterval(async () => {
-    try {
-      const task = await refreshProjectTaskStatus()
-      if (task.status === 'running' && task.stage === 'tts') await refreshTtsStatus()
-      if (task.status === 'running' && task.stage === 'video') videoProgress.value = await getVideoStatus(projectId)
-      if (!['queued', 'running'].includes(task.status)) {
-        stopTaskPolling()
-        await refreshAfterChange()
-      }
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : '刷新任务状态失败'
+  // A workflow task owns all of its stage polling, including TTS progress.
+  // Keeping the standalone TTS poller alive here would duplicate requests.
+  stopPolling()
+  taskPolling = true
+  void pollProjectTask()
+}
+
+async function pollProjectTask() {
+  if (!taskPolling) return
+  try {
+    const task = await refreshProjectTaskStatus()
+    if (task.status === 'running' && task.stage === 'tts') await refreshTtsStatus()
+    if (task.status === 'running' && task.stage === 'video') videoProgress.value = await getVideoStatus(projectId)
+    if (!['queued', 'running'].includes(task.status)) {
+      stopTaskPolling()
+      await refreshAfterChange()
     }
-  }, 1500)
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '刷新任务状态失败'
+  } finally {
+    // Schedule only after the current request chain has completed so slow
+    // status requests can never overlap the next polling cycle.
+    if (taskPolling) {
+      taskPollTimer = window.setTimeout(() => void pollProjectTask(), 1500)
+    }
+  }
 }
 
 function stopTaskPolling() {
+  taskPolling = false
   if (taskPollTimer !== undefined) {
-    window.clearInterval(taskPollTimer)
+    window.clearTimeout(taskPollTimer)
     taskPollTimer = undefined
   }
 }
 
 function startPolling() {
   stopPolling()
-  pollTimer = window.setInterval(async () => {
-    try {
-      await refreshTtsStatus()
-      if (!ttsRequestActive.value && !ttsRunning.value) {
-        stopPolling()
-        await Promise.all([refreshSegments(), refreshOutputs()])
-      }
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : '刷新进度失败'
+  if (taskPolling) return
+  ttsPolling = true
+  void pollTtsStatus()
+}
+
+async function pollTtsStatus() {
+  if (!ttsPolling) return
+  try {
+    await refreshTtsStatus()
+    if (!ttsRequestActive.value && !ttsRunning.value) {
+      stopPolling()
+      await Promise.all([refreshSegments(), refreshOutputs()])
     }
-  }, 1500)
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '刷新进度失败'
+  } finally {
+    if (ttsPolling) {
+      pollTimer = window.setTimeout(() => void pollTtsStatus(), 1500)
+    }
+  }
 }
 
 async function stopGeneration() {
@@ -500,26 +527,36 @@ async function stopGeneration() {
 }
 
 function stopPolling() {
+  ttsPolling = false
   if (pollTimer !== undefined) {
-    window.clearInterval(pollTimer)
+    window.clearTimeout(pollTimer)
     pollTimer = undefined
   }
 }
 
 function startVideoPolling() {
   stopVideoPolling()
-  videoPollTimer = window.setInterval(async () => {
-    try {
-      videoProgress.value = await getVideoStatus(projectId)
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : '刷新视频进度失败'
+  videoPolling = true
+  void pollVideoStatus()
+}
+
+async function pollVideoStatus() {
+  if (!videoPolling) return
+  try {
+    videoProgress.value = await getVideoStatus(projectId)
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '刷新视频进度失败'
+  } finally {
+    if (videoPolling) {
+      videoPollTimer = window.setTimeout(() => void pollVideoStatus(), 1000)
     }
-  }, 1000)
+  }
 }
 
 function stopVideoPolling() {
+  videoPolling = false
   if (videoPollTimer !== undefined) {
-    window.clearInterval(videoPollTimer)
+    window.clearTimeout(videoPollTimer)
     videoPollTimer = undefined
   }
 }

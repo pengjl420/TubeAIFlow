@@ -405,6 +405,7 @@ def update_project_settings(
         raise ValueError("Output directory is required")
     normalized_tts_engine = tts_engine.strip().lower()
     normalized_reference_audio_text = reference_audio_text.strip()
+    normalized_cosyvoice_speed = 1.0
     if voice_profile_id.strip():
         from app.services.narration import voice_profile_service
 
@@ -414,6 +415,7 @@ def update_project_settings(
         profile_config = voice_profile_service.load_profile_config(selected_profile)
         normalized_tts_engine = str(profile_config.get("tts_engine") or DEFAULT_TTS_ENGINE)
         normalized_reference_audio_text = str(profile_config.get("reference_audio_text") or "").strip()
+        normalized_cosyvoice_speed = voice_profile_service.profile_cosyvoice_speed(profile_config)
     if normalized_tts_engine not in SUPPORTED_TTS_ENGINES:
         raise ValueError("Unsupported TTS engine")
     if normalized_tts_engine == "cosyvoice" and not normalized_reference_audio_text:
@@ -435,6 +437,7 @@ def update_project_settings(
     config = load_project_config(project)
     previous_tts_engine = str(config.get("tts_engine") or DEFAULT_TTS_ENGINE).strip().lower()
     previous_reference_audio_text = str(config.get("reference_audio_text") or "").strip()
+    previous_cosyvoice_speed = float(config.get("cosyvoice_speed", 1.0))
     previous_voice_profile_id = str(config.get("voice_profile_id") or "")
     if not str(config.get("project_directory_name") or "").strip():
         config["project_directory_name"] = _available_project_directory_name(
@@ -445,6 +448,7 @@ def update_project_settings(
     config["output_filename"] = safe_filename_stem(output_filename or project_name or _timestamp_stem())
     config["tts_engine"] = normalized_tts_engine
     config["reference_audio_text"] = normalized_reference_audio_text
+    config["cosyvoice_speed"] = normalized_cosyvoice_speed
     config["include_video"] = include_video
     config["video_mode"] = resolved_video_mode
     if video_directory:
@@ -460,6 +464,7 @@ def update_project_settings(
         config["voice_profile_name"] = selected_profile.name
         config["tts_engine"] = normalized_tts_engine
         config["reference_audio_text"] = normalized_reference_audio_text
+        config["cosyvoice_speed"] = normalized_cosyvoice_speed
         config["reference_audio_filename"] = str(
             profile_config.get("original_filename") or audio_path.name
         )
@@ -469,6 +474,7 @@ def update_project_settings(
     if (
         previous_tts_engine != normalized_tts_engine
         or previous_reference_audio_text != normalized_reference_audio_text
+        or previous_cosyvoice_speed != normalized_cosyvoice_speed
         or previous_voice_profile_id != str(config.get("voice_profile_id") or "")
     ):
         if _reset_tts_segments(session, project.id):

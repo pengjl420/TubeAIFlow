@@ -142,6 +142,47 @@ class VoiceProfileTests(unittest.TestCase):
             self.assertEqual(Path(project.reference_audio_path or ""), new_path)
             self.assertEqual(segment.status, "completed")
 
+    def test_cosyvoice_speed_is_stored_with_voice_and_copied_to_project(self) -> None:
+        with Session(self.engine) as session:
+            voice = voice_profile_service.create_profile(
+                session,
+                name="CosyVoice 快速音色",
+                tts_engine="cosyvoice",
+                reference_audio_text="参考音频文字",
+                cosyvoice_speed=1.25,
+                source=io.BytesIO(b"audio"),
+                original_filename="voice.wav",
+            )
+            serialized = voice_profile_service.serialize_profile(voice)
+            self.assertEqual(serialized["cosyvoice_speed"], 1.25)
+
+            project = project_service.create_project(session, "语速测试")
+            project_service.update_project_settings(
+                session,
+                project,
+                "语速测试",
+                str(self.root / "output"),
+                "story",
+                "",
+                voice_profile_id=voice.id,
+            )
+
+            config = json.loads(project.config_json or "{}")
+            self.assertEqual(config["cosyvoice_speed"], 1.25)
+
+    def test_cosyvoice_speed_must_be_in_supported_range(self) -> None:
+        with Session(self.engine) as session:
+            with self.assertRaisesRegex(ValueError, "0.5 到 2.0"):
+                voice_profile_service.create_profile(
+                    session,
+                    name="无效语速",
+                    tts_engine="cosyvoice",
+                    reference_audio_text="参考音频文字",
+                    cosyvoice_speed=2.1,
+                    source=io.BytesIO(b"audio"),
+                    original_filename="voice.wav",
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

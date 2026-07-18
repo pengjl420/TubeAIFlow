@@ -260,14 +260,16 @@ class TtsEngineTests(unittest.TestCase):
                 cosyvoice_root=cosyvoice_root,
                 cosyvoice_python=python_path,
                 cosyvoice_model_dir=model_dir,
-                cosyvoice_speed=1.1,
                 cosyvoice_instruction="You are helpful.",
                 cosyvoice_fp16=True,
             )
             project = Project(
                 id="cosyvoice-project",
                 name="CosyVoice",
-                config_json=json.dumps({"reference_audio_text": "参考文本"}, ensure_ascii=False),
+                config_json=json.dumps(
+                    {"reference_audio_text": "参考文本", "cosyvoice_speed": 1.1},
+                    ensure_ascii=False,
+                ),
             )
             segment = Segment(
                 id="cosyvoice-project_0001",

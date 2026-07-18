@@ -411,11 +411,6 @@ onMounted(load)
             <input v-model="settings.cosyvoice_model_dir" placeholder="例如 D:\CosyVoice\pretrained_models\Fun-CosyVoice3-0.5B" />
             <small>推荐使用 Fun-CosyVoice3-0.5B；不要选择仅支持预置音色的 SFT 模型。</small>
           </label>
-          <label class="field">
-            <span>语速</span>
-            <input v-model.number="settings.cosyvoice_speed" type="number" min="0.5" max="2" step="0.05" />
-            <small>默认 1.0；所有分段使用相同语速。</small>
-          </label>
           <label class="checkbox-field">
             <input v-model="settings.cosyvoice_fp16" type="checkbox" />
             <span><strong>使用 FP16</strong><small>使用 CUDA 时可降低显存占用；CPU 环境请取消勾选。</small></span>

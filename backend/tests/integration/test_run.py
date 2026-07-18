@@ -35,6 +35,7 @@ class BackendRunTests(unittest.TestCase):
                 "get_settings",
                 return_value=SimpleNamespace(app_host="127.0.0.1", app_port=18080),
             ),
+            patch.object(run, "configure_event_loop") as configure_event_loop,
             patch.object(run.uvicorn, "run") as uvicorn_run,
         ):
             run.main()
@@ -45,7 +46,18 @@ class BackendRunTests(unittest.TestCase):
             port=18080,
             reload=False,
         )
+        configure_event_loop.assert_called_once_with()
         release.assert_called_once_with(lock_file)
+
+    def test_windows_uses_selector_event_loop(self) -> None:
+        with (
+            patch.object(run.os, "name", "nt"),
+            patch.object(run.asyncio, "set_event_loop_policy") as set_policy,
+            patch.object(run.asyncio, "WindowsSelectorEventLoopPolicy", return_value="selector"),
+        ):
+            run.configure_event_loop()
+
+        set_policy.assert_called_once_with("selector")
 
     def test_find_available_port_skips_an_occupied_port(self) -> None:
         import socket

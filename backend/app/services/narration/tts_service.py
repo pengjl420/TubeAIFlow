@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 import os
 import subprocess
 from datetime import datetime
@@ -215,6 +216,17 @@ def _project_reference_audio_text(project: Project) -> str:
     return str(load_project_config(project).get("reference_audio_text") or "").strip()
 
 
+def _project_cosyvoice_speed(project: Project) -> float:
+    value = load_project_config(project).get("cosyvoice_speed", 1.0)
+    try:
+        speed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("CosyVoice voice speed must be a number") from exc
+    if not math.isfinite(speed) or not 0.5 <= speed <= 2.0:
+        raise ValueError("CosyVoice voice speed must be between 0.5 and 2.0")
+    return speed
+
+
 def _engine_label(engine: str) -> str:
     return {
         "qwen3_tts": "Qwen3-TTS",
@@ -369,7 +381,7 @@ def _run_cosyvoice_batch(
         "--progress-file",
         str(progress_path),
         "--speed",
-        str(settings.cosyvoice_speed),
+        str(_project_cosyvoice_speed(project)),
         "--instruction",
         settings.cosyvoice_instruction,
     ]

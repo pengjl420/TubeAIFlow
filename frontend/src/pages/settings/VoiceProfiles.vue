@@ -18,6 +18,7 @@ const editingId = ref('')
 const name = ref('')
 const ttsEngine = ref<VoiceTtsEngine>('qwen3_tts')
 const referenceAudioText = ref('')
+const cosyvoiceSpeed = ref(1.0)
 const audioFile = ref<File | null>(null)
 const loading = ref(false)
 const saving = ref(false)
@@ -55,6 +56,7 @@ function edit(voice: VoiceProfile) {
   name.value = voice.name
   ttsEngine.value = voice.tts_engine
   referenceAudioText.value = voice.reference_audio_text
+  cosyvoiceSpeed.value = voice.cosyvoice_speed
   audioFile.value = null
   error.value = ''
   message.value = ''
@@ -66,6 +68,7 @@ function resetForm() {
   name.value = ''
   ttsEngine.value = 'qwen3_tts'
   referenceAudioText.value = ''
+  cosyvoiceSpeed.value = 1.0
   audioFile.value = null
 }
 
@@ -82,6 +85,13 @@ async function save() {
     error.value = 'CosyVoice 需要填写参考音频逐字稿'
     return
   }
+  if (
+    ttsEngine.value === 'cosyvoice'
+    && (!Number.isFinite(cosyvoiceSpeed.value) || cosyvoiceSpeed.value < 0.5 || cosyvoiceSpeed.value > 2)
+  ) {
+    error.value = 'CosyVoice 语速必须在 0.5 到 2.0 之间'
+    return
+  }
   saving.value = true
   error.value = ''
   message.value = ''
@@ -90,6 +100,7 @@ async function save() {
       name: name.value.trim(),
       tts_engine: ttsEngine.value,
       reference_audio_text: referenceAudioText.value.trim(),
+      cosyvoice_speed: cosyvoiceSpeed.value,
       file: audioFile.value,
     }
     if (editingId.value) await updateVoice(editingId.value, input)
@@ -166,6 +177,11 @@ onMounted(load)
           <span>参考音频逐字稿（{{ ttsEngine === 'cosyvoice' ? '必填' : '推荐' }}）</span>
           <textarea v-model="referenceAudioText" rows="5" placeholder="填写参考音频中实际说出的文字"></textarea>
         </label>
+        <label v-if="ttsEngine === 'cosyvoice'" class="field reference-field">
+          <span>语速</span>
+          <input v-model.number="cosyvoiceSpeed" type="number" min="0.5" max="2" step="0.05" />
+          <small>默认 1.0；该语速仅随当前音色生效。</small>
+        </label>
         <div class="actions">
           <button class="primary-button" type="button" :disabled="saving" @click="save">
             {{ saving ? '保存中…' : editingId ? '保存修改' : '创建音色' }}
@@ -180,7 +196,9 @@ onMounted(load)
           <article v-for="voice in voices" :key="voice.id" class="voice-profile-row">
             <div>
               <strong>{{ voice.name }}</strong>
-              <p class="muted">{{ engineLabel(voice.tts_engine) }} · {{ voice.original_filename }}</p>
+              <p class="muted">
+                {{ engineLabel(voice.tts_engine) }} · {{ voice.original_filename }}<template v-if="voice.tts_engine === 'cosyvoice'"> · 语速 {{ voice.cosyvoice_speed }}</template>
+              </p>
               <AudioPlayer :src="audioUrl(voice)" />
             </div>
             <div class="actions">

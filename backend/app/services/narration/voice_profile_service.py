@@ -1,4 +1,5 @@
 import json
+import math
 import re
 import uuid
 from pathlib import Path
@@ -40,12 +41,13 @@ def create_profile(
     name: str,
     tts_engine: str,
     reference_audio_text: str,
+    cosyvoice_speed: float = 1.0,
     source: BinaryIO,
     original_filename: str,
 ) -> VoiceProfile:
     profile_id = uuid.uuid4().hex[:12]
     validated_name = _validate_name(name)
-    config = _validated_config(tts_engine, reference_audio_text, original_filename)
+    config = _validated_config(tts_engine, reference_audio_text, original_filename, cosyvoice_speed)
     audio_path = _save_audio(profile_id, validated_name, source, original_filename)
     now = utc_now_iso()
     profile = VoiceProfile(
@@ -72,13 +74,16 @@ def update_profile(
     name: str,
     tts_engine: str,
     reference_audio_text: str,
+    cosyvoice_speed: float | None = None,
     source: BinaryIO | None = None,
     original_filename: str | None = None,
 ) -> VoiceProfile:
     validated_name = _validate_name(name)
     current_config = load_profile_config(profile)
     filename = original_filename or str(current_config.get("original_filename") or Path(profile.reference_audio_path).name)
-    config = _validated_config(tts_engine, reference_audio_text, filename)
+    if cosyvoice_speed is None:
+        cosyvoice_speed = profile_cosyvoice_speed(current_config)
+    config = _validated_config(tts_engine, reference_audio_text, filename, cosyvoice_speed)
     old_path = Path(profile.reference_audio_path)
     if source is not None:
         audio_path = _save_audio(
@@ -137,6 +142,7 @@ def serialize_profile(profile: VoiceProfile) -> dict:
         "name": profile.name,
         "tts_engine": str(config.get("tts_engine") or "qwen3_tts"),
         "reference_audio_text": str(config.get("reference_audio_text") or ""),
+        "cosyvoice_speed": profile_cosyvoice_speed(config),
         "original_filename": str(config.get("original_filename") or Path(profile.reference_audio_path).name),
         "created_at": profile.created_at,
         "updated_at": profile.updated_at,
@@ -166,6 +172,7 @@ def apply_profile_to_project(session: Session, project: Project, profile_id: str
     config["voice_profile_name"] = profile.name
     config["tts_engine"] = str(profile_config.get("tts_engine") or "qwen3_tts")
     config["reference_audio_text"] = str(profile_config.get("reference_audio_text") or "")
+    config["cosyvoice_speed"] = profile_cosyvoice_speed(profile_config)
     config["reference_audio_filename"] = str(profile_config.get("original_filename") or audio_path.name)
     config["reference_audio_path"] = str(audio_path)
     project.reference_audio_path = str(audio_path)
@@ -200,11 +207,13 @@ def _synchronize_projects(session: Session, profile: VoiceProfile, force_reset: 
         previous_tts_config = (
             str(config.get("tts_engine") or ""),
             str(config.get("reference_audio_text") or ""),
+            profile_cosyvoice_speed(config),
         )
         config = apply_profile_to_project(session, project, profile.id)
         current_tts_config = (
             str(config.get("tts_engine") or ""),
             str(config.get("reference_audio_text") or ""),
+            profile_cosyvoice_speed(config),
         )
         project.config_json = json.dumps(config, ensure_ascii=False)
         project.updated_at = utc_now_iso()
@@ -293,15 +302,39 @@ def _validate_name(name: str) -> str:
     return value
 
 
-def _validated_config(tts_engine: str, reference_audio_text: str, original_filename: str) -> dict:
+def _validated_config(
+    tts_engine: str,
+    reference_audio_text: str,
+    original_filename: str,
+    cosyvoice_speed: float,
+) -> dict:
     engine = tts_engine.strip().lower()
     if engine not in SUPPORTED_TTS_ENGINES:
         raise ValueError("不支持的 TTS 引擎")
     transcript = reference_audio_text.strip()
     if engine == "cosyvoice" and not transcript:
         raise ValueError("CosyVoice 需要填写参考音频逐字稿")
+    speed = _validate_cosyvoice_speed(cosyvoice_speed)
     return {
         "tts_engine": engine,
         "reference_audio_text": transcript,
+        "cosyvoice_speed": speed,
         "original_filename": Path(original_filename).name,
     }
+
+
+def _validate_cosyvoice_speed(value: object) -> float:
+    try:
+        speed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("CosyVoice 语速必须是数字") from exc
+    if not math.isfinite(speed) or not 0.5 <= speed <= 2.0:
+        raise ValueError("CosyVoice 语速必须在 0.5 到 2.0 之间")
+    return speed
+
+
+def profile_cosyvoice_speed(config: dict) -> float:
+    try:
+        return _validate_cosyvoice_speed(config.get("cosyvoice_speed", 1.0))
+    except ValueError:
+        return 1.0

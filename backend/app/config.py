@@ -86,7 +86,6 @@ class Settings(BaseModel):
     cosyvoice_python: Path | None = None
     cosyvoice_model_dir: Path | None = None
     cosyvoice_fp16: bool = True
-    cosyvoice_speed: float = Field(default=1.0, ge=0.5, le=2)
     cosyvoice_instruction: str = "You are a helpful assistant."
 
     @field_validator(

@@ -9,11 +9,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 from app.config import LandscapeTransitionEffect, get_settings
 from app.models.project import Project
-from app.models.media import LIBRARY_ROLE_LANDSCAPE_FALLBACK, MediaFile
 from app.infrastructure.ffmpeg import probe_duration, run_ffmpeg
 from app.infrastructure.project_layout import (
     ensure_project_dirs,
@@ -22,7 +21,6 @@ from app.infrastructure.project_layout import (
     get_output_stem,
     get_project_work_dir,
 )
-from app.services.media_library import ingestion_service
 
 
 logger = logging.getLogger(__name__)
@@ -122,13 +120,7 @@ def _compose_video(session: Session, project: Project) -> Path:
     session.add(project)
     session.commit()
 
-    ingestion_service.import_directory(
-        session,
-        str(media_dir),
-        library_role=LIBRARY_ROLE_LANDSCAPE_FALLBACK,
-        fallback_category="landscape",
-    )
-    source_paths = list_rough_cut_video_files(session, media_dir)
+    source_paths = list_rough_cut_video_files(media_dir)
     write_video_progress(progress_path, "running", "selecting", 12, message="Selecting video materials")
     grouped_paths = group_video_files(source_paths)
     enabled_effects = [item for item in settings.landscape_transition_effects if item.enabled]
@@ -403,28 +395,9 @@ def scan_video_files(media_dir: Path) -> list[Path]:
     return sorted(paths, key=lambda item: str(item).lower())
 
 
-def list_rough_cut_video_files(session: Session, media_dir: Path) -> list[Path]:
-    """Return only approved landscape-pool videos inside the configured directory."""
-    root = media_dir.resolve()
-    media_files = session.exec(
-        select(MediaFile).where(
-            MediaFile.media_type == "video",
-            MediaFile.library_role == LIBRARY_ROLE_LANDSCAPE_FALLBACK,
-            MediaFile.review_status == "approved",
-            MediaFile.enabled == True,  # noqa: E712
-            MediaFile.status == "ready",
-        )
-    ).all()
-    paths = []
-    for media_file in media_files:
-        path = Path(media_file.path).resolve()
-        if path.is_file() and path.is_relative_to(root):
-            paths.append(path)
-    if not paths:
-        raise ValueError(
-            "风景空镜池中没有可用视频；普通语义素材不会被快速空镜流程使用"
-        )
-    return sorted(set(paths), key=lambda item: str(item).lower())
+def list_rough_cut_video_files(media_dir: Path) -> list[Path]:
+    """Scan the configured landscape directory without importing it into the library."""
+    return scan_video_files(media_dir.resolve())
 
 
 def group_video_files(paths: list[Path]) -> dict[str, list[Path]]:
@@ -668,7 +641,7 @@ def write_selected_manifest(
         "transition_overlap_duration": transition_overlap,
         "effective_selected_duration": selected_duration - transition_overlap,
         "selection_mode": "landscape_rough_cut",
-        "required_library_role": LIBRARY_ROLE_LANDSCAPE_FALLBACK,
+        "source_type": "configured_landscape_directory",
         "transitions": [
             {
                 "after_clip_index": item.after_clip_index,

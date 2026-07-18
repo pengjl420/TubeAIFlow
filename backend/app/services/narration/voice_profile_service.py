@@ -1,4 +1,5 @@
 import json
+import re
 import uuid
 from pathlib import Path
 from typing import BinaryIO
@@ -14,6 +15,14 @@ from app.shared.time import utc_now_iso
 
 SUPPORTED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".m4a"}
 SUPPORTED_TTS_ENGINES = {"qwen3_tts", "chatterbox", "cosyvoice"}
+WINDOWS_RESERVED_NAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{index}" for index in range(1, 10)),
+    *(f"LPT{index}" for index in range(1, 10)),
+}
 
 
 def list_profiles(session: Session) -> list[dict]:
@@ -37,7 +46,7 @@ def create_profile(
     profile_id = uuid.uuid4().hex[:12]
     validated_name = _validate_name(name)
     config = _validated_config(tts_engine, reference_audio_text, original_filename)
-    audio_path = _save_audio(profile_id, source, original_filename)
+    audio_path = _save_audio(profile_id, validated_name, source, original_filename)
     now = utc_now_iso()
     profile = VoiceProfile(
         id=profile_id,
@@ -66,19 +75,34 @@ def update_profile(
     source: BinaryIO | None = None,
     original_filename: str | None = None,
 ) -> VoiceProfile:
+    validated_name = _validate_name(name)
     current_config = load_profile_config(profile)
     filename = original_filename or str(current_config.get("original_filename") or Path(profile.reference_audio_path).name)
     config = _validated_config(tts_engine, reference_audio_text, filename)
     old_path = Path(profile.reference_audio_path)
     if source is not None:
-        audio_path = _save_audio(profile.id, source, filename)
+        audio_path = _save_audio(
+            profile.id,
+            validated_name,
+            source,
+            filename,
+            current_dir=old_path.parent,
+        )
         if old_path != audio_path:
             old_path.unlink(missing_ok=True)
+            try:
+                old_path.parent.rmdir()
+            except OSError:
+                pass
         profile.reference_audio_path = str(audio_path)
     elif not old_path.is_file():
         raise ValueError("参考音频文件不存在，请重新上传")
+    else:
+        profile.reference_audio_path = str(
+            _relocate_audio(profile.id, validated_name, old_path)
+        )
 
-    profile.name = _validate_name(name)
+    profile.name = validated_name
     profile.config_json = json.dumps(config, ensure_ascii=False)
     profile.updated_at = utc_now_iso()
     session.add(profile)
@@ -148,25 +172,43 @@ def apply_profile_to_project(session: Session, project: Project, profile_id: str
     return config
 
 
+def migrate_profile_directories(session: Session) -> int:
+    """Rename legacy ID-based voice folders to their configured profile names."""
+    migrated = 0
+    for profile in session.exec(select(VoiceProfile)).all():
+        old_path = Path(profile.reference_audio_path)
+        if not old_path.is_file():
+            continue
+        audio_path = _relocate_audio(profile.id, profile.name, old_path)
+        if audio_path == old_path:
+            continue
+        profile.reference_audio_path = str(audio_path)
+        profile.updated_at = utc_now_iso()
+        session.add(profile)
+        _synchronize_projects(session, profile)
+        migrated += 1
+    if migrated:
+        session.commit()
+    return migrated
+
+
 def _synchronize_projects(session: Session, profile: VoiceProfile, force_reset: bool = False) -> None:
     for project in session.exec(select(Project)).all():
         config = load_project_config(project)
         if str(config.get("voice_profile_id") or "") != profile.id:
             continue
-        previous = (
+        previous_tts_config = (
             str(config.get("tts_engine") or ""),
             str(config.get("reference_audio_text") or ""),
-            project.reference_audio_path or "",
         )
         config = apply_profile_to_project(session, project, profile.id)
-        current = (
+        current_tts_config = (
             str(config.get("tts_engine") or ""),
             str(config.get("reference_audio_text") or ""),
-            project.reference_audio_path or "",
         )
         project.config_json = json.dumps(config, ensure_ascii=False)
         project.updated_at = utc_now_iso()
-        if force_reset or previous != current:
+        if force_reset or previous_tts_config != current_tts_config:
             for segment in session.exec(select(Segment).where(Segment.project_id == project.id)).all():
                 segment.audio_path = None
                 segment.duration = None
@@ -183,14 +225,16 @@ def _synchronize_projects(session: Session, profile: VoiceProfile, force_reset: 
 
 def _save_audio(
     profile_id: str,
+    profile_name: str,
     source: BinaryIO,
     original_filename: str,
+    current_dir: Path | None = None,
     max_bytes: int = 100 * 1024 * 1024,
 ) -> Path:
     extension = Path(original_filename).suffix.lower()
     if extension not in SUPPORTED_AUDIO_EXTENSIONS:
         raise ValueError("参考音频必须是 WAV、MP3、FLAC 或 M4A")
-    profile_dir = get_settings().workspace_dir / "voices" / profile_id
+    profile_dir = _profile_directory(profile_id, profile_name, current_dir)
     profile_dir.mkdir(parents=True, exist_ok=True)
     output_path = profile_dir / f"reference{extension}"
     written = 0
@@ -205,6 +249,39 @@ def _save_audio(
         output_path.unlink(missing_ok=True)
         raise
     return output_path.resolve()
+
+
+def _relocate_audio(profile_id: str, profile_name: str, old_path: Path) -> Path:
+    old_path = old_path.resolve()
+    target_dir = _profile_directory(profile_id, profile_name, old_path.parent)
+    if target_dir.resolve() == old_path.parent:
+        return old_path
+    target_dir.parent.mkdir(parents=True, exist_ok=True)
+    old_path.parent.rename(target_dir)
+    return (target_dir / old_path.name).resolve()
+
+
+def _profile_directory(
+    profile_id: str,
+    profile_name: str,
+    current_dir: Path | None = None,
+) -> Path:
+    voices_dir = (get_settings().workspace_dir / "voices").resolve()
+    folder_name = _safe_folder_name(profile_name, profile_id)
+    candidate = voices_dir / folder_name
+    if current_dir is not None and candidate.resolve() == current_dir.resolve():
+        return candidate
+    if not candidate.exists():
+        return candidate
+    return voices_dir / f"{folder_name}_{profile_id[:8]}"
+
+
+def _safe_folder_name(profile_name: str, profile_id: str) -> str:
+    value = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", profile_name.strip())
+    value = re.sub(r"\s+", " ", value).rstrip(" .")
+    if not value or value in {".", ".."} or value.upper() in WINDOWS_RESERVED_NAMES:
+        return f"voice_{profile_id[:8]}"
+    return value[:100].rstrip(" .") or f"voice_{profile_id[:8]}"
 
 
 def _validate_name(name: str) -> str:

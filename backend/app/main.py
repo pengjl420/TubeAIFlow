@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlmodel import Session
 
 from app.api import (
     assets,
@@ -16,7 +17,8 @@ from app.api import (
     tts,
     voices,
 )
-from app.database import create_db_and_tables
+from app.database import create_db_and_tables, engine
+from app.services.narration import voice_profile_service
 from app.services.tasks import task_worker
 
 
@@ -34,6 +36,8 @@ app.add_middleware(
 @app.on_event("startup")
 def on_startup() -> None:
     create_db_and_tables()
+    with Session(engine) as session:
+        voice_profile_service.migrate_profile_directories(session)
     task_worker.recover_and_start_worker()
 
 

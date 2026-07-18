@@ -3,10 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from sqlmodel import Session, SQLModel, create_engine
-
 from app.config import LandscapeTransitionEffect
-from app.models.media import MediaFile
 from app.services.rendering import rough_cut_service as video_service
 
 
@@ -154,41 +151,21 @@ class VideoServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "before transitions"):
             video_service.select_videos_for_duration(groups, 3.8, 0.45)
 
-    def test_rough_cut_pool_never_returns_semantic_assets(self) -> None:
+    def test_rough_cut_scans_configured_directory_without_using_media_library(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            landscape_path = root / "landscape.mp4"
-            semantic_path = root / "semantic.mp4"
-            landscape_path.write_bytes(b"landscape")
-            semantic_path.write_bytes(b"semantic")
-            engine = create_engine(f"sqlite:///{root / 'media.db'}")
-            SQLModel.metadata.create_all(engine)
-            with Session(engine) as session:
-                session.add_all(
-                    [
-                        MediaFile(
-                            id="landscape",
-                            path=str(landscape_path),
-                            filename=landscape_path.name,
-                            media_type="video",
-                            file_hash="landscape",
-                            library_role="landscape_fallback",
-                        ),
-                        MediaFile(
-                            id="semantic",
-                            path=str(semantic_path),
-                            filename=semantic_path.name,
-                            media_type="video",
-                            file_hash="semantic",
-                            library_role="semantic",
-                        ),
-                    ]
-                )
-                session.commit()
-                selected = video_service.list_rough_cut_video_files(session, root)
-            engine.dispose()
+            nested = root / "nested"
+            nested.mkdir()
+            first_path = root / "landscape.mp4"
+            second_path = nested / "other.mov"
+            ignored_path = root / "notes.txt"
+            first_path.write_bytes(b"landscape")
+            second_path.write_bytes(b"other")
+            ignored_path.write_text("not video", encoding="utf-8")
 
-        self.assertEqual(selected, [landscape_path])
+            selected = video_service.list_rough_cut_video_files(root)
+
+        self.assertEqual(selected, [first_path, second_path])
 
 
 if __name__ == "__main__":

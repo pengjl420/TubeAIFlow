@@ -42,6 +42,7 @@ class VoiceProfileTests(unittest.TestCase):
                 source=io.BytesIO(b"first-audio"),
                 original_filename="voice.wav",
             )
+            self.assertEqual(Path(voice.reference_audio_path).parent.name, "纪录片男声")
             project = project_service.create_project(session, "人物故事")
             project = project_service.update_project_settings(
                 session,
@@ -79,6 +80,7 @@ class VoiceProfileTests(unittest.TestCase):
                 source=io.BytesIO(b"second-audio"),
                 original_filename="voice.wav",
             )
+            self.assertEqual(Path(voice.reference_audio_path).parent.name, "纪录片男声")
             session.refresh(project)
             session.refresh(segment)
             config = json.loads(project.config_json or "{}")
@@ -88,6 +90,57 @@ class VoiceProfileTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "正被 1 个项目使用"):
                 voice_profile_service.delete_profile(session, voice)
+
+    def test_profile_rename_moves_audio_and_keeps_project_segments(self) -> None:
+        with Session(self.engine) as session:
+            voice = voice_profile_service.create_profile(
+                session,
+                name="旧音色",
+                tts_engine="qwen3_tts",
+                reference_audio_text="",
+                source=io.BytesIO(b"audio"),
+                original_filename="voice.wav",
+            )
+            old_path = Path(voice.reference_audio_path)
+            project = project_service.create_project(session, "测试项目")
+            project_service.update_project_settings(
+                session,
+                project,
+                "测试项目",
+                str(self.root / "output"),
+                "story",
+                "",
+                voice_profile_id=voice.id,
+            )
+            segment = Segment(
+                id=f"{project.id}_0001",
+                project_id=project.id,
+                segment_id="0001",
+                segment_index=1,
+                text="测试",
+                status="completed",
+                audio_path="generated.wav",
+                duration=1.0,
+            )
+            session.add(segment)
+            session.commit()
+
+            voice_profile_service.update_profile(
+                session,
+                voice,
+                name="新/音色",
+                tts_engine="qwen3_tts",
+                reference_audio_text="",
+            )
+
+            new_path = Path(voice.reference_audio_path)
+            session.refresh(project)
+            session.refresh(segment)
+            self.assertEqual(new_path.parent.name, "新_音色")
+            self.assertTrue(new_path.is_file())
+            self.assertFalse(old_path.exists())
+            self.assertEqual(Path(project.reference_audio_path or ""), new_path)
+            self.assertEqual(segment.status, "completed")
 
 
 if __name__ == "__main__":

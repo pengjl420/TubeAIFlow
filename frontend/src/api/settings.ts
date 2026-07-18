@@ -1,11 +1,20 @@
 import { apiClient, unwrap } from './client'
 
+export type LandscapeTransitionName = 'fade' | 'dissolve' | 'fadeblack' | 'smoothleft' | 'smoothright'
+
+export interface LandscapeTransitionEffect {
+  name: LandscapeTransitionName
+  enabled: boolean
+  percentage: number
+}
+
 export interface SystemSettings {
   app_host: string
   app_port: number
   workspace_dir: string
   ffmpeg_path: string
   ffprobe_path: string
+  landscape_transition_effects: LandscapeTransitionEffect[]
   deepseek_api_key: string
   deepseek_api_key_configured: boolean
   deepseek_base_url: string

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 
 import { rememberApiAddress } from '../../api/client'
 import {
@@ -10,6 +10,7 @@ import {
   installFfmpeg,
   saveSystemSettings,
   type FfmpegStatus,
+  type LandscapeTransitionName,
   type MediaProviderStatus,
   type SystemSettings,
 } from '../../api/settings'
@@ -22,6 +23,24 @@ const ffmpegStatus = ref<FfmpegStatus | null>(null)
 const mediaProviderStatuses = ref<MediaProviderStatus[]>([])
 const error = ref('')
 const message = ref('')
+
+const transitionLabels: Record<LandscapeTransitionName, { label: string; description: string }> = {
+  fade: { label: '柔和叠化', description: '最自然的交叉淡化，适合作为主要转场。' },
+  dissolve: { label: '轻微溶解', description: '带少量纹理变化的柔和过渡。' },
+  fadeblack: { label: '短暂淡黑', description: '快速经过黑场，建议保持较低占比。' },
+  smoothleft: { label: '平滑左移', description: '画面柔和向左交接，适合移动镜头。' },
+  smoothright: { label: '平滑右移', description: '画面柔和向右交接，可与左移少量搭配。' },
+}
+
+const enabledTransitionPercentage = computed(() => (
+  settings.value?.landscape_transition_effects
+    .filter((item) => item.enabled)
+    .reduce((total, item) => total + Number(item.percentage || 0), 0) || 0
+))
+
+const enabledTransitionCount = computed(() => (
+  settings.value?.landscape_transition_effects.filter((item) => item.enabled).length || 0
+))
 
 async function load() {
   loading.value = true
@@ -60,6 +79,17 @@ async function downloadFfmpeg() {
 
 async function save() {
   if (!settings.value) return
+  if (enabledTransitionCount.value > 0 && enabledTransitionPercentage.value !== 100) {
+    error.value = `已启用转场的占比合计必须为 100%，当前为 ${enabledTransitionPercentage.value}%`
+    return
+  }
+  const invalidTransition = settings.value.landscape_transition_effects.some(
+    (item) => item.enabled && (!Number.isFinite(item.percentage) || item.percentage <= 0),
+  )
+  if (invalidTransition) {
+    error.value = '已启用转场的占比必须大于 0%'
+    return
+  }
   saving.value = true
   error.value = ''
   message.value = ''
@@ -188,6 +218,61 @@ onMounted(load)
           </button>
         </div>
         <div class="notice">系统设置数据库固定保存在 <code>backend/workspace/app.db</code>，不会随着“工作目录”一起移动。</div>
+        </div>
+      </details>
+
+      <details class="panel settings-disclosure">
+        <summary>
+          <span class="settings-disclosure-heading">
+            <strong>纯风景视频转场</strong>
+            <small>短转场效果、启用状态与随机占比</small>
+          </span>
+          <span class="settings-disclosure-icon" aria-hidden="true">⌄</span>
+        </summary>
+        <div class="settings-disclosure-content">
+          <p class="section-description">
+            系统会把视频随机分成 2–5 个一组，并在每组中选择 1–2 个镜头边界应用转场，其余位置保持硬切。单次转场约 0.45 秒。
+          </p>
+          <div class="transition-settings-list">
+            <div
+              v-for="effect in settings.landscape_transition_effects"
+              :key="effect.name"
+              class="transition-setting-row"
+              :class="{ 'is-disabled': !effect.enabled }"
+            >
+              <label class="transition-effect-toggle">
+                <input v-model="effect.enabled" type="checkbox" />
+                <span>
+                  <strong>{{ transitionLabels[effect.name].label }}</strong>
+                  <small>{{ transitionLabels[effect.name].description }}</small>
+                </span>
+              </label>
+              <label class="transition-percentage-field">
+                <span>选中占比</span>
+                <span class="transition-percentage-input">
+                  <input
+                    v-model.number="effect.percentage"
+                    type="number"
+                    min="1"
+                    max="100"
+                    step="1"
+                    :disabled="!effect.enabled"
+                  />
+                  <b>%</b>
+                </span>
+              </label>
+            </div>
+          </div>
+          <div
+            class="transition-percentage-summary"
+            :class="{ 'is-invalid': enabledTransitionCount > 0 && enabledTransitionPercentage !== 100 }"
+          >
+            <span>已启用 {{ enabledTransitionCount }} 种效果</span>
+            <strong>占比合计 {{ enabledTransitionPercentage }}%</strong>
+          </div>
+          <div class="notice">
+            可以取消全部勾选来关闭纯风景视频转场。启用任意效果时，已启用效果的占比合计必须为 100%。
+          </div>
         </div>
       </details>
 

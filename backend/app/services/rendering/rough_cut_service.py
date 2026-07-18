@@ -11,7 +11,7 @@ from pathlib import Path
 
 from sqlmodel import Session, select
 
-from app.config import get_settings
+from app.config import LandscapeTransitionEffect, get_settings
 from app.models.project import Project
 from app.models.media import LIBRARY_ROLE_LANDSCAPE_FALLBACK, MediaFile
 from app.infrastructure.ffmpeg import probe_duration, run_ffmpeg
@@ -35,6 +35,8 @@ TARGET_FPS = 30
 # Skipping a few frames also prevents that frame from becoming a clip boundary.
 CLIP_START_OFFSET = 0.1
 VIDEO_TAIL_PADDING = 0.5
+TRANSITION_DURATION_SECONDS = 0.45
+MIN_TRANSITION_DURATION_SECONDS = 0.2
 PROGRESS_WRITE_RETRIES = 5
 _composing_project_ids: set[str] = set()
 _composing_projects_lock = threading.Lock()
@@ -46,6 +48,14 @@ class SelectedVideo:
     title_group: str
     source_duration: float
     clip_duration: float
+
+
+@dataclass(frozen=True)
+class PlannedTransition:
+    # One-based index of the clip immediately before this transition.
+    after_clip_index: int
+    effect: str
+    duration: float
 
 
 class VideoCompositionRunningError(ValueError):
@@ -81,6 +91,7 @@ def compose_video(session: Session, project: Project) -> Path:
 
 
 def _compose_video(session: Session, project: Project) -> Path:
+    settings = get_settings()
     config = _load_project_config(project)
     media_dir_value = str(config.get("media_video_dir") or "").strip()
     if not media_dir_value:
@@ -90,7 +101,7 @@ def _compose_video(session: Session, project: Project) -> Path:
     if not media_dir.is_dir():
         raise ValueError("Video material directory does not exist")
 
-    audio_path = get_final_audio_path(project, get_settings().workspace_dir)
+    audio_path = get_final_audio_path(project, settings.workspace_dir)
     if not audio_path.is_file():
         raise ValueError("Final WAV audio does not exist; merge audio before composing video")
 
@@ -98,7 +109,7 @@ def _compose_video(session: Session, project: Project) -> Path:
     if target_duration <= 0:
         raise ValueError("Final WAV audio duration is invalid")
 
-    base_dir = get_project_work_dir(project, get_settings().workspace_dir)
+    base_dir = get_project_work_dir(project, settings.workspace_dir)
     ensure_project_dirs(base_dir)
     video_dir = base_dir / "video"
     temp_dir = video_dir / "temp"
@@ -120,8 +131,19 @@ def _compose_video(session: Session, project: Project) -> Path:
     source_paths = list_rough_cut_video_files(session, media_dir)
     write_video_progress(progress_path, "running", "selecting", 12, message="Selecting video materials")
     grouped_paths = group_video_files(source_paths)
-    selected = select_videos_for_duration(grouped_paths, target_duration)
-    write_selected_manifest(video_dir / "selected_videos.json", selected, target_duration)
+    enabled_effects = [item for item in settings.landscape_transition_effects if item.enabled]
+    selected = select_videos_for_duration(
+        grouped_paths,
+        target_duration,
+        TRANSITION_DURATION_SECONDS if enabled_effects else 0.0,
+    )
+    transition_plan = build_transition_plan(selected, enabled_effects)
+    write_selected_manifest(
+        video_dir / "selected_videos.json",
+        selected,
+        target_duration,
+        transition_plan,
+    )
 
     write_video_progress(
         progress_path,
@@ -132,24 +154,38 @@ def _compose_video(session: Session, project: Project) -> Path:
         message="Normalizing selected clips",
     )
     temp_paths = normalize_selected_clips(selected, temp_dir, progress_path, project.id)
+    normalized_durations = [probe_duration(path) for path in temp_paths]
     concat_path = video_dir / "concat.txt"
     concat_path.write_text(
         "\n".join(f"file '{path.as_posix()}'" for path in temp_paths),
         encoding="utf-8",
     )
 
-    output_path = get_final_video_path(project, get_settings().workspace_dir)
+    filter_script_path = video_dir / "transition_filter.txt"
+    output_path = get_final_video_path(project, settings.workspace_dir)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     write_video_progress(
         progress_path,
         "running",
-        "concatenating",
+        "transitioning" if transition_plan else "concatenating",
         95,
         total=len(selected),
         completed=len(selected),
-        message="Concatenating final video",
+        message=(
+            f"Applying {len(transition_plan)} video transitions"
+            if transition_plan
+            else "Concatenating final video"
+        ),
     )
-    concatenate_normalized_clips(concat_path, output_path, project_id=project.id)
+    compose_normalized_clips(
+        temp_paths,
+        normalized_durations,
+        concat_path,
+        filter_script_path,
+        transition_plan,
+        output_path,
+        project_id=project.id,
+    )
     video_duration = probe_duration(output_path)
     if video_duration <= target_duration:
         # Frame-rate normalization and imperfect source tails can make the
@@ -166,7 +202,16 @@ def _compose_video(session: Session, project: Project) -> Path:
             target_duration - video_duration,
             retry_padding,
         )
-        concatenate_normalized_clips(concat_path, output_path, retry_padding, project.id)
+        compose_normalized_clips(
+            temp_paths,
+            normalized_durations,
+            concat_path,
+            filter_script_path,
+            transition_plan,
+            output_path,
+            retry_padding,
+            project.id,
+        )
         video_duration = probe_duration(output_path)
     if video_duration <= target_duration:
         raise RuntimeError(
@@ -188,6 +233,125 @@ def _compose_video(session: Session, project: Project) -> Path:
         message="Video generation completed",
     )
     return output_path
+
+
+def compose_normalized_clips(
+    clip_paths: list[Path],
+    clip_durations: list[float],
+    concat_path: Path,
+    filter_script_path: Path,
+    transition_plan: list[PlannedTransition],
+    output_path: Path,
+    tail_padding: float = VIDEO_TAIL_PADDING,
+    project_id: str | None = None,
+) -> None:
+    if transition_plan:
+        concatenate_clips_with_transitions(
+            clip_paths,
+            clip_durations,
+            filter_script_path,
+            transition_plan,
+            output_path,
+            tail_padding,
+            project_id,
+        )
+        return
+    concatenate_normalized_clips(concat_path, output_path, tail_padding, project_id)
+
+
+def concatenate_clips_with_transitions(
+    clip_paths: list[Path],
+    clip_durations: list[float],
+    filter_script_path: Path,
+    transition_plan: list[PlannedTransition],
+    output_path: Path,
+    tail_padding: float = VIDEO_TAIL_PADDING,
+    project_id: str | None = None,
+) -> None:
+    if len(clip_paths) != len(clip_durations):
+        raise ValueError("Clip paths and durations must have the same length")
+    if len(clip_paths) < 2:
+        raise ValueError("At least two clips are required for video transitions")
+
+    filter_script_path.parent.mkdir(parents=True, exist_ok=True)
+    filter_script_path.write_text(
+        build_transition_filter(clip_durations, transition_plan, tail_padding),
+        encoding="utf-8",
+    )
+    args = ["-y"]
+    for path in clip_paths:
+        args.extend(["-i", str(path)])
+    args.extend(
+        [
+            "-filter_complex_script",
+            str(filter_script_path),
+            "-map",
+            "[vout]",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "20",
+            "-pix_fmt",
+            "yuv420p",
+            "-r",
+            str(TARGET_FPS),
+            "-an",
+            "-movflags",
+            "+faststart",
+            str(output_path),
+        ]
+    )
+    run_ffmpeg(args, project_id)
+
+
+def build_transition_filter(
+    clip_durations: list[float],
+    transition_plan: list[PlannedTransition],
+    tail_padding: float = VIDEO_TAIL_PADDING,
+) -> str:
+    if len(clip_durations) < 2:
+        raise ValueError("At least two clip durations are required")
+    transitions = {item.after_clip_index: item for item in transition_plan}
+    if len(transitions) != len(transition_plan):
+        raise ValueError("Only one transition can be assigned to a video boundary")
+
+    filters = [
+        f"[{index}:v]settb=AVTB,setpts=PTS-STARTPTS[v{index}]"
+        for index in range(len(clip_durations))
+    ]
+    current_label = "v0"
+    current_duration = clip_durations[0]
+    for clip_index in range(1, len(clip_durations)):
+        output_label = f"join{clip_index}"
+        transition = transitions.get(clip_index)
+        if transition:
+            duration = _resolve_transition_duration(
+                transition.duration,
+                current_duration,
+                clip_durations[clip_index],
+            )
+            if duration >= MIN_TRANSITION_DURATION_SECONDS:
+                offset = max(0.0, current_duration - duration)
+                filters.append(
+                    f"[{current_label}][v{clip_index}]xfade=transition={transition.effect}:"
+                    f"duration={duration:.3f}:offset={offset:.3f}[{output_label}]"
+                )
+                current_duration += clip_durations[clip_index] - duration
+                current_label = output_label
+                continue
+        filters.append(
+            f"[{current_label}][v{clip_index}]concat=n=2:v=1:a=0[{output_label}]"
+        )
+        current_duration += clip_durations[clip_index]
+        current_label = output_label
+
+    filters.append(
+        f"[{current_label}]tpad=stop_mode=clone:stop_duration={tail_padding:.3f},"
+        f"fps={TARGET_FPS},format=yuv420p[vout]"
+    )
+    return ";\n".join(filters)
 
 
 def concatenate_normalized_clips(
@@ -278,7 +442,49 @@ def normalize_video_title(path: Path) -> str:
     return title.strip() or path.stem.strip()
 
 
-def select_videos_for_duration(groups: dict[str, list[Path]], target_duration: float) -> list[SelectedVideo]:
+def build_transition_plan(
+    selected: list[SelectedVideo],
+    effects: list[LandscapeTransitionEffect],
+) -> list[PlannedTransition]:
+    enabled = [item for item in effects if item.enabled and item.percentage > 0]
+    if len(selected) < 2 or not enabled:
+        return []
+
+    effect_names = [item.name for item in enabled]
+    effect_weights = [item.percentage for item in enabled]
+    plan: list[PlannedTransition] = []
+    group_start = 0
+    while group_start < len(selected) - 1:
+        group_end = min(len(selected), group_start + random.randint(2, 5))
+        candidates: list[tuple[int, float]] = []
+        for boundary in range(group_start + 1, group_end):
+            duration = _resolve_transition_duration(
+                TRANSITION_DURATION_SECONDS,
+                selected[boundary - 1].clip_duration,
+                selected[boundary].clip_duration,
+            )
+            if duration >= MIN_TRANSITION_DURATION_SECONDS:
+                candidates.append((boundary, duration))
+        if candidates:
+            count = random.randint(1, min(2, len(candidates)))
+            for boundary, duration in sorted(random.sample(candidates, count)):
+                effect = random.choices(effect_names, weights=effect_weights, k=1)[0]
+                plan.append(PlannedTransition(boundary, effect, duration))
+        group_start = group_end
+    return plan
+
+
+def _resolve_transition_duration(requested: float, before: float, after: float) -> float:
+    return max(0.0, min(requested, before / 3, after / 3))
+
+
+def select_videos_for_duration(
+    groups: dict[str, list[Path]],
+    target_duration: float,
+    maximum_boundary_overlap: float = 0.0,
+) -> list[SelectedVideo]:
+    if maximum_boundary_overlap < 0:
+        raise ValueError("Maximum transition overlap cannot be negative")
     group_items = list(groups.items())
     random.shuffle(group_items)
 
@@ -303,14 +509,15 @@ def select_videos_for_duration(groups: dict[str, list[Path]], target_duration: f
         clip_duration = usable_duration
         selected.append(SelectedVideo(path, title_group, duration, clip_duration))
         total += clip_duration
-        if total > target_duration:
+        minimum_effective_duration = total - maximum_boundary_overlap * max(0, len(selected) - 1)
+        if minimum_effective_duration > target_duration:
             return selected
 
     if not selected:
         raise ValueError("No readable video files found in material directory")
     raise ValueError(
         f"Not enough unique video title groups to cover target duration: "
-        f"{total:.2f}s selected, {target_duration:.2f}s required"
+        f"{total:.2f}s selected before transitions, {target_duration:.2f}s required"
     )
 
 
@@ -445,20 +652,47 @@ def mark_video_progress_failed(project: Project, error: str) -> None:
     )
 
 
-def write_selected_manifest(path: Path, selected: list[SelectedVideo], target_duration: float) -> None:
+def write_selected_manifest(
+    path: Path,
+    selected: list[SelectedVideo],
+    target_duration: float,
+    transition_plan: list[PlannedTransition] | None = None,
+) -> None:
+    transition_plan = transition_plan or []
+    transitions_by_boundary = {item.after_clip_index: item for item in transition_plan}
+    transition_overlap = sum(item.duration for item in transition_plan)
+    selected_duration = sum(item.clip_duration for item in selected)
     data = {
         "target_duration": target_duration,
-        "selected_duration": sum(item.clip_duration for item in selected),
+        "selected_duration": selected_duration,
+        "transition_overlap_duration": transition_overlap,
+        "effective_selected_duration": selected_duration - transition_overlap,
         "selection_mode": "landscape_rough_cut",
         "required_library_role": LIBRARY_ROLE_LANDSCAPE_FALLBACK,
+        "transitions": [
+            {
+                "after_clip_index": item.after_clip_index,
+                "effect": item.effect,
+                "duration": item.duration,
+            }
+            for item in transition_plan
+        ],
         "items": [
             {
                 "title_group": item.title_group,
                 "source_path": str(item.source_path),
                 "source_duration": item.source_duration,
                 "clip_duration": item.clip_duration,
+                "transition_to_next": (
+                    {
+                        "effect": transitions_by_boundary[index].effect,
+                        "duration": transitions_by_boundary[index].duration,
+                    }
+                    if index in transitions_by_boundary
+                    else None
+                ),
             }
-            for item in selected
+            for index, item in enumerate(selected, start=1)
         ],
     }
     path.parent.mkdir(parents=True, exist_ok=True)

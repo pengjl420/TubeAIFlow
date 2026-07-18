@@ -47,6 +47,46 @@ class SettingsModelTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             Settings(media_search_cache_hours=23)
 
+    def test_landscape_transition_defaults_total_one_hundred_percent(self) -> None:
+        settings = Settings()
+
+        self.assertEqual(
+            [item.name for item in settings.landscape_transition_effects],
+            ["fade", "dissolve", "fadeblack", "smoothleft", "smoothright"],
+        )
+        self.assertEqual(
+            sum(item.percentage for item in settings.landscape_transition_effects if item.enabled),
+            100,
+        )
+
+    def test_landscape_transition_percentages_must_total_one_hundred(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must total 100"):
+            Settings(
+                landscape_transition_effects=[
+                    {"name": "fade", "enabled": True, "percentage": 40},
+                    {"name": "dissolve", "enabled": True, "percentage": 20},
+                    {"name": "fadeblack", "enabled": True, "percentage": 10},
+                    {"name": "smoothleft", "enabled": True, "percentage": 10},
+                    {"name": "smoothright", "enabled": True, "percentage": 10},
+                ]
+            )
+
+    def test_all_landscape_transitions_can_be_disabled(self) -> None:
+        settings = Settings(
+            landscape_transition_effects=[
+                {"name": name, "enabled": False, "percentage": percentage}
+                for name, percentage in [
+                    ("fade", 45),
+                    ("dissolve", 25),
+                    ("fadeblack", 10),
+                    ("smoothleft", 10),
+                    ("smoothright", 10),
+                ]
+            ]
+        )
+
+        self.assertFalse(any(item.enabled for item in settings.landscape_transition_effects))
+
     def test_public_settings_never_expose_secret_values(self) -> None:
         configured = Settings(
             deepseek_api_key="deepseek-secret",

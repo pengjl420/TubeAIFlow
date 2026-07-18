@@ -2254,6 +2254,88 @@ main {
   font-size: 13px;
 }
 
+.transition-settings-list {
+  display: grid;
+  gap: 10px;
+}
+
+.transition-setting-row {
+  align-items: center;
+  background: var(--surface-soft);
+  border: 1px solid #e7e9e2;
+  border-radius: 10px;
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(0, 1fr) 150px;
+  padding: 13px 14px;
+}
+
+.transition-setting-row.is-disabled {
+  opacity: 0.62;
+}
+
+.transition-effect-toggle {
+  align-items: flex-start;
+  cursor: pointer;
+  display: flex;
+  gap: 11px;
+}
+
+.transition-effect-toggle input {
+  accent-color: var(--teal);
+  height: 16px;
+  margin-top: 2px;
+  width: 16px;
+}
+
+.transition-effect-toggle > span {
+  display: grid;
+  gap: 3px;
+}
+
+.transition-effect-toggle small,
+.transition-percentage-field > span {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.transition-percentage-field {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.transition-percentage-input {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+.transition-percentage-input input {
+  min-width: 0;
+  text-align: right;
+  width: 78px;
+}
+
+.transition-percentage-input b {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.transition-percentage-summary {
+  align-items: center;
+  color: var(--ink-soft);
+  display: flex;
+  font-size: 12px;
+  justify-content: space-between;
+  margin-top: 12px;
+}
+
+.transition-percentage-summary.is-invalid strong {
+  color: var(--danger);
+}
+
 .section-description {
   color: var(--ink-soft);
   font-size: 13px;
@@ -2601,7 +2683,8 @@ main {
   .workflow-step { padding: 12px; }
   .reference-box { align-items: stretch; grid-template-columns: 1fr; }
   .script-panel > .field textarea { min-height: 300px; }
-  .form-grid, .inline-form, .output-row, .secret-row { grid-template-columns: 1fr; }
+  .form-grid, .inline-form, .output-row, .secret-row, .transition-setting-row { grid-template-columns: 1fr; }
+  .transition-percentage-field { justify-content: space-between; }
   .generation-timing { grid-template-columns: 1fr; }
   .project-metrics-strip { grid-template-columns: 1fr; }
   .project-metrics-strip > div + div { border-left: 0; border-top: 1px solid var(--line); }

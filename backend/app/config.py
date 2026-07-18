@@ -1,6 +1,7 @@
 import json
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
 from sqlalchemy.exc import OperationalError
@@ -11,6 +12,30 @@ DEFAULT_WORKSPACE_DIR = (BASE_DIR / "workspace").resolve()
 DEFAULT_EMBEDDING_MODEL_DIR = (BASE_DIR.parent / "models" / "Qwen3-VL-Embedding-2B").resolve()
 DATABASE_PATH = DEFAULT_WORKSPACE_DIR / "app.db"
 
+LANDSCAPE_TRANSITION_NAMES = (
+    "fade",
+    "dissolve",
+    "fadeblack",
+    "smoothleft",
+    "smoothright",
+)
+
+
+class LandscapeTransitionEffect(BaseModel):
+    name: Literal["fade", "dissolve", "fadeblack", "smoothleft", "smoothright"]
+    enabled: bool = True
+    percentage: int = Field(ge=0, le=100)
+
+
+def default_landscape_transition_effects() -> list[LandscapeTransitionEffect]:
+    return [
+        LandscapeTransitionEffect(name="fade", percentage=45),
+        LandscapeTransitionEffect(name="dissolve", percentage=25),
+        LandscapeTransitionEffect(name="fadeblack", percentage=10),
+        LandscapeTransitionEffect(name="smoothleft", percentage=10),
+        LandscapeTransitionEffect(name="smoothright", percentage=10),
+    ]
+
 
 class Settings(BaseModel):
     app_host: str = "127.0.0.1"
@@ -18,6 +43,9 @@ class Settings(BaseModel):
     workspace_dir: Path = DEFAULT_WORKSPACE_DIR
     ffmpeg_path: str = "ffmpeg"
     ffprobe_path: str = "ffprobe"
+    landscape_transition_effects: list[LandscapeTransitionEffect] = Field(
+        default_factory=default_landscape_transition_effects
+    )
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-v4-flash"
@@ -95,6 +123,20 @@ class Settings(BaseModel):
         if dtype not in {"bfloat16", "float16", "float32"}:
             raise ValueError("Unsupported Qwen3-TTS dtype")
         return dtype
+
+    @field_validator("landscape_transition_effects")
+    @classmethod
+    def validate_landscape_transition_effects(cls, value):
+        names = [item.name for item in value]
+        if len(names) != len(set(names)) or set(names) != set(LANDSCAPE_TRANSITION_NAMES):
+            raise ValueError("Landscape transition settings must contain each supported effect once")
+        enabled = [item for item in value if item.enabled]
+        if enabled and any(item.percentage <= 0 for item in enabled):
+            raise ValueError("Enabled landscape transitions must have a positive percentage")
+        if enabled and sum(item.percentage for item in enabled) != 100:
+            raise ValueError("Enabled landscape transition percentages must total 100")
+        by_name = {item.name: item for item in value}
+        return [by_name[name] for name in LANDSCAPE_TRANSITION_NAMES]
 
     @field_validator("qwen_tts_device", "qwen_tts_language")
     @classmethod

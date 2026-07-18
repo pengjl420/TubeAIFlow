@@ -4,12 +4,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
 from app.config import get_settings
-from app.database import get_session
+from app.database import engine, get_session
 from app.models.narration import Segment
 from app.infrastructure import process_runner as task_control
 from app.infrastructure.project_layout import get_project_work_dir
-from app.services.narration import tts_service
 from app.services.projects import project_service
+from app.workflows import narration_generation
 
 
 router = APIRouter(tags=["tts"])
@@ -51,14 +51,42 @@ def regenerate_segment(project_id: str, segment_id: str, session: Session = Depe
         raise HTTPException(status_code=404, detail={"success": False, "error": "Segment not found"})
     try:
         project = project_service.ensure_output_filename(session, project)
+        deferred = task_control.defer_if_running(
+            project_id,
+            "tts",
+            lambda: _regenerate_segment_after_active_tts(project_id, segment_id),
+        )
+        if deferred is not None:
+            return {"success": True, "data": deferred.wait()}
         with task_control.controlled(project_id, "tts"):
-            data = tts_service.regenerate_segment_tts(session, project, segment)
+            data = narration_generation.regenerate_segment_and_refresh_outputs(
+                session, project, segment
+            )
         return {"success": True, "data": data}
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(
             status_code=400,
             detail={"success": False, "error": str(exc)},
         ) from exc
+
+
+def _regenerate_segment_after_active_tts(project_id: str, segment_id: str) -> dict:
+    """Reload edited data and regenerate before the active TTS stage releases its lock."""
+    with Session(engine) as session:
+        project = project_service.get_project(session, project_id)
+        segment = session.exec(
+            select(Segment).where(
+                Segment.project_id == project_id,
+                Segment.segment_id == segment_id,
+            )
+        ).first()
+        if not project or not segment:
+            raise ValueError("Project or segment no longer exists")
+        project = project_service.ensure_output_filename(session, project)
+        regenerated = narration_generation.regenerate_segment_and_refresh_outputs(
+            session, project, segment
+        )
+        return regenerated.model_dump()
 
 
 @router.get("/projects/{project_id}/tts/status")

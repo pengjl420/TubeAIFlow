@@ -11,7 +11,7 @@ from app.models.project import Project
 from app.models.storyboard import VisualScene
 from app.schemas.media import SceneAssignmentRequest
 from app.schemas.storyboard import StoryboardContent
-from app.services.media_library import ingestion_service, retrieval_service
+from app.services.media_library import fallback_service, ingestion_service, retrieval_service
 
 
 class MediaLibraryTests(unittest.TestCase):
@@ -187,6 +187,25 @@ class MediaLibraryTests(unittest.TestCase):
             self.assertEqual(result["candidates"][0]["status"], "QUALIFIED")
             self.assertTrue(result["candidates"][1]["conflicts"])
 
+            conflict_candidate_id = result["candidates"][1]["id"]
+            with self.assertRaisesRegex(ValueError, "需要人工确认"):
+                retrieval_service.assign_candidate(
+                    session,
+                    project,
+                    scene.id,
+                    SceneAssignmentRequest(candidate_id=conflict_candidate_id),
+                )
+            overridden = retrieval_service.assign_candidate(
+                session,
+                project,
+                scene.id,
+                SceneAssignmentRequest(
+                    candidate_id=conflict_candidate_id,
+                    manual_override=True,
+                ),
+            )
+            override_reason = session.exec(select(SceneAssignment)).one().selection_reason
+
             assignment = retrieval_service.assign_candidate(
                 session,
                 project,
@@ -202,6 +221,8 @@ class MediaLibraryTests(unittest.TestCase):
             scene_status = saved_scene.status
 
         self.assertEqual(assignment["media_shot_id"], good_shot_id)
+        self.assertEqual(overridden["candidate_id"], conflict_candidate_id)
+        self.assertIn("人工确认接受候选冲突", override_reason)
         self.assertTrue(assignment_confirmed)
         self.assertEqual(scene_status, "assigned")
         self.assertEqual(repeated_ids.count(assignment["candidate_id"]), 1)
@@ -414,6 +435,84 @@ class MediaLibraryTests(unittest.TestCase):
                 blocked = retrieval_service.search_scene_candidates(session, project, scene.id)
             self.assertEqual(blocked["status"], "NO_RESULT")
             self.assertEqual(blocked["candidates"], [])
+
+    def test_themed_fallback_auto_fills_track_and_waits_for_review(self) -> None:
+        project = Project(id="auto-fallback-project", name="Auto fallback")
+        scene = VisualScene(
+            id="auto-fallback-scene",
+            project_id=project.id,
+            scene_index=1,
+            start_ms=0,
+            end_ms=10_000,
+            narration="Business transition",
+        )
+        records = [project, scene]
+        for index in (1, 2):
+            media = MediaFile(
+                id=f"fallback-media-{index}",
+                path=str(self.root / f"business-{index}.mp4"),
+                filename=f"business-{index}.mp4",
+                media_type="video",
+                file_hash=f"fallback-hash-{index}",
+                duration_ms=5_000,
+                width=1920,
+                height=1080,
+                library_role="themed_fallback",
+                fallback_category="business",
+            )
+            shot = MediaShot(
+                id=f"fallback-shot-{index}",
+                media_file_id=media.id,
+                shot_index=1,
+                start_ms=0,
+                end_ms=5_000,
+                library_role="themed_fallback",
+                fallback_category="business",
+            )
+            candidate = SceneCandidate(
+                id=f"fallback-candidate-{index}",
+                project_id=project.id,
+                scene_id=scene.id,
+                media_shot_id=shot.id,
+                total_score=0.8 - index * 0.1,
+                status="QUALIFIED",
+                selection_stage="themed_fallback",
+                is_fallback=True,
+            )
+            records.extend([media, shot, candidate])
+
+        settings = type(
+            "Settings",
+            (),
+            {
+                "auto_fallback_enabled": True,
+                "auto_landscape_fallback_enabled": False,
+                "auto_fallback_review_required": True,
+                "auto_fallback_max_ratio_percent": 100,
+                "auto_fallback_max_consecutive_shots": 2,
+            },
+        )()
+        with Session(self.engine) as session:
+            session.add_all(records)
+            session.commit()
+            candidates = retrieval_service.list_scene_candidates(session, project.id, scene.id)
+            with patch.object(fallback_service, "get_settings", return_value=settings):
+                result = fallback_service.auto_fill_scene(
+                    session, project, scene, candidates
+                )
+
+            assignments = retrieval_service.list_scene_assignments(
+                session, project.id, scene.id
+            )
+            self.assertTrue(result["complete"])
+            self.assertEqual(len(result["selected_assignment_ids"]), 2)
+            self.assertTrue(assignments["coverage"]["review_required"])
+            self.assertTrue(all(not item["manual_confirmed"] for item in assignments["assignments"]))
+
+            confirmed = retrieval_service.confirm_scene_fallback_assignments(
+                session, project.id, scene.id
+            )
+            self.assertFalse(confirmed["coverage"]["review_required"])
 
 
 if __name__ == "__main__":

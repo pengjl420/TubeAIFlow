@@ -11,7 +11,7 @@ from app.models.media import SceneAssignment
 from app.models.storyboard import VisualScene
 from app.services.projects import project_service
 from app.services.quality import qa_service
-from app.services.rendering import final_renderer, rough_cut_service, scene_renderer
+from app.services.rendering import final_renderer, rough_cut_service, scene_renderer, timeline_composer
 
 
 router = APIRouter(tags=["videos"])
@@ -113,6 +113,11 @@ def intelligent_render_status(project_id: str, session: Session = Depends(get_se
     assignments = [
         item for item in assignments if item.scene_id in scene_ids and item.manual_confirmed
     ]
+    scene_coverages = [timeline_composer.scene_coverage(session, scene) for scene in scenes]
+    completed_scene_count = sum(
+        coverage["complete"] and not coverage["review_required"]
+        for coverage in scene_coverages
+    )
     rendered = sum(scene_renderer.scene_output_path(project, scene).is_file() for scene in scenes)
     work_dir = get_project_work_dir(project, get_settings().workspace_dir)
     intelligent_render_complete = (work_dir / "reports" / "render_report.json").is_file()
@@ -121,7 +126,8 @@ def intelligent_render_status(project_id: str, session: Session = Depends(get_se
         "success": True,
         "data": {
             "scene_count": len(scenes),
-            "assignment_count": len(assignments),
+            "assignment_count": completed_scene_count,
+            "shot_assignment_count": len(assignments),
             "rendered_scene_count": rendered,
             "final_video_path": str(final_video_path),
             "final_video_exists": final_video_path.is_file() and intelligent_render_complete,

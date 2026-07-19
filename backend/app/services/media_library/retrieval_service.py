@@ -22,6 +22,7 @@ from app.schemas.storyboard import StoryboardContent
 from app.shared.time import utc_now_iso
 from app.services.media_library.ingestion_service import serialize_shot
 from app.services.media_library import media_provider_service, remote_retrieval_service
+from app.services.rendering import timeline_composer
 
 
 MIN_LOCAL_RELEVANCE = 0.25
@@ -77,6 +78,11 @@ def search_scene_candidates(
                     "status": "FALLBACK_REQUIRED",
                     "candidates": list_scene_candidates(session, project.id, scene.id),
                 }
+                from app.services.media_library import fallback_service
+
+                result["auto_fallback"] = fallback_service.auto_fill_scene(
+                    session, project, scene, result["candidates"]
+                )
         result["online_search"] = attempts
         return result
 
@@ -89,16 +95,17 @@ def _search_available_candidates(
         raise ValueError("请先生成该场景的 Storyboard")
     storyboard = StoryboardContent.model_validate_json(scene.storyboard_json)
 
-    assignment = session.exec(
+    assignments = session.exec(
         select(SceneAssignment).where(SceneAssignment.scene_id == scene.id)
-    ).first()
+    ).all()
+    assigned_candidate_ids = {item.candidate_id for item in assignments if item.candidate_id}
     existing = session.exec(
         select(SceneCandidate).where(SceneCandidate.scene_id == scene.id)
     ).all()
-    preserved_candidate = None
+    preserved_candidates = []
     for candidate in existing:
-        if assignment and candidate.id == assignment.candidate_id:
-            preserved_candidate = candidate
+        if candidate.id in assigned_candidate_ids:
+            preserved_candidates.append(candidate)
         else:
             session.delete(candidate)
 
@@ -136,17 +143,19 @@ def _search_available_candidates(
     ranked.sort(key=lambda item: item[0], reverse=True)
 
     candidates = []
-    if preserved_candidate:
+    preserved_shot_ids = set()
+    for preserved_candidate in preserved_candidates:
         preserved_shot = session.get(MediaShot, preserved_candidate.media_shot_id)
         preserved_file = (
             session.get(MediaFile, preserved_shot.media_file_id) if preserved_shot else None
         )
         if preserved_shot and preserved_file:
             candidates.append((preserved_candidate, preserved_shot, preserved_file))
+            preserved_shot_ids.add(preserved_shot.id)
     for _, shot, media_file, scored in ranked:
         if len(candidates) >= MAX_CANDIDATES:
             break
-        if preserved_candidate and shot.id == preserved_candidate.media_shot_id:
+        if shot.id in preserved_shot_ids:
             continue
         candidate = SceneCandidate(
             id=f"candidate_{uuid4().hex}",
@@ -156,7 +165,11 @@ def _search_available_candidates(
             source=media_file.provider,
             query=storyboard.primary_query,
             selection_stage=(
-                "local_semantic" if media_file.provider == "local" else "remote_semantic"
+                "manual_upload"
+                if media_file.provider == "manual_upload"
+                else "local_semantic"
+                if media_file.provider == "local"
+                else "remote_semantic"
             ),
             **scored,
         )
@@ -193,6 +206,52 @@ def list_scene_candidates(
     return result
 
 
+def register_manual_asset_candidates(
+    session: Session, project: Project, scene_id: str, media_id: str
+) -> list[dict]:
+    """Expose every successfully ingested shot from a user upload for explicit selection."""
+    scene = _require_scene(session, project.id, scene_id)
+    media_file = session.get(MediaFile, media_id)
+    if not media_file or not media_file.enabled or media_file.review_status != "approved":
+        raise ValueError("上传素材不存在或当前不可用")
+    shots = session.exec(
+        select(MediaShot)
+        .where(MediaShot.media_file_id == media_file.id, MediaShot.status == "ready")
+        .order_by(MediaShot.shot_index)
+    ).all()
+    if not shots:
+        raise ValueError("上传素材没有可用镜头，请检查文件格式或处理日志")
+
+    candidates: list[tuple[SceneCandidate, MediaShot]] = []
+    for shot in shots:
+        candidate = session.exec(
+            select(SceneCandidate).where(
+                SceneCandidate.scene_id == scene.id,
+                SceneCandidate.media_shot_id == shot.id,
+                SceneCandidate.selection_stage == "manual_upload",
+            )
+        ).first()
+        if not candidate:
+            technical_score = _technical_score(media_file)
+            candidate = SceneCandidate(
+                id=f"candidate_{uuid4().hex}",
+                project_id=project.id,
+                scene_id=scene.id,
+                media_shot_id=shot.id,
+                source="manual_upload",
+                query="人工上传替换素材",
+                technical_score=technical_score,
+                total_score=technical_score,
+                status="QUALIFIED",
+                selection_stage="manual_upload",
+                conflicts_json="[]",
+            )
+            session.add(candidate)
+        candidates.append((candidate, shot))
+    session.commit()
+    return [_serialize_candidate(session, candidate, shot, media_file) for candidate, shot in candidates]
+
+
 def assign_candidate(
     session: Session,
     project: Project,
@@ -203,8 +262,8 @@ def assign_candidate(
     candidate = session.get(SceneCandidate, payload.candidate_id)
     if not candidate or candidate.project_id != project.id or candidate.scene_id != scene.id:
         raise ValueError("候选素材不存在或不属于当前场景")
-    if candidate.status != "QUALIFIED":
-        raise ValueError("只有 QUALIFIED 候选可以直接指派")
+    if candidate.status != "QUALIFIED" and not payload.manual_override:
+        raise ValueError("该候选存在冲突或相关度不足，需要人工确认后才能指派")
     shot = session.get(MediaShot, candidate.media_shot_id)
     if not shot:
         raise ValueError("候选素材镜头不存在")
@@ -223,18 +282,25 @@ def assign_candidate(
     ):
         raise ValueError("素材裁剪结束时间超出镜头范围")
 
-    assignment = session.exec(
-        select(SceneAssignment).where(SceneAssignment.scene_id == scene.id)
-    ).first()
+    assignments = timeline_composer.scene_assignments(session, scene.id)
+    if payload.append and any(item.candidate_id == candidate.id for item in assignments):
+        raise ValueError("该候选已经在当前场景的镜头轨道中")
     now = utc_now_iso()
-    if not assignment:
+    if payload.append or not assignments:
         assignment = SceneAssignment(
             id=f"assignment_{uuid4().hex}",
             project_id=project.id,
             scene_id=scene.id,
             media_shot_id=shot.id,
+            sequence_index=len(assignments) + 1,
             created_at=now,
         )
+        assignments.append(assignment)
+    else:
+        assignment = assignments[0]
+        for extra in assignments[1:]:
+            session.delete(extra)
+        assignments = [assignment]
     assignment.media_shot_id = shot.id
     assignment.candidate_id = candidate.id
     assignment.trim_start_ms = payload.trim_start_ms
@@ -243,10 +309,19 @@ def assign_candidate(
     assignment.transition = payload.transition
     assignment.manual_confirmed = True
     assignment.selection_stage = candidate.selection_stage
-    assignment.selection_reason = _selection_reason(candidate.selection_stage)
+    conflicts = json.loads(candidate.conflicts_json)
+    assignment.selection_reason = (
+        "人工确认接受候选冲突：" + "；".join(conflicts)
+        if conflicts
+        else "人工确认接受低相关候选"
+        if candidate.status != "QUALIFIED"
+        else _selection_reason(candidate.selection_stage)
+    )
     assignment.is_fallback = candidate.is_fallback
     assignment.updated_at = now
-    scene.status = "assigned"
+    _, covered_ms = timeline_composer.reflow_scene_assignments(session, scene, assignments)
+    scene_duration_ms = scene.end_ms - scene.start_ms
+    scene.status = "assigned" if covered_ms >= scene_duration_ms else "partially_assigned"
     scene.updated_at = now
     session.add(assignment)
     session.add(scene)
@@ -266,7 +341,103 @@ def assign_candidate(
         "selection_stage": assignment.selection_stage,
         "selection_reason": assignment.selection_reason,
         "is_fallback": assignment.is_fallback,
+        "sequence_index": assignment.sequence_index,
+        "scene_offset_start_ms": assignment.scene_offset_start_ms,
+        "scene_offset_end_ms": assignment.scene_offset_end_ms,
+        "coverage": _coverage_payload(covered_ms, scene_duration_ms),
     }
+
+
+def list_scene_assignments(session: Session, project_id: str, scene_id: str) -> dict:
+    scene = _require_scene(session, project_id, scene_id)
+    assignments, covered_ms = timeline_composer.reflow_scene_assignments(session, scene)
+    session.commit()
+    coverage = _coverage_payload(covered_ms, scene.end_ms - scene.start_ms)
+    coverage["review_required"] = any(not item.manual_confirmed for item in assignments)
+    return {
+        "assignments": [_serialize_assignment(session, item) for item in assignments],
+        "coverage": coverage,
+    }
+
+
+def list_project_assignment_coverage(session: Session, project_id: str) -> dict:
+    scenes = list(
+        session.exec(
+            select(VisualScene)
+            .where(VisualScene.project_id == project_id)
+            .order_by(VisualScene.scene_index)
+        ).all()
+    )
+    coverage = {}
+    for scene in scenes:
+        _, covered_ms = timeline_composer.reflow_scene_assignments(session, scene)
+        duration_ms = scene.end_ms - scene.start_ms
+        scene.status = "assigned" if covered_ms >= duration_ms else "partially_assigned" if covered_ms else "generated"
+        session.add(scene)
+        item_coverage = _coverage_payload(covered_ms, duration_ms)
+        scene_assignments = timeline_composer.scene_assignments(session, scene.id)
+        item_coverage["review_required"] = any(
+            not item.manual_confirmed for item in scene_assignments
+        )
+        coverage[scene.id] = item_coverage
+    session.commit()
+    return {"scenes": coverage}
+
+
+def delete_scene_assignment(
+    session: Session, project_id: str, scene_id: str, assignment_id: str
+) -> dict:
+    scene = _require_scene(session, project_id, scene_id)
+    assignment = session.get(SceneAssignment, assignment_id)
+    if not assignment or assignment.scene_id != scene.id or assignment.project_id != project_id:
+        raise ValueError("镜头轨道指派不存在")
+    session.delete(assignment)
+    session.flush()
+    assignments, covered_ms = timeline_composer.reflow_scene_assignments(session, scene)
+    duration_ms = scene.end_ms - scene.start_ms
+    scene.status = "assigned" if covered_ms >= duration_ms else "partially_assigned" if assignments else "generated"
+    session.add(scene)
+    session.commit()
+    return list_scene_assignments(session, project_id, scene_id)
+
+
+def reorder_scene_assignments(
+    session: Session, project_id: str, scene_id: str, assignment_ids: list[str]
+) -> dict:
+    scene = _require_scene(session, project_id, scene_id)
+    assignments = timeline_composer.scene_assignments(session, scene.id)
+    by_id = {item.id: item for item in assignments}
+    if set(assignment_ids) != set(by_id):
+        raise ValueError("排序列表必须完整包含当前场景的全部镜头")
+    for index, assignment_id in enumerate(assignment_ids, start=1):
+        by_id[assignment_id].sequence_index = -index
+        session.add(by_id[assignment_id])
+    session.flush()
+    ordered = [by_id[assignment_id] for assignment_id in assignment_ids]
+    _, covered_ms = timeline_composer.reflow_scene_assignments(session, scene, ordered)
+    duration_ms = scene.end_ms - scene.start_ms
+    scene.status = "assigned" if covered_ms >= duration_ms else "partially_assigned"
+    session.add(scene)
+    session.commit()
+    return list_scene_assignments(session, project_id, scene_id)
+
+
+def confirm_scene_fallback_assignments(
+    session: Session, project_id: str, scene_id: str
+) -> dict:
+    scene = _require_scene(session, project_id, scene_id)
+    assignments = timeline_composer.scene_assignments(session, scene.id)
+    confirmed = 0
+    for assignment in assignments:
+        if assignment.selection_reason.startswith("系统自动兜底") and not assignment.manual_confirmed:
+            assignment.manual_confirmed = True
+            assignment.selection_reason += "；人工复核通过"
+            session.add(assignment)
+            confirmed += 1
+    if not confirmed:
+        raise ValueError("当前场景没有等待确认的自动兜底镜头")
+    session.commit()
+    return list_scene_assignments(session, project_id, scene_id)
 
 
 def _append_fallback_candidates(
@@ -370,6 +541,7 @@ def _validate_candidate_role(
     expected_role = {
         "local_semantic": LIBRARY_ROLE_SEMANTIC,
         "remote_semantic": LIBRARY_ROLE_SEMANTIC,
+        "manual_upload": LIBRARY_ROLE_SEMANTIC,
         LIBRARY_ROLE_THEMED_FALLBACK: LIBRARY_ROLE_THEMED_FALLBACK,
         LIBRARY_ROLE_LANDSCAPE_FALLBACK: LIBRARY_ROLE_LANDSCAPE_FALLBACK,
     }.get(candidate.selection_stage)
@@ -515,4 +687,46 @@ def _serialize_candidate(
             "fallback_category": media_file.fallback_category,
             "mood": media_file.mood,
         },
+    }
+
+
+def _serialize_assignment(session: Session, assignment: SceneAssignment) -> dict:
+    shot = session.get(MediaShot, assignment.media_shot_id)
+    media_file = session.get(MediaFile, shot.media_file_id) if shot else None
+    if not shot or not media_file:
+        raise ValueError("镜头轨道包含不存在的素材")
+    return {
+        "id": assignment.id,
+        "candidate_id": assignment.candidate_id,
+        "media_shot_id": assignment.media_shot_id,
+        "sequence_index": assignment.sequence_index,
+        "scene_offset_start_ms": assignment.scene_offset_start_ms,
+        "scene_offset_end_ms": assignment.scene_offset_end_ms,
+        "trim_start_ms": assignment.trim_start_ms,
+        "trim_end_ms": assignment.trim_end_ms,
+        "playback_speed": assignment.playback_speed,
+        "transition": assignment.transition,
+        "manual_confirmed": assignment.manual_confirmed,
+        "selection_stage": assignment.selection_stage,
+        "selection_reason": assignment.selection_reason,
+        "is_fallback": assignment.is_fallback,
+        "shot": serialize_shot(session, shot),
+        "media": {
+            "id": media_file.id,
+            "filename": media_file.filename,
+            "media_type": media_file.media_type,
+            "duration_ms": media_file.duration_ms,
+            "width": media_file.width,
+            "height": media_file.height,
+            "provider": media_file.provider,
+        },
+    }
+
+
+def _coverage_payload(covered_ms: int, duration_ms: int) -> dict:
+    return {
+        "covered_ms": covered_ms,
+        "duration_ms": duration_ms,
+        "remaining_ms": max(0, duration_ms - covered_ms),
+        "complete": covered_ms >= duration_ms,
     }

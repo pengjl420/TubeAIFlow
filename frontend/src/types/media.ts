@@ -63,7 +63,7 @@ export interface SceneCandidate {
     total: number
   }
   status: 'NO_RESULT' | 'LOW_RELEVANCE' | 'QUALIFIED' | 'FALLBACK_REQUIRED'
-  selection_stage: 'local_semantic' | 'remote_semantic' | 'themed_fallback' | 'landscape_fallback'
+  selection_stage: 'local_semantic' | 'remote_semantic' | 'themed_fallback' | 'landscape_fallback' | 'manual_upload'
   is_fallback: boolean
   conflicts: string[]
   retrieval: {
@@ -105,4 +105,51 @@ export interface SceneSearchResult {
     downloaded: string[]
     errors: Array<{ asset_id: string; error: string }>
   }>
+  auto_fallback?: {
+    selected_assignment_ids: string[]
+    covered_ms: number
+    remaining_ms: number
+    complete: boolean
+    ratio_threshold_exceeded: boolean
+  }
+}
+
+export interface SceneCoverage {
+  covered_ms: number
+  duration_ms: number
+  remaining_ms: number
+  complete: boolean
+  review_required: boolean
+}
+
+export interface SceneAssignment {
+  id: string
+  candidate_id: string | null
+  media_shot_id: string
+  sequence_index: number
+  scene_offset_start_ms: number
+  scene_offset_end_ms: number
+  trim_start_ms: number
+  trim_end_ms: number | null
+  playback_speed: number
+  transition: string
+  manual_confirmed: boolean
+  selection_stage: SceneCandidate['selection_stage'] | 'manual'
+  selection_reason: string
+  is_fallback: boolean
+  shot: MediaShot
+  media: {
+    id: string
+    filename: string
+    media_type: 'video' | 'image'
+    duration_ms: number | null
+    width: number | null
+    height: number | null
+    provider: string
+  }
+}
+
+export interface SceneAssignmentTrack {
+  assignments: SceneAssignment[]
+  coverage: SceneCoverage
 }

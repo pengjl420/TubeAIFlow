@@ -1926,6 +1926,37 @@ main {
 .candidate-review-panel { display: grid; gap: 14px; min-width: 0; }
 .selected-scene-query { display: grid; gap: 13px; }
 .selected-scene-query h2 { font-size: 18px; }
+.scene-media-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.visually-hidden-file { height: 1px; opacity: 0; overflow: hidden; position: absolute; width: 1px; }
+.scene-shot-track { display: grid; gap: 12px; }
+.scene-shot-track h2 { font-size: 18px; }
+.coverage-meter { background: var(--warning-soft); border-radius: 999px; height: 9px; overflow: hidden; }
+.coverage-meter > span { background: var(--warning); display: block; height: 100%; transition: width 180ms ease; }
+.coverage-meter.is-complete > span { background: var(--success); }
+.track-guidance { color: var(--ink-soft); font-size: 12px; margin: 0; }
+.track-guidance.is-complete { color: var(--success); }
+.auto-fallback-review { align-items: center; background: var(--warning-soft); border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent); border-radius: 10px; display: flex; gap: 12px; justify-content: space-between; padding: 11px 12px; }
+.auto-fallback-review p { color: var(--warning); font-size: 12px; margin: 0; }
+.shot-track-list { display: grid; gap: 8px; }
+.shot-track-item {
+  align-items: center;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 86px 28px minmax(0, 1fr) auto;
+  padding: 8px;
+}
+.shot-track-item > img { aspect-ratio: 16 / 9; border-radius: 6px; object-fit: cover; width: 86px; }
+.shot-track-item.is-auto-fallback { border-color: color-mix(in srgb, var(--warning) 42%, var(--line)); }
+.shot-track-index { align-items: center; background: var(--teal-soft); border-radius: 50%; color: var(--teal); display: flex; font-size: 11px; font-weight: 800; height: 26px; justify-content: center; width: 26px; }
+.shot-track-copy { display: grid; gap: 4px; min-width: 0; }
+.shot-track-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shot-track-copy small { color: var(--ink-soft); }
+.auto-fallback-badge { color: var(--warning); font-size: 10px; font-weight: 800; }
+.shot-track-actions { display: flex; flex-wrap: wrap; gap: 5px; justify-content: flex-end; }
+.track-empty { border: 1px dashed var(--line); border-radius: 10px; color: var(--ink-soft); font-size: 12px; padding: 18px; text-align: center; }
 .candidate-empty { min-height: 260px; }
 .candidate-grid { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .candidate-card { overflow: hidden; padding: 0; }
@@ -1958,6 +1989,7 @@ main {
 .candidate-conflicts span { background: var(--warning-soft); border-radius: 6px; color: var(--warning); font-size: 10px; padding: 5px 7px; }
 .candidate-meta { color: var(--ink-soft); display: flex; flex-wrap: wrap; font-size: 10px; gap: 10px; }
 .candidate-assign { width: 100%; }
+.conflict-override-button { border-color: var(--warning); color: var(--warning); }
 .media-library-title { margin-top: 6px; }
 .asset-index-grid { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .asset-index-head { align-items: center; display: flex; gap: 12px; justify-content: space-between; }

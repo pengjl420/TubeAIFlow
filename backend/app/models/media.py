@@ -99,6 +99,9 @@ class SceneAssignment(SQLModel, table=True):
     scene_id: str = Field(index=True)
     media_shot_id: str = Field(index=True)
     candidate_id: str | None = Field(default=None, index=True)
+    sequence_index: int = Field(default=1, index=True)
+    scene_offset_start_ms: int = 0
+    scene_offset_end_ms: int | None = None
     trim_start_ms: int = 0
     trim_end_ms: int | None = None
     playback_speed: float = 1.0

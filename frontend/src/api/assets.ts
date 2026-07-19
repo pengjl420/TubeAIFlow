@@ -5,6 +5,8 @@ import type {
   MediaAsset,
   ReviewStatus,
   SceneCandidate,
+  SceneAssignmentTrack,
+  SceneCoverage,
   SceneSearchResult,
 } from '../types/media'
 
@@ -125,10 +127,69 @@ export async function assignSceneCandidate(
   projectId: string,
   sceneId: string,
   candidateId: string,
+  manualOverride = false,
+  append = false,
 ): Promise<{ id: string; candidate_id: string; media_shot_id: string }> {
   return unwrap(await apiClient.post(
     `/projects/${projectId}/storyboard/scenes/${encodeURIComponent(sceneId)}/assign`,
-    { candidate_id: candidateId },
+    { candidate_id: candidateId, manual_override: manualOverride, append },
+  ))
+}
+
+export async function listSceneAssignments(projectId: string, sceneId: string): Promise<SceneAssignmentTrack> {
+  return unwrap(await apiClient.get(
+    `/projects/${projectId}/storyboard/scenes/${encodeURIComponent(sceneId)}/assignments`,
+  ))
+}
+
+export async function getProjectAssignmentCoverage(projectId: string): Promise<Record<string, SceneCoverage>> {
+  const result = unwrap<{ scenes: Record<string, SceneCoverage> }>(await apiClient.get(
+    `/projects/${projectId}/storyboard/assignments/coverage`,
+  ))
+  return result.scenes
+}
+
+export async function deleteSceneAssignment(
+  projectId: string,
+  sceneId: string,
+  assignmentId: string,
+): Promise<SceneAssignmentTrack> {
+  return unwrap(await apiClient.delete(
+    `/projects/${projectId}/storyboard/scenes/${encodeURIComponent(sceneId)}/assignments/${encodeURIComponent(assignmentId)}`,
+  ))
+}
+
+export async function reorderSceneAssignments(
+  projectId: string,
+  sceneId: string,
+  assignmentIds: string[],
+): Promise<SceneAssignmentTrack> {
+  return unwrap(await apiClient.put(
+    `/projects/${projectId}/storyboard/scenes/${encodeURIComponent(sceneId)}/assignments/order`,
+    { assignment_ids: assignmentIds },
+  ))
+}
+
+export async function confirmSceneFallbackAssignments(
+  projectId: string,
+  sceneId: string,
+): Promise<SceneAssignmentTrack> {
+  return unwrap(await apiClient.post(
+    `/projects/${projectId}/storyboard/scenes/${encodeURIComponent(sceneId)}/assignments/confirm-fallback`,
+  ))
+}
+
+export async function uploadSceneAsset(
+  projectId: string,
+  sceneId: string,
+  file: File,
+): Promise<{ asset: MediaAsset; candidates: SceneCandidate[]; ingestion_errors: Array<{ shot_id: string; error: string }> }> {
+  const form = new FormData()
+  form.append('file', file)
+  return unwrap(await apiClient.post(
+    `/projects/${projectId}/storyboard/scenes/${encodeURIComponent(sceneId)}/upload`,
+    form,
+    { timeout: 0 },
   ))
 }
 

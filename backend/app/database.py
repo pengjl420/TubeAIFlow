@@ -252,6 +252,15 @@ def _apply_migrations() -> None:
             "ALTER TABLE scene_assignments ADD COLUMN is_fallback BOOLEAN NOT NULL DEFAULT 0",
             "CREATE INDEX IF NOT EXISTS ix_scene_assignments_selection_stage ON scene_assignments (selection_stage)",
         ],
+        9: [
+            "DROP INDEX IF EXISTS uq_scene_assignments_scene_id",
+            "ALTER TABLE scene_assignments ADD COLUMN sequence_index INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE scene_assignments ADD COLUMN scene_offset_start_ms INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE scene_assignments ADD COLUMN scene_offset_end_ms INTEGER",
+            "CREATE INDEX IF NOT EXISTS ix_scene_assignments_sequence_index ON scene_assignments (sequence_index)",
+            "CREATE INDEX IF NOT EXISTS ix_scene_assignments_scene_sequence "
+            "ON scene_assignments (scene_id, sequence_index)",
+        ],
     }
     with engine.begin() as connection:
         connection.exec_driver_sql(

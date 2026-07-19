@@ -10,7 +10,7 @@ from app.models.media import MediaFile, MediaShot, SceneAssignment
 from app.models.project import Project
 from app.models.storyboard import SubtitleCue, VisualScene
 from app.services.quality import qa_service
-from app.services.rendering import scene_renderer
+from app.services.rendering import scene_renderer, timeline_composer
 from app.workflows import video_synthesis
 
 
@@ -116,6 +116,108 @@ class IntelligentVideoPipelineTests(unittest.TestCase):
             args = ffmpeg.call_args.args[0]
             self.assertEqual(args[args.index("-c:v") + 1], "libx264")
             self.assertIn("1920:1080", args[args.index("-filter_complex") + 1])
+
+    def test_manual_upload_assignment_uses_semantic_media_role(self) -> None:
+        media_file = MediaFile(
+            id="manual-media",
+            path=str(self.root / "manual.mp4"),
+            filename="manual.mp4",
+            media_type="video",
+            file_hash="manual-hash",
+            library_role="semantic",
+        )
+        shot = MediaShot(
+            id="manual-shot",
+            media_file_id=media_file.id,
+            shot_index=1,
+            library_role="semantic",
+        )
+        assignment = SceneAssignment(
+            id="manual-assignment",
+            project_id="project-1",
+            scene_id="scene-1",
+            media_shot_id=shot.id,
+            selection_stage="manual_upload",
+        )
+
+        scene_renderer.validate_semantic_assignment(assignment, shot, media_file)
+
+    def test_two_short_shots_cover_and_render_one_scene(self) -> None:
+        with Session(self.engine) as session:
+            project, scene = self._project_with_scene(session)
+            scene.end_ms = 10_000
+            session.add(scene)
+            clips = []
+            for index in (1, 2):
+                source = self.root / f"source-{index}.mp4"
+                source.write_bytes(b"video")
+                media = MediaFile(
+                    id=f"media-{index}",
+                    path=str(source),
+                    filename=source.name,
+                    media_type="video",
+                    file_hash=f"hash-{index}",
+                    duration_ms=5_000,
+                    width=1920,
+                    height=1080,
+                )
+                shot = MediaShot(
+                    id=f"shot-{index}",
+                    media_file_id=media.id,
+                    shot_index=1,
+                    start_ms=0,
+                    end_ms=5_000,
+                )
+                assignment = SceneAssignment(
+                    id=f"assignment-{index}",
+                    project_id=project.id,
+                    scene_id=scene.id,
+                    media_shot_id=shot.id,
+                    sequence_index=index,
+                )
+                session.add_all([media, shot, assignment])
+                clips.append(assignment)
+            session.commit()
+            settings = SimpleNamespace(workspace_dir=self.root)
+
+            def fake_ffmpeg(args, _project_id):
+                Path(args[-1]).write_bytes(b"mp4")
+
+            with (
+                patch.object(scene_renderer, "get_settings", return_value=settings),
+                patch.object(scene_renderer, "run_ffmpeg", side_effect=fake_ffmpeg) as ffmpeg,
+                patch.object(scene_renderer, "probe_duration", return_value=10.0),
+            ):
+                scene_renderer.render_scene(session, project, scene, clips)
+
+            coverage = timeline_composer.scene_coverage(session, scene)
+            args = ffmpeg.call_args.args[0]
+            self.assertTrue(coverage["complete"])
+            self.assertEqual(args.count("-i"), 2)
+            self.assertIn("concat=n=2:v=1:a=0", args[args.index("-filter_complex") + 1])
+
+    def test_small_duration_gap_uses_only_mild_slowdown(self) -> None:
+        with Session(self.engine) as session:
+            project, scene = self._project_with_scene(session)
+            scene.end_ms = 11_000
+            session.add(scene)
+            media, shot = self._media(session)
+            media.duration_ms = 10_000
+            shot.end_ms = 10_000
+            assignment = SceneAssignment(
+                id="slow-assignment",
+                project_id=project.id,
+                scene_id=scene.id,
+                media_shot_id=shot.id,
+            )
+            session.add_all([media, shot, assignment])
+            session.commit()
+
+            coverage = timeline_composer.scene_coverage(session, scene)
+
+            self.assertTrue(coverage["complete"])
+            self.assertGreaterEqual(assignment.playback_speed, 0.85)
+            self.assertAlmostEqual(assignment.playback_speed, 10 / 11, places=3)
 
     def test_qa_report_passes_for_continuous_complete_timeline(self) -> None:
         source = self.root / "source.mp4"

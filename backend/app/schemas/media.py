@@ -51,10 +51,22 @@ class AssetBatchDeleteRequest(BaseModel):
 
 class SceneAssignmentRequest(BaseModel):
     candidate_id: str = Field(min_length=1)
+    manual_override: bool = False
+    append: bool = False
     trim_start_ms: int = Field(default=0, ge=0)
     trim_end_ms: int | None = Field(default=None, gt=0)
     playback_speed: float = Field(default=1.0, ge=0.5, le=2.0)
     transition: str = Field(default="cut", min_length=1, max_length=30)
+
+
+class SceneAssignmentReorderRequest(BaseModel):
+    assignment_ids: list[str] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def unique_assignment_ids(self):
+        if len(set(self.assignment_ids)) != len(self.assignment_ids):
+            raise ValueError("镜头轨道中不能包含重复指派")
+        return self
 
 
 class RemoteMediaCandidate(BaseModel):

@@ -5,17 +5,23 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   assetPreviewUrl,
   assignSceneCandidate,
+  confirmSceneFallbackAssignments,
+  deleteSceneAssignment,
+  getProjectAssignmentCoverage,
   importAssets,
   ingestAsset,
   listAssets,
   listSceneCandidates,
+  listSceneAssignments,
+  reorderSceneAssignments,
   searchSceneCandidates,
   updateAsset,
+  uploadSceneAsset,
 } from '../../api/assets'
 import { getProject, selectDirectory } from '../../api/projects'
 import { getStoryboard } from '../../api/storyboard'
 import { startVideoWorkflow } from '../../api/tasks'
-import type { LibraryRole, MediaAsset, SceneCandidate } from '../../types/media'
+import type { LibraryRole, MediaAsset, SceneAssignment, SceneCandidate, SceneCoverage } from '../../types/media'
 import type { Project } from '../../types/project'
 import type { VisualScene } from '../../types/storyboard'
 import { formatDuration } from '../../utils/time'
@@ -27,6 +33,8 @@ const project = ref<Project | null>(null)
 const scenes = ref<VisualScene[]>([])
 const assets = ref<MediaAsset[]>([])
 const candidates = ref<SceneCandidate[]>([])
+const assignments = ref<SceneAssignment[]>([])
+const coverageByScene = ref<Record<string, SceneCoverage>>({})
 const selectedSceneId = ref('')
 const importDirectory = ref('')
 const importRole = ref<LibraryRole>('semantic')
@@ -39,6 +47,10 @@ const importing = ref(false)
 const indexingId = ref('')
 const updatingId = ref('')
 const assigningId = ref('')
+const editingTrack = ref(false)
+const confirmingFallback = ref(false)
+const uploadInput = ref<HTMLInputElement | null>(null)
+const uploadingSceneAsset = ref(false)
 const continuing = ref(false)
 const message = ref('')
 const error = ref('')
@@ -46,7 +58,17 @@ const error = ref('')
 const selectedScene = computed(() => scenes.value.find((scene) => scene.id === selectedSceneId.value) || null)
 const indexedShotCount = computed(() => assets.value.flatMap((asset) => asset.shots).filter((shot) => shot.vector_id !== null).length)
 const keyframeCount = computed(() => assets.value.flatMap((asset) => asset.shots).reduce((sum, shot) => sum + shot.keyframes.length, 0))
-const assignedCount = computed(() => scenes.value.filter((scene) => scene.status === 'assigned' || scene.status === 'rendered').length)
+const selectedCoverage = computed<SceneCoverage>(() => coverageByScene.value[selectedSceneId.value] || {
+  covered_ms: 0,
+  duration_ms: selectedScene.value ? selectedScene.value.end_ms - selectedScene.value.start_ms : 0,
+  remaining_ms: selectedScene.value ? selectedScene.value.end_ms - selectedScene.value.start_ms : 0,
+  complete: false,
+  review_required: false,
+})
+const assignedCount = computed(() => scenes.value.filter((scene) => {
+  const coverage = coverageByScene.value[scene.id]
+  return coverage?.complete && !coverage.review_required
+}).length)
 const reviewComplete = computed(() => scenes.value.length > 0 && assignedCount.value === scenes.value.length)
 const filteredAssets = computed(() => roleFilter.value === 'all'
   ? assets.value
@@ -56,14 +78,16 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [loadedProject, loadedScenes, loadedAssets] = await Promise.all([
+    const [loadedProject, loadedScenes, loadedAssets, loadedCoverage] = await Promise.all([
       getProject(projectId),
       getStoryboard(projectId),
       listAssets(),
+      getProjectAssignmentCoverage(projectId),
     ])
     project.value = loadedProject
     scenes.value = loadedScenes
     assets.value = loadedAssets
+    coverageByScene.value = loadedCoverage
     if (loadedScenes.length) await selectScene(loadedScenes[0].id)
   } catch (err) {
     error.value = err instanceof Error ? err.message : '素材审核工作区加载失败'
@@ -75,9 +99,16 @@ async function load() {
 async function selectScene(sceneId: string) {
   selectedSceneId.value = sceneId
   candidates.value = []
+  assignments.value = []
   error.value = ''
   try {
-    candidates.value = await listSceneCandidates(projectId, sceneId)
+    const [loadedCandidates, track] = await Promise.all([
+      listSceneCandidates(projectId, sceneId),
+      listSceneAssignments(projectId, sceneId),
+    ])
+    candidates.value = loadedCandidates
+    assignments.value = track.assignments
+    coverageByScene.value = { ...coverageByScene.value, [sceneId]: track.coverage }
   } catch (err) {
     error.value = err instanceof Error ? err.message : '候选素材加载失败'
   }
@@ -192,6 +223,7 @@ function selectionStageLabel(stage: SceneCandidate['selection_stage']) {
     remote_semantic: '在线语义命中',
     themed_fallback: '主题兜底',
     landscape_fallback: '纯风景最终兜底',
+    manual_upload: '人工上传',
   }[stage]
 }
 
@@ -206,11 +238,15 @@ async function searchCandidates() {
   try {
     const result = await searchSceneCandidates(projectId, selectedScene.value.id)
     candidates.value = result.candidates
+    const track = await listSceneAssignments(projectId, selectedScene.value.id)
+    assignments.value = track.assignments
+    coverageByScene.value = { ...coverageByScene.value, [selectedScene.value.id]: track.coverage }
     const onlineProviders = (result.online_search || [])
       .filter((item) => item.downloaded.length)
       .map((item) => item.provider === 'pexels' ? 'Pexels' : 'Pixabay')
+    const autoCount = result.auto_fallback?.selected_assignment_ids.length || 0
     message.value = result.candidates.length
-      ? `已完成素材检索，返回 ${result.candidates.length} 个候选${onlineProviders.length ? `（已补充 ${onlineProviders.join('、')} 素材）` : ''}`
+      ? `已完成素材检索，返回 ${result.candidates.length} 个候选${onlineProviders.length ? `（已补充 ${onlineProviders.join('、')} 素材）` : ''}${autoCount ? `；已自动添加 ${autoCount} 个兜底镜头` : ''}`
       : '本地与已配置的在线平台均没有可用候选'
   } catch (err) {
     error.value = err instanceof Error ? err.message : '素材检索失败'
@@ -221,16 +257,110 @@ async function searchCandidates() {
 
 async function assign(candidate: SceneCandidate) {
   if (!selectedScene.value) return
+  const manualOverride = candidate.status !== 'QUALIFIED'
+  if (manualOverride && !window.confirm(`该候选存在冲突或相关度不足：\n${candidate.conflicts.join('\n') || '系统评分未达到自动使用标准'}\n\n是否仍由你人工确认使用？`)) {
+    return
+  }
   assigningId.value = candidate.id
   error.value = ''
   try {
-    await assignSceneCandidate(projectId, selectedScene.value.id, candidate.id)
-    selectedScene.value.status = 'assigned'
-    message.value = `场景 ${String(selectedScene.value.scene_index).padStart(2, '0')} 已确认使用 ${candidate.media.filename}`
+    await assignSceneCandidate(projectId, selectedScene.value.id, candidate.id, manualOverride, true)
+    const track = await listSceneAssignments(projectId, selectedScene.value.id)
+    assignments.value = track.assignments
+    coverageByScene.value = { ...coverageByScene.value, [selectedScene.value.id]: track.coverage }
+    selectedScene.value.status = track.coverage.complete ? 'assigned' : 'partially_assigned'
+    message.value = track.coverage.complete
+      ? `场景 ${String(selectedScene.value.scene_index).padStart(2, '0')} 的镜头轨道已覆盖完整`
+      : `已添加 ${candidate.media.filename}，还需要 ${formatMilliseconds(track.coverage.remaining_ms)}`
   } catch (err) {
     error.value = err instanceof Error ? err.message : '确认素材失败'
   } finally {
     assigningId.value = ''
+  }
+}
+
+async function removeTrackItem(assignment: SceneAssignment) {
+  if (!selectedScene.value) return
+  editingTrack.value = true
+  error.value = ''
+  try {
+    const track = await deleteSceneAssignment(projectId, selectedScene.value.id, assignment.id)
+    assignments.value = track.assignments
+    coverageByScene.value = { ...coverageByScene.value, [selectedScene.value.id]: track.coverage }
+    selectedScene.value.status = track.coverage.complete ? 'assigned' : track.assignments.length ? 'partially_assigned' : 'generated'
+    message.value = `已移除 ${assignment.media.filename}，当前覆盖 ${formatMilliseconds(track.coverage.covered_ms)}`
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '移除镜头失败'
+  } finally {
+    editingTrack.value = false
+  }
+}
+
+async function moveTrackItem(index: number, direction: -1 | 1) {
+  if (!selectedScene.value) return
+  const target = index + direction
+  if (target < 0 || target >= assignments.value.length) return
+  const ids = assignments.value.map((item) => item.id)
+  ;[ids[index], ids[target]] = [ids[target], ids[index]]
+  editingTrack.value = true
+  error.value = ''
+  try {
+    const track = await reorderSceneAssignments(projectId, selectedScene.value.id, ids)
+    assignments.value = track.assignments
+    coverageByScene.value = { ...coverageByScene.value, [selectedScene.value.id]: track.coverage }
+    message.value = '镜头顺序已更新'
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '镜头排序失败'
+  } finally {
+    editingTrack.value = false
+  }
+}
+
+async function confirmFallbackTrack() {
+  if (!selectedScene.value) return
+  confirmingFallback.value = true
+  error.value = ''
+  try {
+    const track = await confirmSceneFallbackAssignments(projectId, selectedScene.value.id)
+    assignments.value = track.assignments
+    coverageByScene.value = { ...coverageByScene.value, [selectedScene.value.id]: track.coverage }
+    selectedScene.value.status = track.coverage.complete ? 'assigned' : 'partially_assigned'
+    message.value = '本场景的自动兜底镜头已通过人工复核'
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '自动兜底确认失败'
+  } finally {
+    confirmingFallback.value = false
+  }
+}
+
+function chooseSceneAsset() {
+  uploadInput.value?.click()
+}
+
+async function uploadReplacement(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file || !selectedScene.value) return
+  uploadingSceneAsset.value = true
+  error.value = ''
+  message.value = `正在上传并处理 ${file.name}…`
+  try {
+    const result = await uploadSceneAsset(projectId, selectedScene.value.id, file)
+    const uploadedIds = new Set(result.candidates.map((candidate) => candidate.id))
+    candidates.value = [
+      ...result.candidates,
+      ...candidates.value.filter((candidate) => !uploadedIds.has(candidate.id)),
+    ]
+    assets.value = await listAssets()
+    message.value = result.ingestion_errors.length
+      ? `${file.name} 已加入候选，但有 ${result.ingestion_errors.length} 个镜头处理失败`
+      : `${file.name} 已处理完成，请在下方选择要使用的镜头`
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '替换素材上传失败'
+    message.value = ''
+  } finally {
+    uploadingSceneAsset.value = false
+    input.value = ''
   }
 }
 
@@ -257,6 +387,10 @@ function percent(value: number) {
 
 function formatMilliseconds(value: number | null) {
   return formatDuration((value || 0) / 1000)
+}
+
+function isCandidateAssigned(candidate: SceneCandidate) {
+  return assignments.value.some((assignment) => assignment.candidate_id === candidate.id)
 }
 
 onMounted(load)
@@ -334,7 +468,13 @@ onMounted(load)
           @click="selectScene(scene.id)"
         >
           <span class="scene-index">{{ String(scene.scene_index).padStart(2, '0') }}</span>
-          <span><strong>{{ scene.storyboard?.visual_summary || scene.narration }}</strong><small>{{ formatMilliseconds(scene.end_ms - scene.start_ms) }} · {{ scene.status }}</small></span>
+          <span>
+            <strong>{{ scene.storyboard?.visual_summary || scene.narration }}</strong>
+            <small>
+              {{ formatMilliseconds(scene.end_ms - scene.start_ms) }} ·
+              {{ coverageByScene[scene.id]?.review_required ? '自动兜底待复核' : coverageByScene[scene.id]?.complete ? '轨道完整' : `已覆盖 ${formatMilliseconds(coverageByScene[scene.id]?.covered_ms || 0)}` }}
+            </small>
+          </span>
         </button>
       </aside>
 
@@ -342,15 +482,78 @@ onMounted(load)
         <article v-if="selectedScene" class="panel selected-scene-query">
           <div class="section-head">
             <div><span class="section-eyebrow">VECTOR QUERY</span><h2>{{ selectedScene.storyboard?.visual_summary || '待生成视觉查询' }}</h2></div>
-            <button class="primary-button" :disabled="searching || !selectedScene.storyboard" @click="searchCandidates">
-              {{ searching ? '正在检索素材…' : '检索素材' }}
-            </button>
+            <div class="scene-media-actions">
+              <input
+                ref="uploadInput"
+                class="visually-hidden-file"
+                type="file"
+                accept="video/mp4,video/quicktime,video/x-matroska,video/webm,video/x-msvideo,image/jpeg,image/png,image/webp,image/bmp,.m4v"
+                @change="uploadReplacement"
+              />
+              <button class="secondary-button" :disabled="uploadingSceneAsset" @click="chooseSceneAsset">
+                {{ uploadingSceneAsset ? '正在上传并处理…' : '上传替换素材' }}
+              </button>
+              <button class="primary-button" :disabled="searching || !selectedScene.storyboard" @click="searchCandidates">
+                {{ searching ? '正在检索素材…' : '检索素材' }}
+              </button>
+            </div>
           </div>
           <p class="scene-narration">{{ selectedScene.narration }}</p>
           <div v-if="selectedScene.storyboard" class="query-tags">
             <span>{{ selectedScene.storyboard.primary_query }}</span>
             <span v-for="query in selectedScene.storyboard.alternative_queries" :key="query">{{ query }}</span>
           </div>
+        </article>
+
+        <article v-if="selectedScene" class="panel scene-shot-track">
+          <div class="section-head">
+            <div>
+              <span class="section-eyebrow">SHOT TRACK</span>
+              <h2>场景镜头轨道</h2>
+            </div>
+            <span class="status-pill" :class="selectedCoverage.complete && !selectedCoverage.review_required ? 'is-success' : 'is-warning'">
+              {{ formatMilliseconds(selectedCoverage.covered_ms) }} / {{ formatMilliseconds(selectedCoverage.duration_ms) }}
+            </span>
+          </div>
+          <div class="coverage-meter" :class="{ 'is-complete': selectedCoverage.complete }">
+            <span :style="{ width: `${Math.min(100, selectedCoverage.duration_ms ? selectedCoverage.covered_ms / selectedCoverage.duration_ms * 100 : 0)}%` }"></span>
+          </div>
+          <div v-if="selectedCoverage.review_required" class="auto-fallback-review">
+            <p>
+              系统已自动添加兜底镜头。请检查内容相关性、重复情况与画面质量，再确认通过。
+              <template v-if="!selectedCoverage.complete">当前还缺 {{ formatMilliseconds(selectedCoverage.remaining_ms) }}。</template>
+            </p>
+            <button class="primary-button" :disabled="confirmingFallback" @click="confirmFallbackTrack">
+              {{ confirmingFallback ? '确认中…' : '确认本场景自动兜底' }}
+            </button>
+          </div>
+          <p v-else-if="!selectedCoverage.complete" class="track-guidance">
+            还缺 {{ formatMilliseconds(selectedCoverage.remaining_ms) }}。继续从候选区添加镜头；接近完整时系统最多自动降速到 0.85 倍。
+          </p>
+          <p v-else class="track-guidance is-complete">场景时长已经覆盖完整，可以继续审核其他场景。</p>
+          <div v-if="assignments.length" class="shot-track-list">
+            <div v-for="(assignment, index) in assignments" :key="assignment.id" class="shot-track-item" :class="{ 'is-auto-fallback': assignment.is_fallback && assignment.selection_reason.startsWith('系统自动兜底') }">
+              <img v-if="assignment.shot.thumbnail_url" :src="assetPreviewUrl(assignment.shot.thumbnail_url)" :alt="assignment.media.filename" />
+              <div class="shot-track-index">{{ index + 1 }}</div>
+              <div class="shot-track-copy">
+                <strong>{{ assignment.media.filename }} · #{{ assignment.shot.shot_index }}</strong>
+                <span v-if="assignment.is_fallback && assignment.selection_reason.startsWith('系统自动兜底')" class="auto-fallback-badge">
+                  自动兜底{{ assignment.manual_confirmed ? ' · 已复核' : ' · 待复核' }}
+                </span>
+                <small>
+                  {{ formatMilliseconds(assignment.scene_offset_start_ms) }}—{{ formatMilliseconds(assignment.scene_offset_end_ms) }}
+                  · {{ assignment.playback_speed.toFixed(2) }}×
+                </small>
+                <small :title="assignment.selection_reason">{{ assignment.selection_reason }}</small>
+              </div>
+              <div class="shot-track-actions">
+                <button class="mini-button" :disabled="editingTrack || index === 0" @click="moveTrackItem(index, -1)">上移</button>
+                <button class="mini-button" :disabled="editingTrack || index === assignments.length - 1" @click="moveTrackItem(index, 1)">下移</button>
+                <button class="mini-button danger" :disabled="editingTrack" @click="removeTrackItem(assignment)">移除</button>
+              </div>
+            </div>
+          </div>
+          <div v-else class="track-empty">尚未添加镜头，请从下方候选素材开始选择。</div>
         </article>
 
         <div v-if="selectedScene && !candidates.length" class="empty-state panel candidate-empty">
@@ -393,8 +596,13 @@ onMounted(load)
                 <span>{{ candidate.retrieval.vector_model || '未建立向量' }}</span>
                 <span>{{ selectionStageLabel(candidate.selection_stage) }}</span>
               </div>
-              <button class="primary-button candidate-assign" :disabled="candidate.status !== 'QUALIFIED' || assigningId === candidate.id" @click="assign(candidate)">
-                {{ assigningId === candidate.id ? '确认中…' : candidate.status === 'QUALIFIED' ? '确认使用此镜头' : '需人工处理冲突' }}
+              <button
+                class="candidate-assign"
+                :class="candidate.status === 'QUALIFIED' ? 'primary-button' : 'secondary-button conflict-override-button'"
+                :disabled="assigningId === candidate.id || selectedCoverage.complete || isCandidateAssigned(candidate)"
+                @click="assign(candidate)"
+              >
+                {{ assigningId === candidate.id ? '添加中…' : isCandidateAssigned(candidate) ? '已在镜头轨道中' : selectedCoverage.complete ? '场景轨道已完整' : candidate.status === 'QUALIFIED' ? '添加到镜头轨道' : '仍然使用并添加' }}
               </button>
             </div>
           </article>

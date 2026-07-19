@@ -56,6 +56,11 @@ class Settings(BaseModel):
     pixabay_api_key: str = ""
     media_search_cache_hours: int = Field(default=24, ge=24, le=168)
     media_search_download_limit: int = Field(default=3, ge=1, le=5)
+    auto_fallback_enabled: bool = True
+    auto_landscape_fallback_enabled: bool = False
+    auto_fallback_review_required: bool = True
+    auto_fallback_max_ratio_percent: int = Field(default=20, ge=0, le=100)
+    auto_fallback_max_consecutive_shots: int = Field(default=2, ge=1, le=5)
     vision_embedding_model_dir: Path | None = (
         DEFAULT_EMBEDDING_MODEL_DIR if DEFAULT_EMBEDDING_MODEL_DIR.is_dir() else None
     )

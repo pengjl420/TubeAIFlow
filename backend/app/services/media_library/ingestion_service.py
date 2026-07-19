@@ -127,6 +127,32 @@ def import_remote_asset(
     return media_file, True
 
 
+def import_uploaded_asset(session: Session, path: Path) -> tuple[MediaFile, bool]:
+    """Register one user-uploaded file in the global semantic media library."""
+    resolved = path.resolve()
+    if not resolved.is_file():
+        raise ValueError(f"上传素材不存在：{resolved}")
+    if resolved.suffix.lower() not in VIDEO_EXTENSIONS | IMAGE_EXTENSIONS:
+        raise ValueError("仅支持 MP4、MOV、MKV、WebM、AVI、M4V、JPG、PNG、WebP 或 BMP 素材")
+
+    file_hash = _sha256(resolved)
+    existing = session.exec(select(MediaFile).where(MediaFile.file_hash == file_hash)).first()
+    if existing:
+        return existing, False
+
+    media_file = _create_media_file(
+        resolved,
+        file_hash,
+        provider="manual_upload",
+        library_role=LIBRARY_ROLE_SEMANTIC,
+    )
+    session.add(media_file)
+    session.add_all(_create_shots(media_file))
+    session.commit()
+    session.refresh(media_file)
+    return media_file, True
+
+
 def list_assets(
     session: Session,
     limit: int = 200,

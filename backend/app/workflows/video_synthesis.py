@@ -2,12 +2,13 @@ from collections.abc import Callable
 from sqlmodel import Session, select
 
 from app.infrastructure import gpu_resource
-from app.models.media import LIBRARY_ROLE_SEMANTIC, SceneAssignment
+from app.models.media import LIBRARY_ROLE_SEMANTIC
 from app.models.project import Project
 from app.models.storyboard import SubtitleCue, VisualScene
 from app.services.media_library import ingestion_service, retrieval_service
 from app.services.quality import qa_service
 from app.services.rendering import final_renderer, scene_renderer
+from app.services.rendering import timeline_composer
 from app.services.storyboard import storyboard_service
 
 
@@ -95,16 +96,14 @@ def regenerate_storyboard(session: Session, project: Project) -> dict:
 
 def assignment_gap(session: Session, project_id: str) -> int:
     scenes = _scenes(session, project_id)
-    assigned_ids = {
-        item.scene_id
-        for item in session.exec(
-            select(SceneAssignment).where(
-                SceneAssignment.project_id == project_id,
-                SceneAssignment.manual_confirmed == True,  # noqa: E712
-            )
-        ).all()
-    }
-    return sum(scene.id not in assigned_ids for scene in scenes)
+    incomplete = 0
+    for scene in scenes:
+        coverage = timeline_composer.scene_coverage(session, scene)
+        if not coverage["complete"] or any(
+            not item.manual_confirmed for item in coverage["assignments"]
+        ):
+            incomplete += 1
+    return incomplete
 
 
 def has_subtitles(session: Session, project_id: str) -> bool:

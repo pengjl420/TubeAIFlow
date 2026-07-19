@@ -15,6 +15,7 @@ from app.models.media import MediaFile, MediaShot, SceneAssignment
 from app.models.project import Project
 from app.models.storyboard import SubtitleCue, VisualScene
 from app.services.rendering.scene_renderer import scene_output_path
+from app.services.rendering import timeline_composer
 
 
 MAX_DURATION_ERROR_SECONDS = 0.1
@@ -36,12 +37,14 @@ def run_quality_check(session: Session, project: Project) -> dict:
             .order_by(SubtitleCue.start_ms, SubtitleCue.cue_index)
         ).all()
     )
-    assignments = {
-        item.scene_id: item
-        for item in session.exec(
+    all_assignments = list(
+        session.exec(
             select(SceneAssignment).where(SceneAssignment.project_id == project.id)
         ).all()
-    }
+    )
+    assignments: dict[str, list[SceneAssignment]] = {}
+    for item in all_assignments:
+        assignments.setdefault(item.scene_id, []).append(item)
     _check_timeline(scenes, issues)
     audio_path = get_final_audio_path(project, get_settings().workspace_dir)
     video_path = get_final_video_path(project, get_settings().workspace_dir)
@@ -72,22 +75,24 @@ def run_quality_check(session: Session, project: Project) -> dict:
         _issue(issues, "subtitle_missing", "error", "项目 SRT 字幕文件不存在")
 
     for scene in scenes:
-        assignment = assignments.get(scene.id)
-        if not assignment or not assignment.manual_confirmed:
+        scene_assignments = assignments.get(scene.id, [])
+        coverage = timeline_composer.scene_coverage(session, scene)
+        if not coverage["complete"] or any(not item.manual_confirmed for item in scene_assignments):
             _issue(
                 issues,
                 "assignment_missing",
                 "error",
-                "场景尚未完成人工素材确认",
+                f"场景镜头轨道尚缺 {coverage['remaining_ms'] / 1000:.2f} 秒",
                 scene_id=scene.id,
             )
             continue
-        shot = session.get(MediaShot, assignment.media_shot_id)
-        media_file = session.get(MediaFile, shot.media_file_id) if shot else None
-        if not shot or not media_file:
-            _issue(issues, "source_missing", "error", "场景素材记录不完整", scene_id=scene.id)
-        elif not media_file.provider or not media_file.id or not media_file.path:
-            _issue(issues, "source_metadata_missing", "error", "素材来源信息不完整", scene_id=scene.id)
+        for assignment in scene_assignments:
+            shot = session.get(MediaShot, assignment.media_shot_id)
+            media_file = session.get(MediaFile, shot.media_file_id) if shot else None
+            if not shot or not media_file:
+                _issue(issues, "source_missing", "error", "场景素材记录不完整", scene_id=scene.id)
+            elif not media_file.provider or not media_file.id or not media_file.path:
+                _issue(issues, "source_metadata_missing", "error", "素材来源信息不完整", scene_id=scene.id)
         rendered_path = scene_output_path(project, scene)
         if not rendered_path.is_file():
             _issue(issues, "scene_render_missing", "error", "场景中间视频不存在", scene_id=scene.id)
@@ -122,7 +127,10 @@ def run_quality_check(session: Session, project: Project) -> dict:
         "passed": not any(item["severity"] == "error" for item in issues),
         "summary": {
             "scene_count": len(scenes),
-            "assignment_count": len(assignments),
+            "assignment_count": sum(
+                timeline_composer.scene_coverage(session, scene)["complete"] for scene in scenes
+            ),
+            "shot_assignment_count": len(all_assignments),
             "subtitle_count": len(cues),
             "error_count": sum(item["severity"] == "error" for item in issues),
             "warning_count": sum(item["severity"] == "warning" for item in issues),

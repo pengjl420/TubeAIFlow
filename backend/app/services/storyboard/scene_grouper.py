@@ -9,6 +9,7 @@ from app.schemas.storyboard import SceneGroupingResult
 GROUPING_PROMPT_VERSION = "visual-scene-grouping-v1"
 MAX_CUES_PER_REQUEST = 80
 MAX_CHARACTERS_PER_REQUEST = 12_000
+MAX_SCENE_DURATION_MS = 15_000
 
 
 def group_cues(cues: list[dict], client: DeepSeekClient) -> tuple[list[list[dict]], list[str]]:
@@ -17,10 +18,10 @@ def group_cues(cues: list[dict], client: DeepSeekClient) -> tuple[list[list[dict
     for chunk in _chunk_cues(cues):
         try:
             suggested_ids = _request_groups(chunk, client)
-            groups.extend(_materialize_groups(chunk, suggested_ids))
+            groups.extend(_split_long_groups(_materialize_groups(chunk, suggested_ids)))
         except (RuntimeError, ValueError, ValidationError) as exc:
             warnings.append(f"语义分组已回退到时长规则：{exc}")
-            groups.extend(_deterministic_groups(chunk))
+            groups.extend(_split_long_groups(_deterministic_groups(chunk)))
     return groups, warnings
 
 
@@ -77,6 +78,21 @@ def _deterministic_groups(cues: list[dict]) -> list[list[dict]]:
         else:
             groups.append(current)
     return groups
+
+
+def _split_long_groups(groups: list[list[dict]]) -> list[list[dict]]:
+    """Enforce a hard scene-duration ceiling without breaking subtitle cues."""
+    result: list[list[dict]] = []
+    for group in groups:
+        current: list[dict] = []
+        for cue in group:
+            if current and cue["end_ms"] - current[0]["start_ms"] > MAX_SCENE_DURATION_MS:
+                result.append(current)
+                current = []
+            current.append(cue)
+        if current:
+            result.append(current)
+    return result
 
 
 def _chunk_cues(cues: list[dict]) -> list[list[dict]]:

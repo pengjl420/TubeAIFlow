@@ -520,6 +520,30 @@ onMounted(load)
             </label>
           </div>
           <div class="notice">检索顺序固定为本地素材 → Pexels → Pixabay。平台返回 429 时会进入冷却并自动尝试下一平台，不会轮换同平台的其他 Key。</div>
+          <div class="form-grid fallback-settings-grid">
+            <label class="checkbox-field full-width">
+              <input v-model="settings.auto_fallback_enabled" type="checkbox" />
+              <span>语义素材无合格结果时，自动从主题兜底素材池填充镜头轨道</span>
+            </label>
+            <label class="checkbox-field full-width">
+              <input v-model="settings.auto_landscape_fallback_enabled" type="checkbox" :disabled="!settings.auto_fallback_enabled" />
+              <span>允许自动使用纯风景最终兜底（仍需场景明确允许）</span>
+            </label>
+            <label class="checkbox-field full-width">
+              <input v-model="settings.auto_fallback_review_required" type="checkbox" :disabled="!settings.auto_fallback_enabled" />
+              <span>自动兜底后暂停工作流，等待人工复核</span>
+            </label>
+            <label class="field">
+              <span>单条视频兜底素材警戒占比（%）</span>
+              <input v-model.number="settings.auto_fallback_max_ratio_percent" type="number" min="0" max="100" :disabled="!settings.auto_fallback_enabled" />
+              <small>超过该占比仍会填充，但会强制进入人工复核。</small>
+            </label>
+            <label class="field">
+              <span>单场景连续自动兜底镜头上限</span>
+              <input v-model.number="settings.auto_fallback_max_consecutive_shots" type="number" min="1" max="5" :disabled="!settings.auto_fallback_enabled" />
+              <small>避免长场景被大量随机兜底镜头连续占满。</small>
+            </label>
+          </div>
         </div>
       </details>
     </div>

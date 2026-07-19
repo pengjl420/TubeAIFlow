@@ -1,15 +1,19 @@
 from pathlib import Path
+import re
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from sqlmodel import Session
 
+from app.config import get_settings
 from app.database import get_session
 from app.schemas.media import (
     AssetBatchDeleteRequest,
     AssetImportRequest,
     AssetUpdateRequest,
     SceneAssignmentRequest,
+    SceneAssignmentReorderRequest,
 )
 from app.models.media import MediaFile, MediaKeyframe, MediaShot
 from app.services.media_library import ingestion_service, retrieval_service
@@ -17,6 +21,7 @@ from app.services.projects import project_service
 
 
 router = APIRouter(tags=["assets"])
+MAX_UPLOAD_BYTES = 8 * 1024 * 1024 * 1024
 
 
 @router.get("/assets")
@@ -172,6 +177,16 @@ def list_scene_candidates(
     return {"success": True, "data": {"candidates": candidates}}
 
 
+@router.get("/projects/{project_id}/storyboard/assignments/coverage")
+def list_project_assignment_coverage(
+    project_id: str,
+    session: Session = Depends(get_session),
+) -> dict:
+    _require_project(session, project_id)
+    data = retrieval_service.list_project_assignment_coverage(session, project_id)
+    return {"success": True, "data": data}
+
+
 @router.post("/projects/{project_id}/storyboard/scenes/{scene_id}/search")
 def search_scene_candidates(
     project_id: str,
@@ -205,6 +220,129 @@ def assign_scene_candidate(
             detail={"success": False, "error": str(exc)},
         ) from exc
     return {"success": True, "data": data}
+
+
+@router.get("/projects/{project_id}/storyboard/scenes/{scene_id}/assignments")
+def list_scene_assignments(
+    project_id: str,
+    scene_id: str,
+    session: Session = Depends(get_session),
+) -> dict:
+    _require_project(session, project_id)
+    try:
+        data = retrieval_service.list_scene_assignments(session, project_id, scene_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail={"success": False, "error": str(exc)}) from exc
+    return {"success": True, "data": data}
+
+
+@router.delete("/projects/{project_id}/storyboard/scenes/{scene_id}/assignments/{assignment_id}")
+def delete_scene_assignment(
+    project_id: str,
+    scene_id: str,
+    assignment_id: str,
+    session: Session = Depends(get_session),
+) -> dict:
+    _require_project(session, project_id)
+    try:
+        data = retrieval_service.delete_scene_assignment(
+            session, project_id, scene_id, assignment_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"success": False, "error": str(exc)}) from exc
+    return {"success": True, "data": data}
+
+
+@router.put("/projects/{project_id}/storyboard/scenes/{scene_id}/assignments/order")
+def reorder_scene_assignments(
+    project_id: str,
+    scene_id: str,
+    payload: SceneAssignmentReorderRequest,
+    session: Session = Depends(get_session),
+) -> dict:
+    _require_project(session, project_id)
+    try:
+        data = retrieval_service.reorder_scene_assignments(
+            session, project_id, scene_id, payload.assignment_ids
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"success": False, "error": str(exc)}) from exc
+    return {"success": True, "data": data}
+
+
+@router.post("/projects/{project_id}/storyboard/scenes/{scene_id}/assignments/confirm-fallback")
+def confirm_scene_fallback_assignments(
+    project_id: str,
+    scene_id: str,
+    session: Session = Depends(get_session),
+) -> dict:
+    _require_project(session, project_id)
+    try:
+        data = retrieval_service.confirm_scene_fallback_assignments(
+            session, project_id, scene_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"success": False, "error": str(exc)}) from exc
+    return {"success": True, "data": data}
+
+
+@router.post("/projects/{project_id}/storyboard/scenes/{scene_id}/upload")
+def upload_scene_asset(
+    project_id: str,
+    scene_id: str,
+    file: UploadFile = File(...),
+    session: Session = Depends(get_session),
+) -> dict:
+    project = _require_project(session, project_id)
+    original_name = Path(file.filename or "upload").name
+    suffix = Path(original_name).suffix.lower()
+    if suffix not in ingestion_service.VIDEO_EXTENSIONS | ingestion_service.IMAGE_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail={"success": False, "error": "不支持该素材格式，请上传常见视频或图片文件"},
+        )
+
+    safe_name = re.sub(r'[^\w\-.\u4e00-\u9fff]+', "_", original_name).strip("._")
+    safe_name = safe_name or f"upload{suffix}"
+    upload_dir = get_settings().workspace_dir / "assets" / "uploads" / uuid4().hex
+    upload_dir.mkdir(parents=True, exist_ok=False)
+    destination = upload_dir / safe_name
+    imported = False
+    try:
+        size = 0
+        with destination.open("wb") as target:
+            while chunk := file.file.read(1024 * 1024):
+                size += len(chunk)
+                if size > MAX_UPLOAD_BYTES:
+                    raise ValueError("上传素材不能超过 8 GB")
+                target.write(chunk)
+        media_file, imported = ingestion_service.import_uploaded_asset(session, destination)
+        if not imported:
+            destination.unlink(missing_ok=True)
+            upload_dir.rmdir()
+        ingestion = ingestion_service.ingest_asset(session, media_file.id)
+        candidates = retrieval_service.register_manual_asset_candidates(
+            session, project, scene_id, media_file.id
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        if not imported:
+            destination.unlink(missing_ok=True)
+            if upload_dir.exists() and not any(upload_dir.iterdir()):
+                upload_dir.rmdir()
+        raise HTTPException(
+            status_code=400,
+            detail={"success": False, "error": str(exc)},
+        ) from exc
+    finally:
+        file.file.close()
+    return {
+        "success": True,
+        "data": {
+            "asset": ingestion["asset"],
+            "candidates": candidates,
+            "ingestion_errors": ingestion["errors"],
+        },
+    }
 
 
 def _require_project(session: Session, project_id: str):

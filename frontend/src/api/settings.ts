@@ -28,6 +28,11 @@ export interface SystemSettings {
   pixabay_api_key_configured: boolean
   media_search_cache_hours: number
   media_search_download_limit: number
+  auto_fallback_enabled: boolean
+  auto_landscape_fallback_enabled: boolean
+  auto_fallback_review_required: boolean
+  auto_fallback_max_ratio_percent: number
+  auto_fallback_max_consecutive_shots: number
   qwen_tts_root: string | null
   qwen_tts_python: string | null
   qwen_tts_model_dir: string | null

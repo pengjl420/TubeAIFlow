@@ -51,6 +51,12 @@ class _InvalidGroupingDeepSeek:
         return {"groups": [{"subtitle_ids": ["unknown"]}]}
 
 
+class _SingleGroupingDeepSeek:
+    def chat_json(self, _system_prompt: str, user_prompt: str) -> dict:
+        payload = json.loads(user_prompt)
+        return {"groups": [{"subtitle_ids": [cue["id"] for cue in payload["subtitle_cues"]]}]}
+
+
 class _ScalarStoryboardListsDeepSeek(_FakeDeepSeek):
     def chat_json(self, system_prompt: str, user_prompt: str) -> dict:
         result = super().chat_json(system_prompt, user_prompt)
@@ -136,6 +142,20 @@ class StoryboardServiceTests(unittest.TestCase):
 
         self.assertEqual([cue["id"] for group in groups for cue in group], ["s1", "s2", "s3", "s4"])
         self.assertTrue(warnings)
+
+    def test_ai_grouping_is_split_at_fifteen_seconds(self) -> None:
+        cues = [
+            {"id": f"s{index}", "start_ms": (index - 1) * 3000, "end_ms": index * 3000, "text": str(index)}
+            for index in range(1, 8)
+        ]
+
+        groups, warnings = group_cues(cues, _SingleGroupingDeepSeek())
+
+        self.assertEqual([[cue["id"] for cue in group] for group in groups], [
+            ["s1", "s2", "s3", "s4", "s5"],
+            ["s6", "s7"],
+        ])
+        self.assertEqual(warnings, [])
 
     def test_generate_storyboard_persists_validated_scenes_and_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

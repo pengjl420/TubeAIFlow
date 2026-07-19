@@ -197,6 +197,36 @@ class ProjectSettingsTests(unittest.TestCase):
             project_service.VIDEO_MODE_LANDSCAPE,
         )
 
+    def test_semantic_review_mode_defaults_to_manual_and_persists_automatic(self) -> None:
+        legacy = Project(id="legacy", name="Legacy", config_json="{}")
+        self.assertEqual(
+            project_service.get_semantic_review_mode(legacy),
+            project_service.SEMANTIC_REVIEW_MANUAL,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = Project(id="project-id", name="Name", config_json="{}")
+            with patch.object(
+                project_service,
+                "get_settings",
+                return_value=SimpleNamespace(workspace_dir=root / "workspace"),
+            ):
+                result = project_service.update_project_settings(
+                    FakeSession(),
+                    project,
+                    "Name",
+                    str(root / "output"),
+                    "voice",
+                    "",
+                    include_video=True,
+                    video_mode="ai_semantic",
+                    semantic_review_mode="automatic",
+                )
+        self.assertEqual(
+            json.loads(result.config_json or "{}")["semantic_review_mode"],
+            "automatic",
+        )
+
     def test_switching_to_qwen_resets_completed_segments(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

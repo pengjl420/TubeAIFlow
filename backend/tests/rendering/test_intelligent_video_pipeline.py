@@ -45,6 +45,29 @@ class IntelligentVideoPipelineTests(unittest.TestCase):
             self.assertEqual(changed, ["asset_review"])
             search.assert_called_once_with(session, project, scene.id)
 
+    def test_asset_search_auto_review_selects_candidates_before_review_gate(self) -> None:
+        with Session(self.engine) as session:
+            project, scene = self._project_with_scene(session)
+            project.config_json = '{"video_mode":"ai_semantic","semantic_review_mode":"automatic"}'
+            session.add(project)
+            session.commit()
+            changed = []
+            with (
+                patch.object(video_synthesis, "_ingest_configured_assets"),
+                patch.object(video_synthesis.retrieval_service, "search_scene_candidates"),
+                patch.object(
+                    video_synthesis.retrieval_service,
+                    "auto_assign_qualified_candidates",
+                ) as auto_assign,
+            ):
+                with self.assertRaises(video_synthesis.ReviewRequired):
+                    video_synthesis.run_video_synthesis(
+                        session, project, "asset_search", changed.append
+                    )
+
+            auto_assign.assert_called_once_with(session, project, scene.id)
+            self.assertEqual(changed, ["asset_review"])
+
     def test_confirmed_assignments_continue_through_qa(self) -> None:
         with Session(self.engine) as session:
             project, scene = self._project_with_scene(session)

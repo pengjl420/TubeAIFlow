@@ -10,6 +10,7 @@ from app.services.quality import qa_service
 from app.services.rendering import final_renderer, scene_renderer
 from app.services.rendering import timeline_composer
 from app.services.storyboard import storyboard_service
+from app.services.projects import project_service
 
 
 StageChanged = Callable[[str], None]
@@ -52,6 +53,13 @@ def run_video_synthesis(
             scenes = _scenes(session, project.id)
             for scene in scenes:
                 retrieval_service.search_scene_candidates(session, project, scene.id)
+                if (
+                    project_service.get_semantic_review_mode(project)
+                    == project_service.SEMANTIC_REVIEW_AUTO
+                ):
+                    retrieval_service.auto_assign_qualified_candidates(
+                        session, project, scene.id
+                    )
         stage = "asset_review"
         on_stage_changed(stage)
 

@@ -1,5 +1,5 @@
 import { apiClient, unwrap } from './client'
-import type { VideoGenerationMode } from '../types/project'
+import type { SemanticReviewMode, VideoGenerationMode } from '../types/project'
 
 export interface BatchItem {
   id: string
@@ -44,6 +44,7 @@ export interface CreateBatchInput {
   mediaVideoDir: string
   includeVideo: boolean
   videoMode: VideoGenerationMode
+  semanticReviewMode: SemanticReviewMode
   continueOnError: boolean
 }
 
@@ -72,6 +73,7 @@ export async function createBatch(input: CreateBatchInput): Promise<BatchJob> {
   form.append('media_video_dir', input.mediaVideoDir)
   form.append('include_video', String(input.includeVideo))
   form.append('video_mode', input.videoMode)
+  form.append('semantic_review_mode', input.semanticReviewMode)
   form.append('continue_on_error', String(input.continueOnError))
   form.append('auto_start', 'true')
   return unwrap<BatchJob>(await apiClient.post('/batches', form, { timeout: 0 }))

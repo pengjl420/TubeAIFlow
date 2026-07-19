@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 
 import { createProject, selectDirectory } from '../../api/projects'
 import { listVoices, type VoiceProfile } from '../../api/voices'
-import type { VideoGenerationMode } from '../../types/project'
+import type { SemanticReviewMode, VideoGenerationMode } from '../../types/project'
 
 const router = useRouter()
 const name = ref('')
@@ -14,6 +14,7 @@ const outputDir = ref('D:\\video_darft')
 const outputFilename = ref('')
 const mediaVideoDir = ref('')
 const videoMode = ref<VideoGenerationMode>('none')
+const semanticReviewMode = ref<SemanticReviewMode>('manual')
 const saving = ref(false)
 const selectingFolder = ref<'output' | 'video' | null>(null)
 const error = ref('')
@@ -71,6 +72,7 @@ async function submit() {
       media_video_dir: videoMode.value === 'landscape' ? mediaVideoDir.value.trim() : '',
       include_video: videoMode.value !== 'none',
       video_mode: videoMode.value,
+      semantic_review_mode: semanticReviewMode.value,
     })
     router.push(`/projects/${project.id}`)
   } catch (err) {
@@ -176,6 +178,14 @@ onMounted(async () => {
             </button>
           </div>
           <span class="muted">生成最终视频时会扫描该目录中的视频素材。</span>
+        </label>
+        <label v-if="videoMode === 'ai_semantic'" class="field reference-field">
+          <span>素材审核方式</span>
+          <select v-model="semanticReviewMode">
+            <option value="manual">人工审核拼接</option>
+            <option value="automatic">自动审核拼接</option>
+          </select>
+          <span class="muted">人工模式保持现有逐分镜确认流程；自动模式按匹配度从高到低选用合格且不重复的素材。</span>
         </label>
       </div>
     </div>

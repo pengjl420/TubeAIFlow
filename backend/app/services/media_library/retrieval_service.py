@@ -257,6 +257,7 @@ def assign_candidate(
     project: Project,
     scene_id: str,
     payload: SceneAssignmentRequest,
+    auto_approved: bool = False,
 ) -> dict:
     scene = _require_scene(session, project.id, scene_id)
     candidate = session.get(SceneCandidate, payload.candidate_id)
@@ -285,6 +286,8 @@ def assign_candidate(
     assignments = timeline_composer.scene_assignments(session, scene.id)
     if payload.append and any(item.candidate_id == candidate.id for item in assignments):
         raise ValueError("该候选已经在当前场景的镜头轨道中")
+    if payload.append:
+        _ensure_unique_scene_content(session, assignments, media_file)
     now = utc_now_iso()
     if payload.append or not assignments:
         assignment = SceneAssignment(
@@ -311,7 +314,9 @@ def assign_candidate(
     assignment.selection_stage = candidate.selection_stage
     conflicts = json.loads(candidate.conflicts_json)
     assignment.selection_reason = (
-        "人工确认接受候选冲突：" + "；".join(conflicts)
+        f"系统按匹配度自动审核通过（{candidate.total_score:.1%}）"
+        if auto_approved
+        else "人工确认接受候选冲突：" + "；".join(conflicts)
         if conflicts
         else "人工确认接受低相关候选"
         if candidate.status != "QUALIFIED"
@@ -346,6 +351,85 @@ def assign_candidate(
         "scene_offset_end_ms": assignment.scene_offset_end_ms,
         "coverage": _coverage_payload(covered_ms, scene_duration_ms),
     }
+
+
+def auto_assign_qualified_candidates(
+    session: Session, project: Project, scene_id: str
+) -> dict:
+    """Fill one scene with qualified candidates in descending match-score order."""
+    scene = _require_scene(session, project.id, scene_id)
+    selected_assignment_ids: list[str] = []
+    existing_assignments = timeline_composer.scene_assignments(session, scene.id)
+    for assignment in existing_assignments:
+        candidate = session.get(SceneCandidate, assignment.candidate_id) if assignment.candidate_id else None
+        if candidate and candidate.status == "QUALIFIED" and not assignment.manual_confirmed:
+            assignment.manual_confirmed = True
+            assignment.selection_reason = (
+                f"系统按匹配度自动审核通过（{candidate.total_score:.1%}）"
+            )
+            session.add(assignment)
+            selected_assignment_ids.append(assignment.id)
+    session.commit()
+    candidates = session.exec(
+        select(SceneCandidate)
+        .where(
+            SceneCandidate.project_id == project.id,
+            SceneCandidate.scene_id == scene.id,
+            SceneCandidate.status == "QUALIFIED",
+        )
+        .order_by(SceneCandidate.total_score.desc(), SceneCandidate.id)
+    ).all()
+    for candidate in candidates:
+        coverage = timeline_composer.scene_coverage(session, scene)
+        if coverage["complete"]:
+            break
+        try:
+            assignment = assign_candidate(
+                session,
+                project,
+                scene.id,
+                SceneAssignmentRequest(candidate_id=candidate.id, append=True),
+                auto_approved=True,
+            )
+        except ValueError as exc:
+            if "相同的素材内容" in str(exc) or "已经在当前场景" in str(exc):
+                continue
+            raise
+        selected_assignment_ids.append(assignment["id"])
+    coverage = timeline_composer.scene_coverage(session, scene)
+    return {
+        "selected_assignment_ids": selected_assignment_ids,
+        "covered_ms": coverage["covered_ms"],
+        "remaining_ms": coverage["remaining_ms"],
+        "complete": coverage["complete"],
+    }
+
+
+def _ensure_unique_scene_content(
+    session: Session,
+    assignments: list[SceneAssignment],
+    incoming_media: MediaFile,
+) -> None:
+    """Reject the same source or byte-identical content within one visual scene."""
+    for assignment in assignments:
+        shot = session.get(MediaShot, assignment.media_shot_id)
+        media_file = session.get(MediaFile, shot.media_file_id) if shot else None
+        if not media_file:
+            continue
+        if (
+            media_file.id == incoming_media.id
+            or (
+                media_file.provider == incoming_media.provider
+                and media_file.provider_asset_id
+                and media_file.provider_asset_id == incoming_media.provider_asset_id
+            )
+            or (
+                media_file.file_hash
+                and incoming_media.file_hash
+                and media_file.file_hash == incoming_media.file_hash
+            )
+        ):
+            raise ValueError("同一个分镜头中禁止使用相同的素材内容")
 
 
 def list_scene_assignments(session: Session, project_id: str, scene_id: str) -> dict:

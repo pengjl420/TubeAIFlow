@@ -227,6 +227,151 @@ class MediaLibraryTests(unittest.TestCase):
         self.assertEqual(scene_status, "assigned")
         self.assertEqual(repeated_ids.count(assignment["candidate_id"]), 1)
 
+    def test_auto_review_uses_score_order_and_skips_duplicate_content(self) -> None:
+        project = Project(id="auto-project", name="Auto")
+        scene = VisualScene(
+            id="auto-scene",
+            project_id=project.id,
+            scene_index=1,
+            start_ms=0,
+            end_ms=9_000,
+            narration="自动审核测试",
+        )
+        files = [
+            MediaFile(
+                id="media-top",
+                path=str(self.root / "top.mp4"),
+                filename="top.mp4",
+                media_type="video",
+                file_hash="same-content",
+                duration_ms=5_000,
+                width=1920,
+                height=1080,
+            ),
+            MediaFile(
+                id="media-duplicate",
+                path=str(self.root / "duplicate.mp4"),
+                filename="duplicate.mp4",
+                media_type="video",
+                file_hash="same-content",
+                duration_ms=5_000,
+                width=1920,
+                height=1080,
+            ),
+            MediaFile(
+                id="media-next",
+                path=str(self.root / "next.mp4"),
+                filename="next.mp4",
+                media_type="video",
+                file_hash="different-content",
+                duration_ms=5_000,
+                width=1920,
+                height=1080,
+            ),
+        ]
+        shots = [
+            MediaShot(
+                id=f"shot-{index}",
+                media_file_id=media.id,
+                shot_index=1,
+                end_ms=5_000,
+            )
+            for index, media in enumerate(files, start=1)
+        ]
+        candidates = [
+            SceneCandidate(
+                id=f"candidate-{index}",
+                project_id=project.id,
+                scene_id=scene.id,
+                media_shot_id=shot.id,
+                total_score=score,
+                status="QUALIFIED",
+            )
+            for index, (shot, score) in enumerate(
+                zip(shots, [0.95, 0.90, 0.80]), start=1
+            )
+        ]
+
+        with Session(self.engine) as session:
+            session.add_all([project, scene, *files, *shots, *candidates])
+            session.commit()
+            result = retrieval_service.auto_assign_qualified_candidates(
+                session, project, scene.id
+            )
+            assignments = session.exec(
+                select(SceneAssignment)
+                .where(SceneAssignment.scene_id == scene.id)
+                .order_by(SceneAssignment.sequence_index)
+            ).all()
+
+        self.assertTrue(result["complete"])
+        self.assertEqual(
+            [item.media_shot_id for item in assignments],
+            ["shot-1", "shot-3"],
+        )
+        self.assertTrue(all(item.manual_confirmed for item in assignments))
+        self.assertTrue(
+            all("系统按匹配度自动审核通过" in item.selection_reason for item in assignments)
+        )
+
+    def test_manual_append_rejects_same_source_content(self) -> None:
+        project = Project(id="duplicate-project", name="Duplicate")
+        scene = VisualScene(
+            id="duplicate-scene",
+            project_id=project.id,
+            scene_index=1,
+            start_ms=0,
+            end_ms=10_000,
+            narration="重复素材测试",
+        )
+        media = MediaFile(
+            id="duplicate-media",
+            path=str(self.root / "duplicate-source.mp4"),
+            filename="duplicate-source.mp4",
+            media_type="video",
+            file_hash="duplicate-hash",
+            duration_ms=10_000,
+            width=1920,
+            height=1080,
+        )
+        shots = [
+            MediaShot(
+                id=f"duplicate-shot-{index}",
+                media_file_id=media.id,
+                shot_index=index,
+                start_ms=(index - 1) * 5_000,
+                end_ms=index * 5_000,
+            )
+            for index in (1, 2)
+        ]
+        candidates = [
+            SceneCandidate(
+                id=f"duplicate-candidate-{index}",
+                project_id=project.id,
+                scene_id=scene.id,
+                media_shot_id=shot.id,
+                total_score=0.9 - index / 10,
+                status="QUALIFIED",
+            )
+            for index, shot in enumerate(shots, start=1)
+        ]
+        with Session(self.engine) as session:
+            session.add_all([project, scene, media, *shots, *candidates])
+            session.commit()
+            retrieval_service.assign_candidate(
+                session,
+                project,
+                scene.id,
+                SceneAssignmentRequest(candidate_id=candidates[0].id, append=True),
+            )
+            with self.assertRaisesRegex(ValueError, "相同的素材内容"):
+                retrieval_service.assign_candidate(
+                    session,
+                    project,
+                    scene.id,
+                    SceneAssignmentRequest(candidate_id=candidates[1].id, append=True),
+                )
+
     def test_ingest_asset_generates_review_frames_and_vector_metadata(self) -> None:
         source = self.root / "source.mp4"
         source.write_bytes(b"video")

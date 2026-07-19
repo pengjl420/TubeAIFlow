@@ -1,5 +1,5 @@
 import { apiClient, unwrap } from './client'
-import type { Project, VideoGenerationMode } from '../types/project'
+import type { Project, SemanticReviewMode, VideoGenerationMode } from '../types/project'
 
 export interface CreateProjectInput {
   name: string
@@ -9,6 +9,7 @@ export interface CreateProjectInput {
   media_video_dir: string
   include_video: boolean
   video_mode: VideoGenerationMode
+  semantic_review_mode: SemanticReviewMode
 }
 
 export async function listProjects(): Promise<Project[]> {
@@ -24,6 +25,7 @@ export async function createProject(input: CreateProjectInput): Promise<Project>
   form.append('media_video_dir', input.media_video_dir)
   form.append('include_video', String(input.include_video))
   form.append('video_mode', input.video_mode)
+  form.append('semantic_review_mode', input.semantic_review_mode)
   return unwrap<Project>(await apiClient.post('/projects', form))
 }
 
@@ -98,6 +100,7 @@ export interface ProjectSettingsInput {
   media_video_dir: string
   include_video: boolean
   video_mode: VideoGenerationMode
+  semantic_review_mode: SemanticReviewMode
   voice_profile_id: string
 }
 

@@ -55,6 +55,7 @@ def create_batch(
     reference_audio_text: str = "",
     voice_profile_id: str = "",
     video_mode: str | None = None,
+    semantic_review_mode: str | None = None,
 ) -> BatchJob:
     if not scripts:
         raise ValueError("请至少上传一份逐字稿")
@@ -85,6 +86,9 @@ def create_batch(
         raise ValueError("CosyVoice 需要填写参考音频逐字稿")
 
     resolved_video_mode = project_service.normalize_video_mode(video_mode, include_video)
+    resolved_semantic_review_mode = project_service.normalize_semantic_review_mode(
+        semantic_review_mode
+    )
     include_video = resolved_video_mode != project_service.VIDEO_MODE_NONE
     output_root = Path(output_dir).expanduser().resolve()
     output_root.mkdir(parents=True, exist_ok=True)
@@ -106,6 +110,7 @@ def create_batch(
                 "media_video_dir": str(video_root) if video_root else "",
                 "include_video": include_video,
                 "video_mode": resolved_video_mode,
+                "semantic_review_mode": resolved_semantic_review_mode,
                 "continue_on_error": continue_on_error,
                 "reference_audio_filename": reference_audio_filename,
                 "tts_engine": normalized_tts_engine,
@@ -149,6 +154,7 @@ def create_batch(
             include_video,
             voice_profile_id=selected_profile.id if selected_profile else "",
             video_mode=resolved_video_mode,
+            semantic_review_mode=resolved_semantic_review_mode,
         )
         if not selected_profile:
             reference_audio.seek(0)

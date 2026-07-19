@@ -5,7 +5,7 @@ import { useRouter } from 'vue-router'
 import { createBatch } from '../../api/batches'
 import { selectDirectory } from '../../api/projects'
 import { listVoices, type VoiceProfile } from '../../api/voices'
-import type { VideoGenerationMode } from '../../types/project'
+import type { SemanticReviewMode, VideoGenerationMode } from '../../types/project'
 
 const router = useRouter()
 const name = ref(`批量生成 ${new Date().toLocaleDateString()}`)
@@ -15,6 +15,7 @@ const voiceProfileId = ref('')
 const outputDir = ref('')
 const mediaVideoDir = ref('')
 const videoMode = ref<VideoGenerationMode>('landscape')
+const semanticReviewMode = ref<SemanticReviewMode>('manual')
 const continueOnError = ref(true)
 const saving = ref(false)
 const selectingFolder = ref<'output' | 'video' | null>(null)
@@ -82,6 +83,7 @@ async function submit() {
       mediaVideoDir: videoMode.value === 'landscape' ? mediaVideoDir.value.trim() : '',
       includeVideo: videoMode.value !== 'none',
       videoMode: videoMode.value,
+      semanticReviewMode: semanticReviewMode.value,
       continueOnError: continueOnError.value,
     })
     router.push(`/batches/${batch.id}`)
@@ -163,7 +165,16 @@ onMounted(async () => {
             <option value="landscape">纯风景素材拼接</option>
             <option value="ai_semantic">AI 语义视频拼接</option>
           </select>
-          <small>所有方式共用 TTS、音频合并和 SRT 逻辑；AI 语义方式会在素材审核阶段等待人工确认。</small>
+          <small>所有方式共用 TTS、音频合并和 SRT 逻辑。</small>
+        </label>
+
+        <label v-if="videoMode === 'ai_semantic'" class="field">
+          <span>素材审核方式</span>
+          <select v-model="semanticReviewMode">
+            <option value="manual">人工审核拼接</option>
+            <option value="automatic">自动审核拼接</option>
+          </select>
+          <small>自动模式按匹配度从高到低选用审核合格且内容不重复的素材。</small>
         </label>
 
         <label v-if="videoMode === 'landscape'" class="field">

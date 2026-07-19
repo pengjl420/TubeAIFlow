@@ -69,6 +69,8 @@ const assignedCount = computed(() => scenes.value.filter((scene) => {
   const coverage = coverageByScene.value[scene.id]
   return coverage?.complete && !coverage.review_required
 }).length)
+const unreviewedScenes = computed(() => scenes.value.filter((scene) => !isSceneReviewed(scene.id)))
+const unreviewedCount = computed(() => unreviewedScenes.value.length)
 const reviewComplete = computed(() => scenes.value.length > 0 && assignedCount.value === scenes.value.length)
 const filteredAssets = computed(() => roleFilter.value === 'all'
   ? assets.value
@@ -88,7 +90,11 @@ async function load() {
     scenes.value = loadedScenes
     assets.value = loadedAssets
     coverageByScene.value = loadedCoverage
-    if (loadedScenes.length) await selectScene(loadedScenes[0].id)
+    const firstPending = loadedScenes.find((scene) => {
+      const coverage = loadedCoverage[scene.id]
+      return !coverage?.complete || coverage.review_required
+    })
+    if (loadedScenes.length) await selectScene((firstPending || loadedScenes[0]).id)
   } catch (err) {
     error.value = err instanceof Error ? err.message : '素材审核工作区加载失败'
   } finally {
@@ -112,6 +118,49 @@ async function selectScene(sceneId: string) {
   } catch (err) {
     error.value = err instanceof Error ? err.message : '候选素材加载失败'
   }
+}
+
+function isSceneReviewed(sceneId: string) {
+  const coverage = coverageByScene.value[sceneId]
+  return Boolean(coverage?.complete && !coverage.review_required)
+}
+
+function sceneReviewLabel(sceneId: string) {
+  const coverage = coverageByScene.value[sceneId]
+  if (coverage?.review_required) return '待复核'
+  if (coverage?.complete) return '已完成'
+  return coverage?.covered_ms ? '待补素材' : '未审核'
+}
+
+async function locateNextUnreviewed() {
+  if (!unreviewedScenes.value.length) {
+    message.value = '全部分镜素材均已审核完成'
+    return
+  }
+  const currentIndex = scenes.value.findIndex((scene) => scene.id === selectedSceneId.value)
+  const ordered = [
+    ...scenes.value.slice(currentIndex + 1),
+    ...scenes.value.slice(0, currentIndex + 1),
+  ]
+  const target = ordered.find((scene) => !isSceneReviewed(scene.id)) || unreviewedScenes.value[0]
+  await selectScene(target.id)
+  message.value = `已定位到未审核分镜 ${String(target.scene_index).padStart(2, '0')}`
+}
+
+async function advanceAfterSceneCompleted(sceneId: string, completedMessage: string) {
+  if (!isSceneReviewed(sceneId)) return
+  const currentIndex = scenes.value.findIndex((scene) => scene.id === sceneId)
+  const ordered = [
+    ...scenes.value.slice(currentIndex + 1),
+    ...scenes.value.slice(0, currentIndex),
+  ]
+  const target = ordered.find((scene) => !isSceneReviewed(scene.id))
+  if (!target) {
+    message.value = `${completedMessage}；全部 ${scenes.value.length} 个分镜素材均已审核完成`
+    return
+  }
+  await selectScene(target.id)
+  message.value = `${completedMessage}；已自动切换到分镜 ${String(target.scene_index).padStart(2, '0')}`
 }
 
 async function chooseDirectory() {
@@ -248,6 +297,9 @@ async function searchCandidates() {
     message.value = result.candidates.length
       ? `已完成素材检索，返回 ${result.candidates.length} 个候选${onlineProviders.length ? `（已补充 ${onlineProviders.join('、')} 素材）` : ''}${autoCount ? `；已自动添加 ${autoCount} 个兜底镜头` : ''}`
       : '本地与已配置的在线平台均没有可用候选'
+    if (track.coverage.complete && !track.coverage.review_required) {
+      await advanceAfterSceneCompleted(selectedScene.value.id, message.value)
+    }
   } catch (err) {
     error.value = err instanceof Error ? err.message : '素材检索失败'
   } finally {
@@ -272,6 +324,9 @@ async function assign(candidate: SceneCandidate) {
     message.value = track.coverage.complete
       ? `场景 ${String(selectedScene.value.scene_index).padStart(2, '0')} 的镜头轨道已覆盖完整`
       : `已添加 ${candidate.media.filename}，还需要 ${formatMilliseconds(track.coverage.remaining_ms)}`
+    if (track.coverage.complete && !track.coverage.review_required) {
+      await advanceAfterSceneCompleted(selectedScene.value.id, message.value)
+    }
   } catch (err) {
     error.value = err instanceof Error ? err.message : '确认素材失败'
   } finally {
@@ -326,6 +381,9 @@ async function confirmFallbackTrack() {
     coverageByScene.value = { ...coverageByScene.value, [selectedScene.value.id]: track.coverage }
     selectedScene.value.status = track.coverage.complete ? 'assigned' : 'partially_assigned'
     message.value = '本场景的自动兜底镜头已通过人工复核'
+    if (track.coverage.complete && !track.coverage.review_required) {
+      await advanceAfterSceneCompleted(selectedScene.value.id, message.value)
+    }
   } catch (err) {
     error.value = err instanceof Error ? err.message : '自动兜底确认失败'
   } finally {
@@ -456,6 +514,12 @@ onMounted(load)
           <div><span class="section-eyebrow">SCENES</span><h2>视觉场景</h2></div>
           <span class="status-pill is-neutral">{{ scenes.length }}</span>
         </div>
+        <div class="scene-review-progress">
+          <span><strong>{{ unreviewedCount }}</strong> 个未审核</span>
+          <button class="mini-button" :disabled="!unreviewedCount" @click="locateNextUnreviewed">
+            定位下一个
+          </button>
+        </div>
         <div v-if="!scenes.length" class="empty-state compact-empty">
           <h2>{{ loading ? '正在加载…' : '暂无视觉场景' }}</h2>
           <p>请先在分镜工作区生成 Storyboard。</p>
@@ -464,7 +528,11 @@ onMounted(load)
           v-for="scene in scenes"
           :key="scene.id"
           class="scene-review-item"
-          :class="{ 'is-active': scene.id === selectedSceneId }"
+          :class="{
+            'is-active': scene.id === selectedSceneId,
+            'is-unreviewed': !isSceneReviewed(scene.id),
+            'is-reviewed': isSceneReviewed(scene.id),
+          }"
           @click="selectScene(scene.id)"
         >
           <span class="scene-index">{{ String(scene.scene_index).padStart(2, '0') }}</span>
@@ -474,6 +542,15 @@ onMounted(load)
               {{ formatMilliseconds(scene.end_ms - scene.start_ms) }} ·
               {{ coverageByScene[scene.id]?.review_required ? '自动兜底待复核' : coverageByScene[scene.id]?.complete ? '轨道完整' : `已覆盖 ${formatMilliseconds(coverageByScene[scene.id]?.covered_ms || 0)}` }}
             </small>
+            <span
+              class="scene-review-state"
+              :class="{
+                'is-complete': isSceneReviewed(scene.id),
+                'is-review': coverageByScene[scene.id]?.review_required,
+              }"
+            >
+              {{ sceneReviewLabel(scene.id) }}
+            </span>
           </span>
         </button>
       </aside>

@@ -41,6 +41,7 @@ class ProjectSettingsRequest(BaseModel):
     media_video_dir: str = ""
     include_video: bool = False
     video_mode: str | None = None
+    semantic_review_mode: str | None = None
     tts_engine: str = project_service.DEFAULT_TTS_ENGINE
     reference_audio_text: str = ""
     voice_profile_id: str = ""
@@ -73,6 +74,7 @@ def create_project(
     media_video_dir: str = Form(""),
     include_video: bool = Form(False),
     video_mode: str | None = Form(None),
+    semantic_review_mode: str | None = Form(None),
     tts_engine: str = Form(project_service.DEFAULT_TTS_ENGINE),
     reference_audio_text: str = Form(""),
     voice_profile_id: str = Form(""),
@@ -102,6 +104,7 @@ def create_project(
             include_video,
             voice_profile_id,
             video_mode,
+            semantic_review_mode,
         )
         if voice_profile_id.strip():
             return ok(project)
@@ -239,6 +242,7 @@ def save_project_settings(
             payload.include_video,
             payload.voice_profile_id,
             payload.video_mode,
+            payload.semantic_review_mode,
         ))
     except (OSError, ValueError) as exc:
         logger.exception("Failed to save settings for project %s", project_id)

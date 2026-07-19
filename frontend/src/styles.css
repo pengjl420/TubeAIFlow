@@ -1903,6 +1903,9 @@ main {
 .media-directory-control .filter-select { min-width: 170px; }
 .media-review-layout { align-items: start; display: grid; gap: 18px; grid-template-columns: 310px minmax(0, 1fr); }
 .scene-review-rail { display: grid; gap: 8px; max-height: calc(100vh - 120px); overflow: auto; position: sticky; top: 20px; }
+.scene-review-progress { align-items: center; background: var(--warning-soft); border-radius: 9px; display: flex; justify-content: space-between; padding: 8px 9px; }
+.scene-review-progress span { color: var(--warning); font-size: 11px; }
+.scene-review-progress strong { font-size: 14px; }
 .scene-review-item {
   align-items: start;
   background: transparent;
@@ -1920,9 +1923,14 @@ main {
 }
 .scene-review-item:hover { background: var(--surface-soft); border-color: var(--line); }
 .scene-review-item.is-active { background: var(--teal-soft); border-color: #bcded9; }
+.scene-review-item.is-unreviewed:not(.is-active) { border-left: 3px solid var(--warning); }
+.scene-review-item.is-reviewed:not(.is-active) { opacity: 0.72; }
 .scene-review-item > span:last-child { display: grid; gap: 5px; min-width: 0; }
 .scene-review-item strong { display: -webkit-box; font-size: 12px; line-height: 1.45; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .scene-review-item small { color: var(--ink-soft); font-size: 10px; }
+.scene-review-state { background: var(--warning-soft); border-radius: 999px; color: var(--warning); font-size: 9px; font-weight: 800; justify-self: start; padding: 3px 7px; }
+.scene-review-state.is-review { background: #fff0d8; }
+.scene-review-state.is-complete { background: var(--success-soft); color: var(--success); }
 .candidate-review-panel { display: grid; gap: 14px; min-width: 0; }
 .selected-scene-query { display: grid; gap: 13px; }
 .selected-scene-query h2 { font-size: 18px; }

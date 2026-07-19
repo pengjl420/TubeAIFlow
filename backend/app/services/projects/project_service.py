@@ -36,6 +36,12 @@ SUPPORTED_TTS_ENGINES = {DEFAULT_TTS_ENGINE, "chatterbox", "cosyvoice"}
 VIDEO_MODE_NONE = "none"
 VIDEO_MODE_LANDSCAPE = "landscape"
 VIDEO_MODE_AI_SEMANTIC = "ai_semantic"
+SEMANTIC_REVIEW_MANUAL = "manual"
+SEMANTIC_REVIEW_AUTO = "automatic"
+SUPPORTED_SEMANTIC_REVIEW_MODES = {
+    SEMANTIC_REVIEW_MANUAL,
+    SEMANTIC_REVIEW_AUTO,
+}
 SUPPORTED_VIDEO_MODES = {
     VIDEO_MODE_NONE,
     VIDEO_MODE_LANDSCAPE,
@@ -157,6 +163,19 @@ def get_project_video_mode(project: Project) -> str:
     return normalize_video_mode(
         config.get("video_mode"),
         bool(config.get("include_video", False)),
+    )
+
+
+def normalize_semantic_review_mode(mode: str | None) -> str:
+    normalized = str(mode or SEMANTIC_REVIEW_MANUAL).strip().lower()
+    if normalized not in SUPPORTED_SEMANTIC_REVIEW_MODES:
+        raise ValueError("Unsupported semantic video review mode")
+    return normalized
+
+
+def get_semantic_review_mode(project: Project) -> str:
+    return normalize_semantic_review_mode(
+        load_project_config(project).get("semantic_review_mode")
     )
 
 
@@ -397,6 +416,7 @@ def update_project_settings(
     include_video: bool = False,
     voice_profile_id: str = "",
     video_mode: str | None = None,
+    semantic_review_mode: str | None = None,
 ) -> Project:
     project_name = name.strip()
     if not project_name:
@@ -422,6 +442,7 @@ def update_project_settings(
         raise ValueError("CosyVoice requires the reference audio transcript")
 
     resolved_video_mode = normalize_video_mode(video_mode, include_video)
+    resolved_semantic_review_mode = normalize_semantic_review_mode(semantic_review_mode)
     include_video = resolved_video_mode != VIDEO_MODE_NONE
     video_directory: Path | None = None
     if resolved_video_mode == VIDEO_MODE_LANDSCAPE and not media_video_dir.strip():
@@ -451,6 +472,7 @@ def update_project_settings(
     config["cosyvoice_speed"] = normalized_cosyvoice_speed
     config["include_video"] = include_video
     config["video_mode"] = resolved_video_mode
+    config["semantic_review_mode"] = resolved_semantic_review_mode
     if video_directory:
         config["media_video_dir"] = str(video_directory)
     else:

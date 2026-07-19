@@ -8,7 +8,11 @@ from unittest.mock import patch
 from app.models.project import Project
 from app.models.narration import Segment
 from app.services.narration import tts_service
-from app.integrations.tts.cosyvoice_runner import cosyvoice_prompt_text
+from app.integrations.tts.cosyvoice_runner import (
+    cosyvoice_prompt_text,
+    duration_quality,
+    segment_attempt_seed,
+)
 
 
 class TtsEngineTests(unittest.TestCase):
@@ -262,6 +266,10 @@ class TtsEngineTests(unittest.TestCase):
                 cosyvoice_model_dir=model_dir,
                 cosyvoice_instruction="You are helpful.",
                 cosyvoice_fp16=True,
+                cosyvoice_max_attempts=3,
+                cosyvoice_min_chars_per_second=2.8,
+                cosyvoice_duration_slack_seconds=2.0,
+                cosyvoice_duration_outlier_ratio=1.45,
             )
             project = Project(
                 id="cosyvoice-project",
@@ -291,7 +299,42 @@ class TtsEngineTests(unittest.TestCase):
             command = run.call_args.args[0]
             self.assertEqual(command[command.index("--reference-text") + 1], "参考文本")
             self.assertEqual(command[command.index("--speed") + 1], "1.1")
+            self.assertEqual(command[command.index("--max-attempts") + 1], "3")
             self.assertIn("--fp16", command)
+
+    def test_cosyvoice_seed_is_stable_and_attempt_specific(self) -> None:
+        first = segment_attempt_seed("0192", "第一次只談錢", 1)
+
+        self.assertEqual(first, segment_attempt_seed("0192", "第一次只談錢", 1))
+        self.assertNotEqual(first, segment_attempt_seed("0192", "第一次只談錢", 2))
+        self.assertNotEqual(first, segment_attempt_seed("0193", "第一次只談錢", 1))
+
+    def test_cosyvoice_duration_quality_rejects_hallucination_outlier(self) -> None:
+        suspicious, reason, _ = duration_quality(
+            "第一次只談錢，將各自收入、債務、日常支出，同幫助仔女嘅界線，坦白而完整咁說明。",
+            14.4,
+            [0.25, 0.24, 0.26, 0.23, 0.25],
+            min_chars_per_second=2.8,
+            duration_slack_seconds=2.0,
+            duration_outlier_ratio=1.45,
+        )
+
+        self.assertTrue(suspicious)
+        self.assertIn("duration", reason)
+
+    def test_cosyvoice_duration_quality_accepts_normal_audio(self) -> None:
+        suspicious, reason, ratio = duration_quality(
+            "第一次只談錢，將各自收入、債務、日常支出，同幫助仔女嘅界線，坦白而完整咁說明。",
+            9.1,
+            [0.25, 0.24, 0.26, 0.23, 0.25],
+            min_chars_per_second=2.8,
+            duration_slack_seconds=2.0,
+            duration_outlier_ratio=1.45,
+        )
+
+        self.assertFalse(suspicious)
+        self.assertIsNone(reason)
+        self.assertGreater(ratio, 0)
 
     def test_cosyvoice3_prompt_includes_instruction_separator(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

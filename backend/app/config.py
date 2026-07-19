@@ -87,6 +87,10 @@ class Settings(BaseModel):
     cosyvoice_model_dir: Path | None = None
     cosyvoice_fp16: bool = True
     cosyvoice_instruction: str = "You are a helpful assistant."
+    cosyvoice_max_attempts: int = Field(default=3, ge=1, le=5)
+    cosyvoice_min_chars_per_second: float = Field(default=2.8, gt=0, le=10)
+    cosyvoice_duration_slack_seconds: float = Field(default=2.0, ge=0, le=10)
+    cosyvoice_duration_outlier_ratio: float = Field(default=1.45, gt=1, le=3)
 
     @field_validator(
         "qwen_tts_root",

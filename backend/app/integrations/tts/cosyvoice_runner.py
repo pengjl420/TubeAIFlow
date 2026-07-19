@@ -1,8 +1,11 @@
 """Run a CosyVoice zero-shot voice-clone batch in its own Python environment."""
 
 import argparse
+import hashlib
 import json
+import statistics
 import sys
+import unicodedata
 from pathlib import Path
 
 try:
@@ -37,6 +40,55 @@ def cosyvoice_prompt_text(model_dir: Path, reference_text: str, instruction: str
     return f"{prefix}<|endofprompt|>{reference_text}"
 
 
+def segment_attempt_seed(segment_id: str, text: str, attempt: int) -> int:
+    """Return a stable seed independent of the segment's position in a batch."""
+    material = f"tubeaiflow-cosyvoice-v1\0{segment_id}\0{text}\0{attempt}".encode("utf-8")
+    return int.from_bytes(hashlib.sha256(material).digest()[:4], "big")
+
+
+def spoken_character_count(text: str) -> int:
+    """Count letters and numbers while ignoring punctuation and whitespace."""
+    return sum(1 for char in text if unicodedata.category(char)[0] in {"L", "N"})
+
+
+def duration_quality(
+    text: str,
+    duration: float,
+    accepted_seconds_per_character: list[float],
+    min_chars_per_second: float,
+    duration_slack_seconds: float,
+    duration_outlier_ratio: float,
+) -> tuple[bool, str | None, float]:
+    character_count = spoken_character_count(text)
+    if character_count < 8 or duration <= 0:
+        return False, None, 0.0
+
+    seconds_per_character = duration / character_count
+    absolute_limit = character_count / min_chars_per_second + duration_slack_seconds
+    if duration > absolute_limit:
+        return (
+            True,
+            f"duration {duration:.2f}s exceeds absolute limit {absolute_limit:.2f}s "
+            f"for {character_count} spoken characters",
+            seconds_per_character,
+        )
+
+    if len(accepted_seconds_per_character) >= 5:
+        typical_ratio = statistics.median(accepted_seconds_per_character[-50:])
+        expected_duration = typical_ratio * character_count
+        if (
+            seconds_per_character > typical_ratio * duration_outlier_ratio
+            and duration > expected_duration + duration_slack_seconds
+        ):
+            return (
+                True,
+                f"duration {duration:.2f}s is an outlier; recent expectation is "
+                f"{expected_duration:.2f}s for {character_count} spoken characters",
+                seconds_per_character,
+            )
+    return False, None, seconds_per_character
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cosyvoice-root", required=True)
@@ -49,6 +101,10 @@ def main() -> int:
     parser.add_argument("--speed", type=float, default=1.0)
     parser.add_argument("--instruction", default="You are a helpful assistant.")
     parser.add_argument("--fp16", action="store_true")
+    parser.add_argument("--max-attempts", type=int, default=3)
+    parser.add_argument("--min-chars-per-second", type=float, default=2.8)
+    parser.add_argument("--duration-slack-seconds", type=float, default=2.0)
+    parser.add_argument("--duration-outlier-ratio", type=float, default=1.45)
     args = parser.parse_args()
 
     cosyvoice_root = Path(args.cosyvoice_root).resolve()
@@ -58,6 +114,7 @@ def main() -> int:
     import torch
     import torchaudio
     from cosyvoice.cli.cosyvoice import AutoModel
+    from cosyvoice.utils.common import set_all_random_seed
 
     model_dir = Path(args.model_dir).resolve()
     model = AutoModel(model_dir=str(model_dir), fp16=args.fp16)
@@ -70,6 +127,7 @@ def main() -> int:
     result_file = Path(args.result_file).resolve()
     progress_file = Path(args.progress_file).resolve()
     results = []
+    accepted_seconds_per_character = []
     total = len(tasks)
     segment_ids = [task["segment_id"] for task in tasks]
     write_json(result_file, results)
@@ -82,26 +140,81 @@ def main() -> int:
             progress_file,
             progress_payload(total, segment_ids, results, task["segment_id"], index, "running"),
         )
+        attempts = []
         try:
-            chunks = [
-                item["tts_speech"].cpu()
-                for item in model.inference_zero_shot(
+            for attempt in range(1, args.max_attempts + 1):
+                seed = segment_attempt_seed(task["segment_id"], task["text"], attempt)
+                set_all_random_seed(seed)
+                chunks = [
+                    item["tts_speech"].cpu()
+                    for item in model.inference_zero_shot(
+                        task["text"],
+                        prompt_text,
+                        prompt_audio,
+                        zero_shot_spk_id=zero_shot_spk_id,
+                        stream=False,
+                        speed=args.speed,
+                    )
+                ]
+                if not chunks:
+                    raise RuntimeError("CosyVoice returned no audio")
+                wav = torch.cat(chunks, dim=1)
+                duration = wav.shape[1] / model.sample_rate
+                suspicious, reason, seconds_per_character = duration_quality(
                     task["text"],
-                    prompt_text,
-                    prompt_audio,
-                    zero_shot_spk_id=zero_shot_spk_id,
-                    stream=False,
-                    speed=args.speed,
+                    duration,
+                    accepted_seconds_per_character,
+                    args.min_chars_per_second,
+                    args.duration_slack_seconds,
+                    args.duration_outlier_ratio,
                 )
-            ]
-            if not chunks:
-                raise RuntimeError("CosyVoice returned no audio")
-            wav = torch.cat(chunks, dim=1)
-            torchaudio.save(str(output_path), wav, model.sample_rate)
-            results.append({"segment_id": task["segment_id"], "success": True})
+                attempts.append(
+                    {
+                        "attempt": attempt,
+                        "seed": seed,
+                        "duration": round(duration, 3),
+                        "rejected": suspicious,
+                        "reason": reason,
+                    }
+                )
+                print(
+                    f"CosyVoice attempt segment={task['segment_id']} attempt={attempt} "
+                    f"seed={seed} duration={duration:.3f}s "
+                    f"status={'rejected' if suspicious else 'accepted'}"
+                )
+                if suspicious:
+                    print(
+                        f"Rejected segment {task['segment_id']} attempt {attempt}: {reason}",
+                        file=sys.stderr,
+                    )
+                    continue
+
+                torchaudio.save(str(output_path), wav, model.sample_rate)
+                if seconds_per_character > 0:
+                    accepted_seconds_per_character.append(seconds_per_character)
+                results.append(
+                    {
+                        "segment_id": task["segment_id"],
+                        "success": True,
+                        "duration": round(duration, 3),
+                        "attempts": attempts,
+                    }
+                )
+                break
+            else:
+                raise RuntimeError(
+                    f"CosyVoice produced suspicious duration in all {args.max_attempts} attempts"
+                )
         except Exception as exc:
             output_path.unlink(missing_ok=True)
-            results.append({"segment_id": task["segment_id"], "success": False, "error": str(exc)})
+            results.append(
+                {
+                    "segment_id": task["segment_id"],
+                    "success": False,
+                    "error": str(exc),
+                    "attempts": attempts,
+                }
+            )
         write_json(result_file, results)
         write_json(
             progress_file,

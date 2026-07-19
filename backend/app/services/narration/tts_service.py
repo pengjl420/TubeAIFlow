@@ -3,7 +3,7 @@ import logging
 import math
 import os
 import subprocess
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlmodel import Session, select
@@ -384,6 +384,14 @@ def _run_cosyvoice_batch(
         str(_project_cosyvoice_speed(project)),
         "--instruction",
         settings.cosyvoice_instruction,
+        "--max-attempts",
+        str(settings.cosyvoice_max_attempts),
+        "--min-chars-per-second",
+        str(settings.cosyvoice_min_chars_per_second),
+        "--duration-slack-seconds",
+        str(settings.cosyvoice_duration_slack_seconds),
+        "--duration-outlier-ratio",
+        str(settings.cosyvoice_duration_outlier_ratio),
     ]
     if settings.cosyvoice_fp16:
         command.append("--fp16")
@@ -496,9 +504,12 @@ def _execute_batch_runner(
         check=False,
         env=env,
     )
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     (logs_dir / "tts.log").write_text(result.stdout, encoding="utf-8")
+    (logs_dir / f"tts_{timestamp}.log").write_text(result.stdout, encoding="utf-8")
     if result.stderr:
         (logs_dir / "error.log").write_text(result.stderr, encoding="utf-8")
+        (logs_dir / f"error_{timestamp}.log").write_text(result.stderr, encoding="utf-8")
     if result.returncode != 0 and not result_path.exists():
         message = result.stderr.strip() or result.stdout.strip() or f"{engine_label} batch failed"
         raise RuntimeError(message[-4000:])

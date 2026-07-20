@@ -29,8 +29,10 @@ From the project root, double-click:
 - `Start_TubeAIFlow.bat` to start the backend and frontend
 - `Restart_TubeAIFlow.bat` to stop the running app, then start again
 
-The start script creates the backend virtual environment if needed, installs missing
-dependencies, and opens separate terminal windows for the backend and frontend services.
+The start script uses the existing backend virtual environment without requiring a
+system-wide Python on `PATH`. If the environment does not exist, Python 3.12 is required
+once to create it. The launcher installs missing dependencies and opens separate terminal
+windows for the backend and frontend services.
 Backend runtime configuration is loaded from the local SQLite system settings table.
 
 ## Backend
@@ -54,6 +56,8 @@ npm run dev
 ## Notes
 
 - Runtime configuration is managed on the **System Settings** page and stored locally in SQLite.
+- Qwen3-TTS inference shares `backend/.venv`; only FramePack and CosyVoice keep isolated
+  Python environments because their Torch, CUDA, Diffusers, and Python requirements conflict.
 - API keys are never returned to the frontend after they are saved.
 - Generated project files live under `backend/workspace/projects/{project_id}` by default.
 - FFmpeg, ffprobe, Qwen3-TTS, CosyVoice, DeepSeek, workspace, host, and port are configured on the System Settings page.

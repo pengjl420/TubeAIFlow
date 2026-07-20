@@ -13,15 +13,7 @@ echo  TubeAIFlow - Start
 echo ========================================
 echo.
 
-where python >nul 2>nul
-if errorlevel 1 (
-  echo [ERROR] Python was not found on PATH.
-  echo Please install Python 3.10+ and try again.
-  pause
-  exit /b 1
-)
-
-where npm >nul 2>nul
+where npm.cmd >nul 2>nul
 if errorlevel 1 (
   echo [ERROR] npm was not found on PATH.
   echo Please install Node.js and try again.
@@ -29,9 +21,24 @@ if errorlevel 1 (
   exit /b 1
 )
 
-if not exist "%BACKEND_DIR%\.venv\Scripts\python.exe" (
+set "BACKEND_PYTHON=%BACKEND_DIR%\.venv\Scripts\python.exe"
+
+if not exist "%BACKEND_PYTHON%" (
+  set "BOOTSTRAP_PYTHON="
+  where py.exe >nul 2>nul
+  if not errorlevel 1 set "BOOTSTRAP_PYTHON=py -3.12"
+  if not defined BOOTSTRAP_PYTHON (
+    where python.exe >nul 2>nul
+    if not errorlevel 1 set "BOOTSTRAP_PYTHON=python"
+  )
+  if not defined BOOTSTRAP_PYTHON (
+    echo [ERROR] The backend environment does not exist and Python 3.12 was not found.
+    echo Install Python 3.12, then run this launcher again.
+    pause
+    exit /b 1
+  )
   echo Creating backend virtual environment...
-  python -m venv "%BACKEND_DIR%\.venv"
+  %BOOTSTRAP_PYTHON% -m venv "%BACKEND_DIR%\.venv"
   if errorlevel 1 (
     echo [ERROR] Failed to create backend virtual environment.
     pause
@@ -39,9 +46,17 @@ if not exist "%BACKEND_DIR%\.venv\Scripts\python.exe" (
   )
 )
 
+"%BACKEND_PYTHON%" --version >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] The existing backend virtual environment is damaged.
+  echo Recreate "%BACKEND_DIR%\.venv" with Python 3.12.
+  pause
+  exit /b 1
+)
+
 echo Installing backend dependencies if needed...
 pushd "%BACKEND_DIR%" >nul
-".venv\Scripts\python.exe" -m pip install -r requirements.txt
+"%BACKEND_PYTHON%" -m pip install -r requirements.txt
 if errorlevel 1 (
   popd >nul
   echo [ERROR] Failed to install backend dependencies.
@@ -53,7 +68,7 @@ popd >nul
 if not exist "%FRONTEND_DIR%\node_modules" (
   echo Installing frontend dependencies...
   pushd "%FRONTEND_DIR%" >nul
-  call npm install
+  call npm.cmd install
   if errorlevel 1 (
     popd >nul
     echo [ERROR] Failed to install frontend dependencies.
@@ -64,7 +79,7 @@ if not exist "%FRONTEND_DIR%\node_modules" (
 )
 
 pushd "%BACKEND_DIR%" >nul
-for /f %%P in ('.venv\Scripts\python.exe -m app.find_available_port') do set "BACKEND_PORT=%%P"
+for /f %%P in ('""%BACKEND_PYTHON%" -m app.find_available_port"') do set "BACKEND_PORT=%%P"
 popd >nul
 if not defined BACKEND_PORT (
   echo [ERROR] No available backend port was found.
@@ -74,12 +89,17 @@ if not defined BACKEND_PORT (
 set "APP_PORT_OVERRIDE=%BACKEND_PORT%"
 set "VITE_API_PORT=%BACKEND_PORT%"
 
+if /I "%~1"=="--check" (
+  echo [OK] Backend Python, dependencies, Node.js, npm, and port selection are ready.
+  exit /b 0
+)
+
 echo.
 echo Starting backend on http://127.0.0.1:%BACKEND_PORT% ...
-start "TubeAIFlow Backend" cmd /k "cd /d "%BACKEND_DIR%" && .venv\Scripts\python.exe -m app.run"
+start "TubeAIFlow Backend" cmd /k "cd /d ""%BACKEND_DIR%"" && ""%BACKEND_PYTHON%"" -m app.run"
 
 echo Starting frontend: http://127.0.0.1:5173
-start "TubeAIFlow Frontend" cmd /k "cd /d "%FRONTEND_DIR%" && npm run dev"
+start "TubeAIFlow Frontend" cmd /k "cd /d ""%FRONTEND_DIR%"" && npm.cmd run dev"
 
 echo.
 echo TubeAIFlow is starting.

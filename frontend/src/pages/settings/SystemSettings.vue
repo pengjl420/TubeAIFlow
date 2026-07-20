@@ -380,7 +380,7 @@ onMounted(load)
           </label>
           <label class="field full-width">
             <span>Python 可执行文件</span>
-            <input v-model="settings.qwen_tts_python" placeholder="例如 D:\Qwen3-TTS\.venv\Scripts\python.exe" />
+            <input v-model="settings.qwen_tts_python" placeholder="默认共用 D:\TubeAIFlow\backend\.venv\Scripts\python.exe" />
             <small>必须使用已经安装 Qwen3-TTS、PyTorch 和 soundfile 的独立 Python 环境。</small>
           </label>
           <label class="field full-width">

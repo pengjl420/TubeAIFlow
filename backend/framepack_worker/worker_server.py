@@ -169,6 +169,8 @@ def _update_progress(job: JobState, progress: int, frames: int) -> None:
     with state_lock:
         job.progress = progress
         job.generated_frames = frames
+        if progress >= 97 and job.status == "sampling":
+            job.status = "encoding"
 
 
 if __name__ == "__main__":

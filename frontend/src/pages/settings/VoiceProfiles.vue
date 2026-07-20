@@ -28,7 +28,7 @@ const message = ref('')
 const editingVoice = computed(() => voices.value.find((item) => item.id === editingId.value) || null)
 
 function engineLabel(engine: VoiceTtsEngine) {
-  return { qwen3_tts: 'Qwen3-TTS', chatterbox: 'Chatterbox', cosyvoice: 'CosyVoice' }[engine]
+  return { qwen3_tts: 'Qwen3-TTS', cosyvoice: 'CosyVoice' }[engine]
 }
 
 function audioUrl(voice: VoiceProfile) {
@@ -164,7 +164,6 @@ onMounted(load)
           <span>TTS 引擎</span>
           <select v-model="ttsEngine">
             <option value="qwen3_tts">Qwen3-TTS（默认）</option>
-            <option value="chatterbox">Chatterbox</option>
             <option value="cosyvoice">CosyVoice</option>
           </select>
         </label>

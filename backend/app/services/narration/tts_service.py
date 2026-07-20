@@ -154,11 +154,6 @@ def _validate_configuration(project: Project, segments: list[Segment]) -> tuple[
             "QWEN_TTS_PYTHON": settings.qwen_tts_python,
             "QWEN_TTS_MODEL_DIR": settings.qwen_tts_model_dir,
         }
-    elif engine == "chatterbox":
-        required_paths = {
-            "CHATTERBOX_PYTHON": settings.chatterbox_python,
-            "CHATTERBOX_MODEL_DIR": settings.chatterbox_model_dir,
-        }
     elif engine == "cosyvoice":
         required_paths = {
             "COSYVOICE_ROOT": settings.cosyvoice_root,
@@ -183,18 +178,6 @@ def _validate_configuration(project: Project, segments: list[Segment]) -> tuple[
             raise ValueError("Qwen3-TTS model config cannot be read") from exc
         if model_config.get("tts_model_type") != "base":
             raise ValueError("Qwen3-TTS voice cloning requires a Base model")
-    elif engine == "chatterbox":
-        model_files = {
-            "ve.pt",
-            "s3gen.pt",
-            "grapheme_mtl_merged_expanded_v1.json",
-            f"t3_mtl23ls_{settings.chatterbox_t3_model}.safetensors",
-        }
-        if settings.chatterbox_language.lower() == "zh":
-            model_files.add("Cangjie5_TC.json")
-        missing = sorted(name for name in model_files if not (settings.chatterbox_model_dir / name).is_file())
-        if missing:
-            raise ValueError(f"Chatterbox model files are missing: {', '.join(missing)}")
     elif engine == "cosyvoice":
         if not (settings.cosyvoice_root / "cosyvoice").is_dir():
             raise ValueError("CosyVoice source package is missing under cosyvoice_root")
@@ -230,7 +213,6 @@ def _project_cosyvoice_speed(project: Project) -> float:
 def _engine_label(engine: str) -> str:
     return {
         "qwen3_tts": "Qwen3-TTS",
-        "chatterbox": "Chatterbox",
         "cosyvoice": "CosyVoice",
     }.get(engine, engine)
 
@@ -259,9 +241,6 @@ def _run_tts_batch(
     with gpu_resource.exclusive_gpu(f"tts:{engine}:project:{project.id}"):
         if engine == "qwen3_tts":
             _run_qwen3_tts_batch(project, reference_audio_path, segments, audio_dir, logs_dir)
-            return
-        if engine == "chatterbox":
-            _run_chatterbox_batch(project, reference_audio_path, segments, audio_dir, logs_dir)
             return
         if engine == "cosyvoice":
             _run_cosyvoice_batch(project, reference_audio_path, segments, audio_dir, logs_dir)
@@ -307,49 +286,6 @@ def _run_qwen3_tts_batch(
         str(settings.qwen_tts_max_new_tokens),
     ]
     _execute_batch_runner(project.id, command, settings.qwen_tts_root, logs_dir, result_path, "Qwen3-TTS")
-
-
-def _run_chatterbox_batch(
-    project: Project,
-    reference_audio_path: Path,
-    segments: list[Segment],
-    audio_dir: Path,
-    logs_dir: Path,
-) -> None:
-    settings = get_settings()
-    batch_path, result_path, progress_path = _prepare_batch_files(segments, audio_dir, logs_dir)
-    runner_path = (Path(__file__).parents[2] / "integrations" / "tts" / "chatterbox_runner.py").resolve()
-    command = [
-        str(settings.chatterbox_python),
-        "-s",
-        str(runner_path),
-        "--model-dir",
-        str(settings.chatterbox_model_dir.resolve()),
-        "--batch-file",
-        str(batch_path),
-        "--voice",
-        str(reference_audio_path.resolve()),
-        "--result-file",
-        str(result_path),
-        "--progress-file",
-        str(progress_path),
-        "--device",
-        settings.chatterbox_device,
-        "--language",
-        settings.chatterbox_language,
-        "--t3-model",
-        settings.chatterbox_t3_model,
-        "--exaggeration",
-        str(settings.chatterbox_exaggeration),
-        "--cfg-weight",
-        str(settings.chatterbox_cfg_weight),
-        "--temperature",
-        str(settings.chatterbox_temperature),
-    ]
-    if settings.chatterbox_root is not None:
-        command.extend(("--chatterbox-root", str(settings.chatterbox_root.resolve())))
-    cwd = settings.chatterbox_root or settings.chatterbox_model_dir
-    _execute_batch_runner(project.id, command, cwd, logs_dir, result_path, "Chatterbox")
 
 
 def _run_cosyvoice_batch(

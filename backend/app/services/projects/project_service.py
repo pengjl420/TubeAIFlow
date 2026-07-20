@@ -32,7 +32,7 @@ from app.shared.time import elapsed_seconds, utc_now_iso
 
 
 DEFAULT_TTS_ENGINE = "qwen3_tts"
-SUPPORTED_TTS_ENGINES = {DEFAULT_TTS_ENGINE, "chatterbox", "cosyvoice"}
+SUPPORTED_TTS_ENGINES = {DEFAULT_TTS_ENGINE, "cosyvoice"}
 VIDEO_MODE_NONE = "none"
 VIDEO_MODE_LANDSCAPE = "landscape"
 VIDEO_MODE_AI_SEMANTIC = "ai_semantic"

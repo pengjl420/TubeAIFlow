@@ -123,8 +123,6 @@ def _validate_paths(settings: Settings) -> None:
     for field_name in (
         "qwen_tts_root",
         "qwen_tts_model_dir",
-        "chatterbox_root",
-        "chatterbox_model_dir",
         "cosyvoice_root",
         "cosyvoice_model_dir",
         "vision_embedding_model_dir",
@@ -136,8 +134,6 @@ def _validate_paths(settings: Settings) -> None:
             raise ValueError(f"{field_name} must be an existing directory")
     if settings.qwen_tts_python is not None and not settings.qwen_tts_python.is_file():
         raise ValueError("qwen_tts_python must be an existing file")
-    if settings.chatterbox_python is not None and not settings.chatterbox_python.is_file():
-        raise ValueError("chatterbox_python must be an existing file")
     if settings.cosyvoice_python is not None and not settings.cosyvoice_python.is_file():
         raise ValueError("cosyvoice_python must be an existing file")
     if (

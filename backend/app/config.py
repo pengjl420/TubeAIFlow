@@ -140,15 +140,6 @@ class Settings(BaseModel):
     qwen_tts_dtype: str = "bfloat16"
     qwen_tts_language: str = "Chinese"
     qwen_tts_max_new_tokens: int = Field(default=2048, ge=128, le=16384)
-    chatterbox_root: Path | None = None
-    chatterbox_python: Path | None = None
-    chatterbox_model_dir: Path | None = None
-    chatterbox_device: str = "cuda"
-    chatterbox_language: str = "zh"
-    chatterbox_t3_model: str = "v3"
-    chatterbox_exaggeration: float = Field(default=0.5, ge=0, le=2)
-    chatterbox_cfg_weight: float = Field(default=0.5, ge=0, le=1)
-    chatterbox_temperature: float = Field(default=0.8, gt=0, le=5)
     cosyvoice_root: Path | None = None
     cosyvoice_python: Path | None = None
     cosyvoice_model_dir: Path | None = None
@@ -163,9 +154,6 @@ class Settings(BaseModel):
         "qwen_tts_root",
         "qwen_tts_python",
         "qwen_tts_model_dir",
-        "chatterbox_root",
-        "chatterbox_python",
-        "chatterbox_model_dir",
         "cosyvoice_root",
         "cosyvoice_python",
         "cosyvoice_model_dir",
@@ -268,22 +256,6 @@ class Settings(BaseModel):
             raise ValueError("Vision embedding device and instruction cannot be empty")
         return text
 
-    @field_validator("chatterbox_t3_model")
-    @classmethod
-    def validate_chatterbox_model(cls, value):
-        model = str(value or "").strip().lower()
-        if model not in {"v2", "v3"}:
-            raise ValueError("Unsupported Chatterbox multilingual model")
-        return model
-
-    @field_validator("chatterbox_device", "chatterbox_language")
-    @classmethod
-    def non_empty_chatterbox_setting(cls, value):
-        text = str(value or "").strip()
-        if not text:
-            raise ValueError("Chatterbox device and language cannot be empty")
-        return text
-
     @property
     def database_url(self) -> str:
         return f"sqlite:///{DATABASE_PATH}"
@@ -296,9 +268,6 @@ def _normalize_paths(settings: Settings) -> Settings:
         "qwen_tts_root",
         "qwen_tts_python",
         "qwen_tts_model_dir",
-        "chatterbox_root",
-        "chatterbox_python",
-        "chatterbox_model_dir",
         "cosyvoice_root",
         "cosyvoice_python",
         "cosyvoice_model_dir",

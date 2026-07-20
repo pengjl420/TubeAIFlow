@@ -23,10 +23,16 @@ Model downloading is disabled by default because the required caches exceed
 30 GB. Either prepare the Hugging Face cache manually or explicitly enable
 **Allow model download** in System Settings before starting the worker.
 
+When **CPU Offload** is enabled, the worker uses leaf-level group offloading
+for the text encoders and FramePack transformer. This is required for 8 GB
+GPUs; regular model-level offloading still needs enough VRAM for the complete
+13B transformer and will run out of memory. The first inference step and VAE
+decode can take several minutes on an RTX 4060 Ti 8 GB, so keep the worker
+resident for a batch and route only selected high-value scenes to FramePack.
+
 The F1 transformer uses `vanilla` sampling. If the transformer is changed to
 `lllyasviel/FramePackI2V_HY`, change the sampling type to
 `inverted_anti_drifting` as well.
 
 Worker output is restricted to the configured TubeAIFlow workspace. Logs are
 written to `workspace/logs/framepack_worker.log`.
-

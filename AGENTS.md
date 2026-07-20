@@ -98,7 +98,7 @@
 - FFmpeg
 - ffprobe
 - Qwen3-TTS（默认）
-- 可选 Chatterbox、CosyVoice
+- 可选 CosyVoice
 - httpx
 - python-dotenv
 - PySceneDetect
@@ -110,7 +110,7 @@
 - 管理本地项目
 - 管理参考音频与音色档案
 - 清洗和切分逐字稿
-- 调用 Qwen3-TTS、Chatterbox 或 CosyVoice 生成音频
+- 调用 Qwen3-TTS 或 CosyVoice 生成音频
 - 调用 FFmpeg 处理音频
 - 生成时间轴
 - 根据输入逐字稿和真实音频时间轴生成单一 SRT 字幕
@@ -269,7 +269,6 @@ backend/
     integrations/
       tts/
         qwen_tts.py
-        chatterbox.py
         cosyvoice.py
       llm/
         deepseek.py
@@ -555,7 +554,7 @@ WAV
 
 职责：
 
-- 调用 Qwen3-TTS（默认）、Chatterbox 或 CosyVoice 生成每段音频
+- 调用 Qwen3-TTS（默认）或 CosyVoice 生成每段音频
 - 支持按 segment 单独生成
 - 支持失败重试
 - 支持跳过已生成音频

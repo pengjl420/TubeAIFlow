@@ -244,7 +244,7 @@ class ProjectSettingsTests(unittest.TestCase):
                 id="project-id",
                 name="Name",
                 status="tts_completed",
-                config_json='{"tts_engine": "chatterbox"}',
+                config_json='{"tts_engine": "cosyvoice"}',
             )
             session = FakeSession([segment])
 

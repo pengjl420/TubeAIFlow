@@ -1,6 +1,6 @@
 import { apiClient, unwrap } from './client'
 
-export type VoiceTtsEngine = 'qwen3_tts' | 'chatterbox' | 'cosyvoice'
+export type VoiceTtsEngine = 'qwen3_tts' | 'cosyvoice'
 
 export interface VoiceProfile {
   id: string

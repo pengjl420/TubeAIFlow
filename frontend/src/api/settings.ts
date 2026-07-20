@@ -73,15 +73,6 @@ export interface SystemSettings {
   qwen_tts_dtype: 'bfloat16' | 'float16' | 'float32'
   qwen_tts_language: string
   qwen_tts_max_new_tokens: number
-  chatterbox_root: string | null
-  chatterbox_python: string | null
-  chatterbox_model_dir: string | null
-  chatterbox_device: string
-  chatterbox_language: string
-  chatterbox_t3_model: 'v2' | 'v3'
-  chatterbox_exaggeration: number
-  chatterbox_cfg_weight: number
-  chatterbox_temperature: number
   cosyvoice_root: string | null
   cosyvoice_python: string | null
   cosyvoice_model_dir: string | null

@@ -34,6 +34,7 @@ def ensure_worker(settings: Settings) -> subprocess.Popen:
                 "FRAMEPACK_ALLOW_MODEL_DOWNLOAD": "1" if settings.framepack_allow_model_download else "0",
                 "FRAMEPACK_CPU_OFFLOAD": "1" if settings.framepack_cpu_offload else "0",
                 "FRAMEPACK_ALLOWED_ROOT": str(settings.workspace_dir),
+                "PYTHONUTF8": "1",
             }
         )
         if settings.framepack_cache_dir is not None:

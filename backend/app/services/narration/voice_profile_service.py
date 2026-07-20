@@ -15,7 +15,7 @@ from app.shared.time import utc_now_iso
 
 
 SUPPORTED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".m4a"}
-SUPPORTED_TTS_ENGINES = {"qwen3_tts", "chatterbox", "cosyvoice"}
+SUPPORTED_TTS_ENGINES = {"qwen3_tts", "cosyvoice"}
 WINDOWS_RESERVED_NAMES = {
     "CON",
     "PRN",

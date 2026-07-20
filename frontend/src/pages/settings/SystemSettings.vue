@@ -419,66 +419,6 @@ onMounted(load)
 
       <details class="panel settings-disclosure">
         <summary>
-          <span class="settings-disclosure-heading"><strong>Chatterbox</strong><small>多语言本地配音引擎</small></span>
-          <span class="settings-disclosure-icon" aria-hidden="true">⌄</span>
-        </summary>
-        <div class="settings-disclosure-content">
-        <p class="section-description">配置 Chatterbox Multilingual 本地环境。中文配音默认使用 V3 模型，参考音频只用于声音条件，不要求填写逐字稿。</p>
-        <div class="form-grid">
-          <label class="field full-width">
-            <span>Chatterbox 源码目录（可选）</span>
-            <input v-model="settings.chatterbox_root" placeholder="例如 D:\chatterbox" />
-            <small>使用源码安装时填写项目根目录；如果 Python 环境已经通过 pip 安装 <code>chatterbox-tts</code>，可以留空。</small>
-          </label>
-          <label class="field full-width">
-            <span>Python 可执行文件</span>
-            <input v-model="settings.chatterbox_python" placeholder="例如 D:\chatterbox\.venv\Scripts\python.exe" />
-            <small>填写已安装 Chatterbox、PyTorch 和 torchaudio 的独立 Python 3.11 环境。</small>
-          </label>
-          <label class="field full-width">
-            <span>本地模型目录</span>
-            <input v-model="settings.chatterbox_model_dir" placeholder="例如 D:\models\chatterbox" />
-            <small>使用完整的 Multilingual 模型快照，避免生成任务运行时联网下载模型。</small>
-          </label>
-          <label class="field">
-            <span>运行设备</span>
-            <input v-model="settings.chatterbox_device" placeholder="cuda" />
-            <small>可填写 <code>cuda</code>、<code>cpu</code> 或 <code>mps</code>。</small>
-          </label>
-          <label class="field">
-            <span>模型版本</span>
-            <select v-model="settings.chatterbox_t3_model">
-              <option value="v3">Multilingual V3（推荐）</option>
-              <option value="v2">Multilingual V2</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>语言代码</span>
-            <input v-model="settings.chatterbox_language" placeholder="zh" />
-            <small>中文使用 <code>zh</code>；每次生成只能指定一种语言。</small>
-          </label>
-          <label class="field">
-            <span>表达强度</span>
-            <input v-model.number="settings.chatterbox_exaggeration" type="number" min="0" max="2" step="0.1" />
-            <small>默认 0.5；数值越高通常越有表现力，也可能加快语速。</small>
-          </label>
-          <label class="field">
-            <span>CFG 权重</span>
-            <input v-model.number="settings.chatterbox_cfg_weight" type="number" min="0" max="1" step="0.1" />
-            <small>默认 0.5；参考说话人语速较快时可尝试 0.3。</small>
-          </label>
-          <label class="field">
-            <span>采样温度</span>
-            <input v-model.number="settings.chatterbox_temperature" type="number" min="0.1" max="5" step="0.1" />
-            <small>默认 0.8；提高会增加变化，同时降低稳定性。</small>
-          </label>
-        </div>
-        <div class="notice">Chatterbox 生成的音频包含模型内置的不可感知水印。参考音频语言应与这里的语言代码一致，以减少口音迁移。</div>
-        </div>
-      </details>
-
-      <details class="panel settings-disclosure">
-        <summary>
           <span class="settings-disclosure-heading"><strong>CosyVoice</strong><small>Zero-shot 本地声音克隆引擎</small></span>
           <span class="settings-disclosure-icon" aria-hidden="true">⌄</span>
         </summary>

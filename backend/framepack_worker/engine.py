@@ -32,6 +32,7 @@ class FramePackEngine:
             HunyuanVideoFramepackPipeline,
             HunyuanVideoFramepackTransformer3DModel,
         )
+        from diffusers.hooks import apply_group_offloading
         from diffusers.utils import export_to_video, load_image
         from transformers import SiglipImageProcessor, SiglipVisionModel
 
@@ -62,7 +63,23 @@ class FramePackEngine:
         )
         pipeline.vae.enable_tiling()
         if self.cpu_offload:
-            pipeline.enable_model_cpu_offload()
+            onload_device = torch.device("cuda")
+            offload_device = torch.device("cpu")
+            for component in (
+                pipeline.text_encoder,
+                pipeline.text_encoder_2,
+                pipeline.transformer,
+            ):
+                apply_group_offloading(
+                    component,
+                    onload_device=onload_device,
+                    offload_device=offload_device,
+                    offload_type="leaf_level",
+                    use_stream=True,
+                    low_cpu_mem_usage=True,
+                )
+            pipeline.image_encoder.to(onload_device)
+            pipeline.vae.to(onload_device)
         else:
             pipeline.to("cuda")
         self.pipeline = pipeline
@@ -91,19 +108,23 @@ class FramePackEngine:
             return callback_kwargs
 
         generator = self.torch.Generator(device="cpu").manual_seed(request.seed)
-        frames = self.pipeline(
-            image=self.load_image(str(input_path)),
-            prompt=request.prompt,
-            height=request.height,
-            width=request.width,
-            num_frames=num_frames,
-            latent_window_size=request.latent_window_size,
-            num_inference_steps=request.steps,
-            guidance_scale=request.guidance_scale,
-            generator=generator,
-            sampling_type=self.sampling_type,
-            callback_on_step_end=callback,
-        ).frames[0]
+        try:
+            frames = self.pipeline(
+                image=self.load_image(str(input_path)),
+                prompt=request.prompt,
+                height=request.height,
+                width=request.width,
+                num_frames=num_frames,
+                latent_window_size=request.latent_window_size,
+                num_inference_steps=request.steps,
+                guidance_scale=request.guidance_scale,
+                generator=generator,
+                sampling_type=self.sampling_type,
+                callback_on_step_end=callback,
+            ).frames[0]
+        finally:
+            if self.torch.cuda.is_available():
+                self.torch.cuda.empty_cache()
         if cancel_event.is_set():
             raise FramePackCancelled("FramePack task cancelled")
         on_progress(97, len(frames))
@@ -136,4 +157,3 @@ def _safe_path(value: str, must_exist: bool) -> Path:
     if must_exist and not path.is_file():
         raise ValueError(f"FramePack 输入图片不存在：{path}")
     return path
-

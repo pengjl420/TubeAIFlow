@@ -13,9 +13,6 @@ class SettingsModelTests(unittest.TestCase):
             qwen_tts_root="",
             qwen_tts_python="  ",
             qwen_tts_model_dir=None,
-            chatterbox_root="",
-            chatterbox_python="  ",
-            chatterbox_model_dir=None,
             cosyvoice_root="",
             cosyvoice_python="  ",
             cosyvoice_model_dir=None,
@@ -27,9 +24,6 @@ class SettingsModelTests(unittest.TestCase):
         self.assertIsNone(settings.qwen_tts_root)
         self.assertIsNone(settings.qwen_tts_python)
         self.assertIsNone(settings.qwen_tts_model_dir)
-        self.assertIsNone(settings.chatterbox_root)
-        self.assertIsNone(settings.chatterbox_python)
-        self.assertIsNone(settings.chatterbox_model_dir)
         self.assertIsNone(settings.cosyvoice_root)
         self.assertIsNone(settings.cosyvoice_python)
         self.assertIsNone(settings.cosyvoice_model_dir)
@@ -41,10 +35,6 @@ class SettingsModelTests(unittest.TestCase):
     def test_qwen_dtype_is_validated(self) -> None:
         with self.assertRaisesRegex(ValueError, "Unsupported Qwen3-TTS dtype"):
             Settings(qwen_tts_dtype="int8")
-
-    def test_chatterbox_model_version_is_validated(self) -> None:
-        with self.assertRaisesRegex(ValueError, "Unsupported Chatterbox"):
-            Settings(chatterbox_t3_model="v4")
 
     def test_vision_embedding_dtype_is_validated(self) -> None:
         with self.assertRaisesRegex(ValueError, "Unsupported vision embedding dtype"):

@@ -1,8 +1,24 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlmodel import Session
 
-from app.api import batches, exports, projects, renders, segments, settings, subtitles, tasks, tts, voices
-from app.database import create_db_and_tables
+from app.api import (
+    assets,
+    batches,
+    exports,
+    projects,
+    quality,
+    renders,
+    segments,
+    settings,
+    storyboard,
+    subtitles,
+    tasks,
+    tts,
+    voices,
+)
+from app.database import create_db_and_tables, engine
+from app.services.narration import voice_profile_service
 from app.services.tasks import task_worker
 
 
@@ -20,6 +36,8 @@ app.add_middleware(
 @app.on_event("startup")
 def on_startup() -> None:
     create_db_and_tables()
+    with Session(engine) as session:
+        voice_profile_service.migrate_profile_directories(session)
     task_worker.recover_and_start_worker()
 
 
@@ -29,12 +47,15 @@ def health() -> dict:
 
 
 app.include_router(projects.router, prefix="/api")
+app.include_router(assets.router, prefix="/api")
 app.include_router(batches.router, prefix="/api")
 app.include_router(voices.router, prefix="/api")
 app.include_router(segments.router, prefix="/api")
 app.include_router(tts.router, prefix="/api")
 app.include_router(subtitles.router, prefix="/api")
+app.include_router(storyboard.router, prefix="/api")
 app.include_router(exports.router, prefix="/api")
 app.include_router(renders.router, prefix="/api")
 app.include_router(tasks.router, prefix="/api")
+app.include_router(quality.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")

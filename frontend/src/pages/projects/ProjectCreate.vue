@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 
 import { createProject, selectDirectory } from '../../api/projects'
 import { listVoices, type VoiceProfile } from '../../api/voices'
+import type { SemanticReviewMode, VideoGenerationMode } from '../../types/project'
 
 const router = useRouter()
 const name = ref('')
@@ -12,7 +13,8 @@ const voiceProfileId = ref('')
 const outputDir = ref('D:\\video_darft')
 const outputFilename = ref('')
 const mediaVideoDir = ref('')
-const includeVideo = ref(false)
+const videoMode = ref<VideoGenerationMode>('none')
+const semanticReviewMode = ref<SemanticReviewMode>('manual')
 const saving = ref(false)
 const selectingFolder = ref<'output' | 'video' | null>(null)
 const error = ref('')
@@ -55,8 +57,8 @@ async function submit() {
     error.value = '请选择输出文件夹'
     return
   }
-  if (includeVideo.value && !mediaVideoDir.value.trim()) {
-    error.value = '勾选生成视频后，必须选择原始素材文件夹'
+  if (videoMode.value === 'landscape' && !mediaVideoDir.value.trim()) {
+    error.value = '纯风景素材拼接必须选择原始素材文件夹'
     return
   }
   saving.value = true
@@ -67,8 +69,10 @@ async function submit() {
       voice_profile_id: voiceProfileId.value,
       output_dir: outputDir.value.trim(),
       output_filename: outputFilename.value.trim(),
-      media_video_dir: mediaVideoDir.value.trim(),
-      include_video: includeVideo.value,
+      media_video_dir: videoMode.value === 'landscape' ? mediaVideoDir.value.trim() : '',
+      include_video: videoMode.value !== 'none',
+      video_mode: videoMode.value,
+      semantic_review_mode: semanticReviewMode.value,
     })
     router.push(`/projects/${project.id}`)
   } catch (err) {
@@ -151,11 +155,17 @@ onMounted(async () => {
 
       <div class="panel form-section-card">
         <div class="section-head"><h2>一键生成选项</h2></div>
-        <label class="checkbox-field">
-          <input v-model="includeVideo" type="checkbox" />
-          <span>生成视频<small>开启后，一键生成会在字幕完成后合并视频。</small></span>
+        <label class="field reference-field">
+          <span>视频生成方式</span>
+          <select v-model="videoMode">
+            <option value="none">不生成视频（仅配音与原文 SRT）</option>
+            <option value="landscape">纯风景素材拼接</option>
+            <option value="ai_semantic">AI 语义视频拼接</option>
+            <option value="ai_generated_images">本地 AI 分镜图片视频</option>
+          </select>
+          <span class="muted">三种方式共用切段、TTS、音频合并和 SRT 生成，只在字幕完成后分流。</span>
         </label>
-        <label v-if="includeVideo" class="field reference-field">
+        <label v-if="videoMode === 'landscape'" class="field reference-field">
           <span>原始素材文件夹</span>
           <div class="inline-form">
             <input v-model="mediaVideoDir" readonly placeholder="请选择原始素材文件夹" />
@@ -169,6 +179,14 @@ onMounted(async () => {
             </button>
           </div>
           <span class="muted">生成最终视频时会扫描该目录中的视频素材。</span>
+        </label>
+        <label v-if="videoMode === 'ai_semantic' || videoMode === 'ai_generated_images'" class="field reference-field">
+          <span>素材审核方式</span>
+          <select v-model="semanticReviewMode">
+            <option value="manual">人工审核拼接</option>
+            <option value="automatic">自动审核拼接</option>
+          </select>
+          <span class="muted">人工模式保持现有逐分镜确认流程；自动模式按匹配度从高到低选用合格且不重复的素材。</span>
         </label>
       </div>
     </div>

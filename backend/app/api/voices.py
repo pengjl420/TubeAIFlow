@@ -29,6 +29,7 @@ def create_voice(
     name: str = Form(...),
     tts_engine: str = Form("qwen3_tts"),
     reference_audio_text: str = Form(""),
+    cosyvoice_speed: float = Form(1.0),
     file: UploadFile = File(...),
     session: Session = Depends(get_session),
 ) -> dict:
@@ -38,6 +39,7 @@ def create_voice(
             name=name,
             tts_engine=tts_engine,
             reference_audio_text=reference_audio_text,
+            cosyvoice_speed=cosyvoice_speed,
             source=file.file,
             original_filename=file.filename or "reference.wav",
         )
@@ -53,6 +55,7 @@ def update_voice(
     name: str = Form(...),
     tts_engine: str = Form("qwen3_tts"),
     reference_audio_text: str = Form(""),
+    cosyvoice_speed: float | None = Form(None),
     file: UploadFile | None = File(None),
     session: Session = Depends(get_session),
 ) -> dict:
@@ -66,6 +69,7 @@ def update_voice(
             name=name,
             tts_engine=tts_engine,
             reference_audio_text=reference_audio_text,
+            cosyvoice_speed=cosyvoice_speed,
             source=file.file if file else None,
             original_filename=file.filename if file else None,
         )

@@ -1,12 +1,13 @@
 import { apiClient, unwrap } from './client'
 
-export type VoiceTtsEngine = 'qwen3_tts' | 'chatterbox' | 'cosyvoice'
+export type VoiceTtsEngine = 'qwen3_tts' | 'cosyvoice'
 
 export interface VoiceProfile {
   id: string
   name: string
   tts_engine: VoiceTtsEngine
   reference_audio_text: string
+  cosyvoice_speed: number
   original_filename: string
   created_at: string
   updated_at: string
@@ -16,6 +17,7 @@ export interface SaveVoiceInput {
   name: string
   tts_engine: VoiceTtsEngine
   reference_audio_text: string
+  cosyvoice_speed: number
   file?: File | null
 }
 
@@ -43,6 +45,7 @@ function toFormData(input: SaveVoiceInput): FormData {
   form.append('name', input.name)
   form.append('tts_engine', input.tts_engine)
   form.append('reference_audio_text', input.reference_audio_text)
+  form.append('cosyvoice_speed', String(input.cosyvoice_speed))
   if (input.file) form.append('file', input.file)
   return form
 }

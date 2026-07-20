@@ -44,6 +44,13 @@ def clear_secret(payload: ClearSecretRequest, session: Session = Depends(get_ses
     return {"success": True, "data": data}
 
 
+@router.get("/settings/media-providers/status")
+def get_media_provider_statuses(session: Session = Depends(get_session)) -> dict:
+    from app.services.media_library.media_provider_service import get_provider_statuses
+
+    return {"success": True, "data": {"providers": get_provider_statuses(session)}}
+
+
 @router.get("/settings/ffmpeg/status")
 def get_ffmpeg_status() -> dict:
     return {"success": True, "data": system_settings_service.get_ffmpeg_status()}
@@ -56,3 +63,8 @@ def install_ffmpeg(session: Session = Depends(get_session)) -> dict:
     except (OSError, ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail={"success": False, "error": str(exc)}) from exc
     return {"success": True, "data": data}
+
+
+@router.get("/settings/framepack/status")
+def get_framepack_status() -> dict:
+    return {"success": True, "data": system_settings_service.get_framepack_status()}

@@ -9,7 +9,9 @@ from app.config import get_settings
 from app.models.project import Project
 from app.models.narration import Segment
 from app.models.batch import BatchItem, BatchJob
+from app.models.media import GeneratedImageVariant, MediaFile, MediaShot, SceneAssignment, SceneCandidate
 from app.models.task import TaskRun
+from app.models.storyboard import SubtitleCue, VisualScene
 from app.infrastructure.file_storage import ensure_inside_any, project_dir
 from app.infrastructure.recycle_bin import move_existing_to_recycle_bin
 from app.infrastructure.project_layout import (
@@ -17,6 +19,7 @@ from app.infrastructure.project_layout import (
     get_final_audio_path,
     get_final_srt_path,
     get_final_video_path,
+    get_legacy_project_work_dir,
     get_output_stem,
     get_project_output_dir,
     get_project_work_dir,
@@ -29,7 +32,23 @@ from app.shared.time import elapsed_seconds, utc_now_iso
 
 
 DEFAULT_TTS_ENGINE = "qwen3_tts"
-SUPPORTED_TTS_ENGINES = {DEFAULT_TTS_ENGINE, "chatterbox", "cosyvoice"}
+SUPPORTED_TTS_ENGINES = {DEFAULT_TTS_ENGINE, "cosyvoice"}
+VIDEO_MODE_NONE = "none"
+VIDEO_MODE_LANDSCAPE = "landscape"
+VIDEO_MODE_AI_SEMANTIC = "ai_semantic"
+VIDEO_MODE_AI_GENERATED_IMAGES = "ai_generated_images"
+SEMANTIC_REVIEW_MANUAL = "manual"
+SEMANTIC_REVIEW_AUTO = "automatic"
+SUPPORTED_SEMANTIC_REVIEW_MODES = {
+    SEMANTIC_REVIEW_MANUAL,
+    SEMANTIC_REVIEW_AUTO,
+}
+SUPPORTED_VIDEO_MODES = {
+    VIDEO_MODE_NONE,
+    VIDEO_MODE_LANDSCAPE,
+    VIDEO_MODE_AI_SEMANTIC,
+    VIDEO_MODE_AI_GENERATED_IMAGES,
+}
 EDITABLE_STATUSES = {"created", "script_imported", "segmented"}
 GENERATING_STATUSES = {
     "narration_in_progress",
@@ -131,6 +150,37 @@ def is_project_editable(project: Project) -> bool:
     return project.status in EDITABLE_STATUSES
 
 
+def normalize_video_mode(video_mode: str | None, include_video: bool = False) -> str:
+    """Resolve the explicit video mode while preserving old include_video projects."""
+    normalized = str(video_mode or "").strip().lower()
+    if not normalized:
+        return VIDEO_MODE_LANDSCAPE if include_video else VIDEO_MODE_NONE
+    if normalized not in SUPPORTED_VIDEO_MODES:
+        raise ValueError("Unsupported video generation mode")
+    return normalized
+
+
+def get_project_video_mode(project: Project) -> str:
+    config = load_project_config(project)
+    return normalize_video_mode(
+        config.get("video_mode"),
+        bool(config.get("include_video", False)),
+    )
+
+
+def normalize_semantic_review_mode(mode: str | None) -> str:
+    normalized = str(mode or SEMANTIC_REVIEW_MANUAL).strip().lower()
+    if normalized not in SUPPORTED_SEMANTIC_REVIEW_MODES:
+        raise ValueError("Unsupported semantic video review mode")
+    return normalized
+
+
+def get_semantic_review_mode(project: Project) -> str:
+    return normalize_semantic_review_mode(
+        load_project_config(project).get("semantic_review_mode")
+    )
+
+
 def delete_project(session: Session, project: Project) -> dict:
     active_task = session.exec(
         select(TaskRun).where(
@@ -152,6 +202,36 @@ def delete_project(session: Session, project: Project) -> dict:
         session.delete(task)
     for segment in session.exec(select(Segment).where(Segment.project_id == project.id)).all():
         session.delete(segment)
+    for cue in session.exec(
+        select(SubtitleCue).where(SubtitleCue.project_id == project.id)
+    ).all():
+        session.delete(cue)
+    for assignment in session.exec(
+        select(SceneAssignment).where(SceneAssignment.project_id == project.id)
+    ).all():
+        session.delete(assignment)
+    generated_variants = list(
+        session.exec(
+            select(GeneratedImageVariant).where(GeneratedImageVariant.project_id == project.id)
+        ).all()
+    )
+    generated_media_ids = {item.media_file_id for item in generated_variants if item.media_file_id}
+    for variant in generated_variants:
+        session.delete(variant)
+    for media_id in generated_media_ids:
+        for shot in session.exec(select(MediaShot).where(MediaShot.media_file_id == media_id)).all():
+            session.delete(shot)
+        media_file = session.get(MediaFile, media_id)
+        if media_file and media_file.provider == "local_image_generation":
+            session.delete(media_file)
+    for candidate in session.exec(
+        select(SceneCandidate).where(SceneCandidate.project_id == project.id)
+    ).all():
+        session.delete(candidate)
+    for scene in session.exec(
+        select(VisualScene).where(VisualScene.project_id == project.id)
+    ).all():
+        session.delete(scene)
     for item in batch_items:
         session.delete(item)
     session.delete(project)
@@ -181,12 +261,13 @@ def _project_artifact_paths(project: Project) -> list[Path]:
     paths = [
         project_dir(settings.workspace_dir, project.id),
         get_project_work_dir(project, settings.workspace_dir),
+        get_legacy_project_work_dir(project, settings.workspace_dir),
         get_final_audio_path(project, settings.workspace_dir),
         output_root / f"{stem}.mp3",
         get_final_srt_path(project, settings.workspace_dir),
         get_final_video_path(project, settings.workspace_dir),
     ]
-    return paths
+    return list(dict.fromkeys(paths))
 
 
 def save_script(session: Session, project: Project, raw_text: str) -> Project:
@@ -221,7 +302,11 @@ def create_segments(session: Session, project: Project) -> list[Segment]:
     settings = get_settings()
     clean_path = ensure_inside_any(
         Path(project.script_clean_path),
-        [get_project_work_dir(project, settings.workspace_dir), project_dir(settings.workspace_dir, project.id)],
+        [
+            get_project_work_dir(project, settings.workspace_dir),
+            get_legacy_project_work_dir(project, settings.workspace_dir),
+            project_dir(settings.workspace_dir, project.id),
+        ],
     )
     if not clean_path.is_file():
         raise ValueError("Cleaned script file does not exist")
@@ -318,6 +403,12 @@ def update_output_settings(
     directory.mkdir(parents=True, exist_ok=True)
 
     config = load_project_config(project)
+    if not str(config.get("project_directory_name") or "").strip():
+        config["project_directory_name"] = _available_project_directory_name(
+            directory,
+            project.name,
+            project.id,
+        )
     config["output_filename"] = safe_filename_stem(output_filename or project.name or _timestamp_stem())
     project.output_dir = str(directory)
     project.config_json = json.dumps(config, ensure_ascii=False)
@@ -340,6 +431,8 @@ def update_project_settings(
     reference_audio_text: str = "",
     include_video: bool = False,
     voice_profile_id: str = "",
+    video_mode: str | None = None,
+    semantic_review_mode: str | None = None,
 ) -> Project:
     project_name = name.strip()
     if not project_name:
@@ -348,6 +441,7 @@ def update_project_settings(
         raise ValueError("Output directory is required")
     normalized_tts_engine = tts_engine.strip().lower()
     normalized_reference_audio_text = reference_audio_text.strip()
+    normalized_cosyvoice_speed = 1.0
     if voice_profile_id.strip():
         from app.services.narration import voice_profile_service
 
@@ -357,14 +451,18 @@ def update_project_settings(
         profile_config = voice_profile_service.load_profile_config(selected_profile)
         normalized_tts_engine = str(profile_config.get("tts_engine") or DEFAULT_TTS_ENGINE)
         normalized_reference_audio_text = str(profile_config.get("reference_audio_text") or "").strip()
+        normalized_cosyvoice_speed = voice_profile_service.profile_cosyvoice_speed(profile_config)
     if normalized_tts_engine not in SUPPORTED_TTS_ENGINES:
         raise ValueError("Unsupported TTS engine")
     if normalized_tts_engine == "cosyvoice" and not normalized_reference_audio_text:
         raise ValueError("CosyVoice requires the reference audio transcript")
 
+    resolved_video_mode = normalize_video_mode(video_mode, include_video)
+    resolved_semantic_review_mode = normalize_semantic_review_mode(semantic_review_mode)
+    include_video = resolved_video_mode != VIDEO_MODE_NONE
     video_directory: Path | None = None
-    if include_video and not media_video_dir.strip():
-        raise ValueError("Video material directory is required when video generation is enabled")
+    if resolved_video_mode == VIDEO_MODE_LANDSCAPE and not media_video_dir.strip():
+        raise ValueError("Video material directory is required for landscape video generation")
     if media_video_dir.strip():
         video_directory = Path(media_video_dir).expanduser().resolve()
         if not video_directory.is_dir():
@@ -376,11 +474,21 @@ def update_project_settings(
     config = load_project_config(project)
     previous_tts_engine = str(config.get("tts_engine") or DEFAULT_TTS_ENGINE).strip().lower()
     previous_reference_audio_text = str(config.get("reference_audio_text") or "").strip()
+    previous_cosyvoice_speed = float(config.get("cosyvoice_speed", 1.0))
     previous_voice_profile_id = str(config.get("voice_profile_id") or "")
+    if not str(config.get("project_directory_name") or "").strip():
+        config["project_directory_name"] = _available_project_directory_name(
+            output_directory,
+            project_name,
+            project.id,
+        )
     config["output_filename"] = safe_filename_stem(output_filename or project_name or _timestamp_stem())
     config["tts_engine"] = normalized_tts_engine
     config["reference_audio_text"] = normalized_reference_audio_text
+    config["cosyvoice_speed"] = normalized_cosyvoice_speed
     config["include_video"] = include_video
+    config["video_mode"] = resolved_video_mode
+    config["semantic_review_mode"] = resolved_semantic_review_mode
     if video_directory:
         config["media_video_dir"] = str(video_directory)
     else:
@@ -394,6 +502,7 @@ def update_project_settings(
         config["voice_profile_name"] = selected_profile.name
         config["tts_engine"] = normalized_tts_engine
         config["reference_audio_text"] = normalized_reference_audio_text
+        config["cosyvoice_speed"] = normalized_cosyvoice_speed
         config["reference_audio_filename"] = str(
             profile_config.get("original_filename") or audio_path.name
         )
@@ -403,6 +512,7 @@ def update_project_settings(
     if (
         previous_tts_engine != normalized_tts_engine
         or previous_reference_audio_text != normalized_reference_audio_text
+        or previous_cosyvoice_speed != normalized_cosyvoice_speed
         or previous_voice_profile_id != str(config.get("voice_profile_id") or "")
     ):
         if _reset_tts_segments(session, project.id):
@@ -450,3 +560,13 @@ def _reset_tts_segments(session: Session, project_id: str) -> bool:
 
 def _timestamp_stem() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+
+def _available_project_directory_name(output_root: Path, project_name: str, project_id: str) -> str:
+    base = safe_filename_stem(project_name or project_id)
+    candidate = base
+    suffix = 2
+    while (output_root / candidate).exists():
+        candidate = safe_filename_stem(f"{base}-{suffix}")
+        suffix += 1
+    return candidate

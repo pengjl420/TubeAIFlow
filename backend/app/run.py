@@ -1,3 +1,4 @@
+import asyncio
 import os
 from pathlib import Path
 from typing import BinaryIO
@@ -17,6 +18,7 @@ def main() -> None:
         return
 
     try:
+        configure_event_loop()
         settings = get_settings()
         port = int(os.environ.get("APP_PORT_OVERRIDE") or settings.app_port)
         uvicorn.run(
@@ -29,6 +31,12 @@ def main() -> None:
         )
     finally:
         release_instance_lock(lock_file)
+
+
+def configure_event_loop() -> None:
+    """Avoid noisy Proactor socket shutdown errors in the Windows HTTP server."""
+    if os.name == "nt":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 
 def acquire_instance_lock(path: Path) -> BinaryIO | None:

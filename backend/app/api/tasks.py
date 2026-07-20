@@ -6,13 +6,14 @@ from sqlmodel import Session, select
 from app.database import get_session
 from app.config import get_settings
 from app.infrastructure import process_runner as task_control
-from app.infrastructure.project_layout import get_project_work_dir
-from app.infrastructure.project_layout import load_project_config
+from app.infrastructure.project_layout import get_project_work_dir, load_project_config
+from app.integrations.tts.runner_io import write_json
 from app.models.batch import BatchItem
 from app.models.task import TaskRun
 from app.services.projects import project_service
 from app.services.tasks import task_service, task_worker
 from app.shared.time import utc_now_iso
+from app.workflows import video_synthesis
 
 
 router = APIRouter(tags=["tasks"])
@@ -24,6 +25,10 @@ def cancel_project_task(project_id: str, session: Session = Depends(get_session)
     if not project:
         raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
     task = task_service.get_active_project_task(session, project_id)
+    if not task:
+        latest_video = _latest_ai_video_task(session, project_id)
+        if latest_video and latest_video.status == "review_required":
+            task = latest_video
     if task:
         was_running = task.status == "running"
         task_service.request_cancel(session, task)
@@ -108,6 +113,86 @@ def start_project_workflow(project_id: str, session: Session = Depends(get_sessi
     return {"success": True, "data": task_service.serialize_task(session, task)}
 
 
+@router.post("/projects/{project_id}/workflows/video/start")
+def start_video_workflow(project_id: str, session: Session = Depends(get_session)) -> dict:
+    project = project_service.get_project(session, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
+    if project_service.get_project_video_mode(project) not in {
+        project_service.VIDEO_MODE_AI_SEMANTIC,
+        project_service.VIDEO_MODE_AI_GENERATED_IMAGES,
+    }:
+        raise HTTPException(
+            status_code=409,
+            detail={"success": False, "error": "当前项目未启用 AI 语义视频生成"},
+        )
+    if not video_synthesis.has_subtitles(session, project_id):
+        raise HTTPException(
+            status_code=400,
+            detail={"success": False, "error": "请先完成配音字幕流程或导入 SRT"},
+        )
+    active = task_service.get_active_project_task(session, project_id)
+    if active:
+        if active.workflow != "video_synthesis":
+            raise HTTPException(
+                status_code=409,
+                detail={"success": False, "error": "项目当前有其他生成任务正在执行"},
+            )
+        return {"success": True, "data": task_service.serialize_task(session, active)}
+
+    latest = _latest_ai_video_task(session, project_id)
+    if latest and latest.status == "review_required":
+        resume_stage = video_synthesis.initial_stage(session, project_id)
+        if resume_stage in {"storyboard", "asset_search"}:
+            pass
+        elif latest.current_stage in {"asset_review", "image_review"}:
+            missing = video_synthesis.assignment_gap(session, project_id)
+            if missing:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "success": False,
+                        "error": f"仍有 {missing} 个场景未确认素材，请先完成素材审核",
+                    },
+                )
+            resume_stage = latest.current_stage
+        else:
+            resume_stage = "scene_render"
+        task_service.resume_review_task(session, latest, current_stage=resume_stage)
+        task = latest
+    else:
+        task = task_service.enqueue_project_task(
+            session,
+            project,
+            workflow="video_synthesis",
+            include_video=True,
+            current_stage=video_synthesis.initial_stage(session, project_id),
+        )
+    task_worker.wake_worker()
+    return {"success": True, "data": task_service.serialize_task(session, task)}
+
+
+@router.get("/projects/{project_id}/workflows/video/status")
+def video_workflow_status(project_id: str, session: Session = Depends(get_session)) -> dict:
+    project = project_service.get_project(session, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
+    task = _latest_ai_video_task(session, project_id)
+    return {"success": True, "data": task_service.serialize_task(session, task)}
+
+
+def _latest_ai_video_task(session: Session, project_id: str) -> TaskRun | None:
+    """Include full-generation tasks after they have entered the AI video stages."""
+    task = task_service.get_latest_project_workflow_task(session, project_id, "video_synthesis")
+    full_task = task_service.get_latest_project_workflow_task(
+        session, project_id, "narration_generation"
+    )
+    if full_task and full_task.current_stage in video_synthesis.STAGES:
+        if task is None or full_task.queue_sequence > task.queue_sequence:
+            return full_task
+    return task
+
+
 @router.get("/tasks")
 def list_tasks(session: Session = Depends(get_session)) -> dict:
     tasks = list(
@@ -126,8 +211,6 @@ def _mark_progress_cancelled(project) -> None:
             if isinstance(data, dict) and data.get("status") == "running":
                 data["status"] = "cancelled"
                 data["message"] = "Task was stopped by the user"
-                temp_path = path.with_suffix(path.suffix + ".tmp")
-                temp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-                temp_path.replace(path)
+                write_json(path, data)
         except (OSError, json.JSONDecodeError):
             pass

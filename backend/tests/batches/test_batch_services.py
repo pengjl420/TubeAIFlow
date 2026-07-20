@@ -119,6 +119,59 @@ class GenerationCheckpointTests(unittest.TestCase):
         create_srt.assert_called_once()
         self.assertEqual(project.status, "narration_ready")
 
+    def test_landscape_mode_branches_after_shared_subtitle_stage(self) -> None:
+        session = MagicMock()
+        project = Project(
+            id="p1",
+            name="Project",
+            config_json='{"include_video":true,"video_mode":"landscape"}',
+        )
+        stages: list[str] = []
+        with (
+            patch.object(narration_generation, "_create_subtitles") as create_subtitles,
+            patch.object(narration_generation.rough_cut_service, "compose_video") as compose_video,
+            patch.object(narration_generation.video_synthesis, "run_video_synthesis") as smart_video,
+        ):
+            narration_generation.run_project_generation(
+                session, project, "subtitles", True, stages.append
+            )
+
+        create_subtitles.assert_called_once_with(session, project)
+        compose_video.assert_called_once_with(session, project)
+        smart_video.assert_not_called()
+        self.assertEqual(stages, ["video", "completed"])
+
+    def test_ai_semantic_mode_branches_after_shared_subtitle_stage(self) -> None:
+        session = MagicMock()
+        project = Project(
+            id="p1",
+            name="Project",
+            config_json='{"include_video":true,"video_mode":"ai_semantic"}',
+        )
+        stages: list[str] = []
+
+        def finish_smart_video(_session, _project, stage, on_stage_changed):
+            self.assertEqual(stage, "storyboard")
+            on_stage_changed("completed")
+
+        with (
+            patch.object(narration_generation, "_create_subtitles") as create_subtitles,
+            patch.object(narration_generation.rough_cut_service, "compose_video") as compose_video,
+            patch.object(
+                narration_generation.video_synthesis,
+                "run_video_synthesis",
+                side_effect=finish_smart_video,
+            ) as smart_video,
+        ):
+            narration_generation.run_project_generation(
+                session, project, "subtitles", True, stages.append
+            )
+
+        create_subtitles.assert_called_once_with(session, project)
+        compose_video.assert_not_called()
+        smart_video.assert_called_once()
+        self.assertEqual(stages, ["storyboard", "completed"])
+
 
 class BatchApiTests(unittest.TestCase):
     def test_create_batch_preserves_file_order_and_avoids_duplicate_output_names(self) -> None:

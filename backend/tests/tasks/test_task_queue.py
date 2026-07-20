@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -163,6 +164,38 @@ class TaskQueueTests(unittest.TestCase):
             self.assertEqual(batch.status, "completed")
             self.assertEqual(batch.completed, 1)
 
+    def test_failed_task_can_resume_from_verified_checkpoint(self) -> None:
+        with Session(self.engine) as session:
+            project = Project(id="project", name="Project", status="failed")
+            task = TaskRun(
+                id="task",
+                project_id=project.id,
+                status="failed",
+                current_stage="tts",
+                queue_sequence=1,
+                error_message="TTS 有 1 段生成失败",
+                finished_at="2026-07-20T00:00:00+00:00",
+                checkpoint_json=(
+                    '{"current_stage":"tts","stage_history":'
+                    '[{"event":"failed","stage":"tts","at":"earlier"}]}'
+                ),
+            )
+            session.add(project)
+            session.add(task)
+            session.commit()
+
+            task_service.resume_failed_task(session, task, current_stage="audio_merge")
+
+            self.assertEqual(task.status, "queued")
+            self.assertEqual(task.current_stage, "audio_merge")
+            self.assertIsNone(task.error_message)
+            self.assertIsNone(task.finished_at)
+            self.assertGreater(task.queue_sequence, 1)
+            self.assertEqual(project.status, "narration_in_progress")
+            checkpoint = json.loads(task.checkpoint_json)
+            self.assertEqual(checkpoint["current_stage"], "audio_merge")
+            self.assertEqual(checkpoint["stage_history"][-1]["event"], "resumed")
+
 
 class DatabaseMigrationTests(unittest.TestCase):
     def test_existing_database_adds_task_table_once(self) -> None:
@@ -189,7 +222,19 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertIn("compensation_count", columns)
         self.assertIn("uq_task_runs_active_project", indexes)
         self.assertIn("uq_task_runs_single_running", indexes)
-        self.assertEqual(versions, [(1,), (2,), (3,)])
+        self.assertIn("subtitle_cues", table_names)
+        self.assertIn("visual_scenes", table_names)
+        self.assertIn("media_files", table_names)
+        self.assertIn("media_shots", table_names)
+        self.assertIn("media_keyframes", table_names)
+        self.assertIn("scene_candidates", table_names)
+        self.assertIn("scene_assignments", table_names)
+        self.assertIn("media_provider_states", table_names)
+        self.assertIn("media_query_cache", table_names)
+        self.assertEqual(
+            versions,
+            [(1,), (2,), (3,), (4,), (5,), (6,), (7,), (8,), (9,), (10,), (11,)],
+        )
 
     def test_source_subtitle_migration_removes_bilingual_schema_and_config(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

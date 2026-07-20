@@ -127,7 +127,6 @@ function ttsEngineName(project: Project) {
     : ''
   return {
     qwen3_tts: 'Qwen3-TTS',
-    chatterbox: 'Chatterbox',
     cosyvoice: 'CosyVoice',
   }[engine] || engine
 }

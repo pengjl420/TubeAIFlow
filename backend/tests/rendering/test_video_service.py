@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from app.config import LandscapeTransitionEffect
 from app.services.rendering import rough_cut_service as video_service
 
 
@@ -73,6 +74,53 @@ class VideoServiceTests(unittest.TestCase):
         args = run_mock.call_args.args[0]
         self.assertIn("tpad=stop_mode=clone:stop_duration=0.981", args)
 
+    def test_transition_filter_mixes_xfade_with_hard_cuts(self) -> None:
+        filter_graph = video_service.build_transition_filter(
+            [4.0, 4.0, 4.0],
+            [video_service.PlannedTransition(1, "fade", 0.45)],
+        )
+
+        self.assertIn("xfade=transition=fade:duration=0.450:offset=3.550", filter_graph)
+        self.assertIn("[join1][v2]concat=n=2:v=1:a=0[join2]", filter_graph)
+        self.assertIn("tpad=stop_mode=clone:stop_duration=0.500", filter_graph)
+
+    @patch("app.services.rendering.rough_cut_service.run_ffmpeg")
+    def test_transition_concat_uses_all_video_inputs_and_filter_script(self, run_mock) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            script_path = root / "transition_filter.txt"
+            video_service.concatenate_clips_with_transitions(
+                [root / "one.mp4", root / "two.mp4"],
+                [3.0, 3.0],
+                script_path,
+                [video_service.PlannedTransition(1, "dissolve", 0.45)],
+                root / "out.mp4",
+            )
+
+            self.assertTrue(script_path.is_file())
+            args = run_mock.call_args.args[0]
+            self.assertEqual(args.count("-i"), 2)
+            self.assertIn("-filter_complex_script", args)
+            self.assertIn("xfade=transition=dissolve", script_path.read_text(encoding="utf-8"))
+
+    @patch("app.services.rendering.rough_cut_service.random.choices", return_value=["fade"])
+    @patch("app.services.rendering.rough_cut_service.random.sample", side_effect=lambda values, count: values[:count])
+    @patch("app.services.rendering.rough_cut_service.random.randint", side_effect=[3, 1, 3, 1])
+    def test_transition_plan_adds_only_some_boundaries(
+        self, _randint_mock, _sample_mock, _choices_mock
+    ) -> None:
+        selected = [
+            video_service.SelectedVideo(Path(f"{index}.mp4"), str(index), 3.0, 2.9)
+            for index in range(6)
+        ]
+        effects = [LandscapeTransitionEffect(name="fade", percentage=100)]
+
+        plan = video_service.build_transition_plan(selected, effects)
+
+        self.assertEqual([item.after_clip_index for item in plan], [1, 4])
+        self.assertTrue(all(item.effect == "fade" for item in plan))
+        self.assertLess(len(plan), len(selected) - 1)
+
     @patch("app.services.rendering.rough_cut_service.random.choice", side_effect=lambda paths: paths[0])
     @patch("app.services.rendering.rough_cut_service.random.shuffle")
     @patch("app.services.rendering.rough_cut_service.probe_duration")
@@ -91,6 +139,33 @@ class VideoServiceTests(unittest.TestCase):
         for item in selected:
             self.assertAlmostEqual(item.clip_duration, 4.0)
         self.assertGreater(sum(item.clip_duration for item in selected), 5.0)
+
+    @patch("app.services.rendering.rough_cut_service.random.choice", side_effect=lambda paths: paths[0])
+    @patch("app.services.rendering.rough_cut_service.random.shuffle")
+    @patch("app.services.rendering.rough_cut_service.probe_duration", side_effect=[2.1, 2.1])
+    def test_selection_reserves_duration_for_transition_overlap(
+        self, _probe_mock, _shuffle_mock, _choice_mock
+    ) -> None:
+        groups = {"one": [Path("one.mp4")], "two": [Path("two.mp4")]}
+
+        with self.assertRaisesRegex(ValueError, "before transitions"):
+            video_service.select_videos_for_duration(groups, 3.8, 0.45)
+
+    def test_rough_cut_scans_configured_directory_without_using_media_library(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            nested = root / "nested"
+            nested.mkdir()
+            first_path = root / "landscape.mp4"
+            second_path = nested / "other.mov"
+            ignored_path = root / "notes.txt"
+            first_path.write_bytes(b"landscape")
+            second_path.write_bytes(b"other")
+            ignored_path.write_text("not video", encoding="utf-8")
+
+            selected = video_service.list_rough_cut_video_files(root)
+
+        self.assertEqual(selected, [first_path, second_path])
 
 
 if __name__ == "__main__":

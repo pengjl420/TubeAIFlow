@@ -8,6 +8,7 @@ const route = useRoute()
 
 const sectionTitle = computed(() => {
   if (route.path.startsWith('/voices')) return '参考音频'
+  if (route.path.startsWith('/assets')) return '本地素材库'
   if (route.path.startsWith('/batches')) return '批量生产'
   if (route.path.startsWith('/settings')) return '系统设置'
   if (route.path.includes('/config')) return '项目设置'
@@ -37,6 +38,10 @@ const sectionTitle = computed(() => {
         <RouterLink to="/batches" active-class="is-active">
           <span class="nav-icon">批</span>
           <span>批量生产</span>
+        </RouterLink>
+        <RouterLink to="/assets" active-class="is-active">
+          <span class="nav-icon">材</span>
+          <span>本地素材库</span>
         </RouterLink>
       </nav>
 

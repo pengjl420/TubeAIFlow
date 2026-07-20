@@ -8,7 +8,11 @@ from unittest.mock import patch
 from app.models.project import Project
 from app.models.narration import Segment
 from app.services.narration import tts_service
-from app.integrations.tts.cosyvoice_runner import cosyvoice_prompt_text
+from app.integrations.tts.cosyvoice_runner import (
+    cosyvoice_prompt_text,
+    duration_quality,
+    segment_attempt_seed,
+)
 
 
 class TtsEngineTests(unittest.TestCase):
@@ -122,92 +126,6 @@ class TtsEngineTests(unittest.TestCase):
 
         self.assertEqual(tts_service._project_tts_engine(project), "qwen3_tts")
 
-    def test_chatterbox_configuration_accepts_local_multilingual_v3_model(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            model_dir = root / "model"
-            model_dir.mkdir()
-            for filename in (
-                "ve.pt",
-                "s3gen.pt",
-                "grapheme_mtl_merged_expanded_v1.json",
-                "t3_mtl23ls_v3.safetensors",
-                "Cangjie5_TC.json",
-            ):
-                (model_dir / filename).touch()
-            python_path = root / "python.exe"
-            reference_audio = root / "reference.wav"
-            python_path.touch()
-            reference_audio.touch()
-            settings = SimpleNamespace(
-                chatterbox_python=python_path,
-                chatterbox_model_dir=model_dir,
-                chatterbox_t3_model="v3",
-                chatterbox_language="zh",
-            )
-            project = Project(
-                id="p1",
-                name="Chatterbox",
-                reference_audio_path=str(reference_audio),
-                config_json='{"tts_engine": "chatterbox"}',
-            )
-            segment = Segment(
-                id="p1_0001",
-                project_id="p1",
-                segment_id="0001",
-                segment_index=1,
-                text="测试",
-            )
-
-            with patch.object(tts_service, "get_settings", return_value=settings):
-                engine, audio_path = tts_service._validate_configuration(project, [segment])
-
-            self.assertEqual(engine, "chatterbox")
-            self.assertEqual(audio_path, reference_audio.resolve())
-
-    def test_chatterbox_runner_command_contains_multilingual_controls(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            model_dir = root / "model"
-            python_path = root / "python.exe"
-            reference_audio = root / "reference.wav"
-            model_dir.mkdir()
-            python_path.touch()
-            reference_audio.touch()
-            settings = SimpleNamespace(
-                chatterbox_root=None,
-                chatterbox_python=python_path,
-                chatterbox_model_dir=model_dir,
-                chatterbox_device="cuda",
-                chatterbox_language="zh",
-                chatterbox_t3_model="v3",
-                chatterbox_exaggeration=0.6,
-                chatterbox_cfg_weight=0.4,
-                chatterbox_temperature=0.8,
-            )
-            project = Project(id="chatterbox-project", name="Chatterbox")
-            segment = Segment(
-                id="chatterbox-project_0001",
-                project_id="chatterbox-project",
-                segment_id="0001",
-                segment_index=1,
-                text="需要合成的文本",
-            )
-            completed = SimpleNamespace(returncode=0, stdout="ok", stderr="")
-
-            with (
-                patch.object(tts_service, "get_settings", return_value=settings),
-                patch.object(tts_service.subprocess, "run", return_value=completed) as run,
-            ):
-                tts_service._run_chatterbox_batch(
-                    project, reference_audio, [segment], root / "audio", root / "logs"
-                )
-
-            command = run.call_args.args[0]
-            self.assertEqual(command[command.index("--language") + 1], "zh")
-            self.assertEqual(command[command.index("--t3-model") + 1], "v3")
-            self.assertEqual(command[command.index("--cfg-weight") + 1], "0.4")
-
     def test_cosyvoice_requires_reference_transcript(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -260,14 +178,20 @@ class TtsEngineTests(unittest.TestCase):
                 cosyvoice_root=cosyvoice_root,
                 cosyvoice_python=python_path,
                 cosyvoice_model_dir=model_dir,
-                cosyvoice_speed=1.1,
                 cosyvoice_instruction="You are helpful.",
                 cosyvoice_fp16=True,
+                cosyvoice_max_attempts=3,
+                cosyvoice_min_chars_per_second=2.8,
+                cosyvoice_duration_slack_seconds=2.0,
+                cosyvoice_duration_outlier_ratio=1.45,
             )
             project = Project(
                 id="cosyvoice-project",
                 name="CosyVoice",
-                config_json=json.dumps({"reference_audio_text": "参考文本"}, ensure_ascii=False),
+                config_json=json.dumps(
+                    {"reference_audio_text": "参考文本", "cosyvoice_speed": 1.1},
+                    ensure_ascii=False,
+                ),
             )
             segment = Segment(
                 id="cosyvoice-project_0001",
@@ -289,7 +213,42 @@ class TtsEngineTests(unittest.TestCase):
             command = run.call_args.args[0]
             self.assertEqual(command[command.index("--reference-text") + 1], "参考文本")
             self.assertEqual(command[command.index("--speed") + 1], "1.1")
+            self.assertEqual(command[command.index("--max-attempts") + 1], "3")
             self.assertIn("--fp16", command)
+
+    def test_cosyvoice_seed_is_stable_and_attempt_specific(self) -> None:
+        first = segment_attempt_seed("0192", "第一次只談錢", 1)
+
+        self.assertEqual(first, segment_attempt_seed("0192", "第一次只談錢", 1))
+        self.assertNotEqual(first, segment_attempt_seed("0192", "第一次只談錢", 2))
+        self.assertNotEqual(first, segment_attempt_seed("0193", "第一次只談錢", 1))
+
+    def test_cosyvoice_duration_quality_rejects_hallucination_outlier(self) -> None:
+        suspicious, reason, _ = duration_quality(
+            "第一次只談錢，將各自收入、債務、日常支出，同幫助仔女嘅界線，坦白而完整咁說明。",
+            14.4,
+            [0.25, 0.24, 0.26, 0.23, 0.25],
+            min_chars_per_second=2.8,
+            duration_slack_seconds=2.0,
+            duration_outlier_ratio=1.45,
+        )
+
+        self.assertTrue(suspicious)
+        self.assertIn("duration", reason)
+
+    def test_cosyvoice_duration_quality_accepts_normal_audio(self) -> None:
+        suspicious, reason, ratio = duration_quality(
+            "第一次只談錢，將各自收入、債務、日常支出，同幫助仔女嘅界線，坦白而完整咁說明。",
+            9.1,
+            [0.25, 0.24, 0.26, 0.23, 0.25],
+            min_chars_per_second=2.8,
+            duration_slack_seconds=2.0,
+            duration_outlier_ratio=1.45,
+        )
+
+        self.assertFalse(suspicious)
+        self.assertIsNone(reason)
+        self.assertGreater(ratio, 0)
 
     def test_cosyvoice3_prompt_includes_instruction_separator(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

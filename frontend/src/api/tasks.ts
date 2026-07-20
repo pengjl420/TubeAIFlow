@@ -2,7 +2,7 @@ import { apiClient, unwrap } from './client'
 
 export interface ProjectTaskStatus {
   id: string | null
-  status: 'idle' | 'queued' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled'
+  status: 'idle' | 'queued' | 'running' | 'paused' | 'review_required' | 'completed' | 'failed' | 'cancelled'
   running: boolean
   queued: boolean
   stage: string | null
@@ -14,6 +14,7 @@ export interface ProjectTaskStatus {
   finished_at?: string | null
   workflow_duration_seconds?: number | null
   compensation_count?: number
+  workflow?: 'narration_generation' | 'video_synthesis'
 }
 
 export async function cancelProjectTask(projectId: string) {
@@ -29,5 +30,17 @@ export async function getProjectTaskStatus(projectId: string) {
 export async function startProjectWorkflow(projectId: string) {
   return unwrap<ProjectTaskStatus>(
     await apiClient.post(`/projects/${projectId}/workflows/narration/start`),
+  )
+}
+
+export async function startVideoWorkflow(projectId: string) {
+  return unwrap<ProjectTaskStatus>(
+    await apiClient.post(`/projects/${projectId}/workflows/video/start`),
+  )
+}
+
+export async function getVideoWorkflowStatus(projectId: string) {
+  return unwrap<ProjectTaskStatus>(
+    await apiClient.get(`/projects/${projectId}/workflows/video/status`),
   )
 }

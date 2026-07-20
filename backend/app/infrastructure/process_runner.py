@@ -2,7 +2,7 @@ import subprocess
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Callable
+from typing import Any, Callable
 
 
 class TaskCancelledError(RuntimeError):
@@ -15,6 +15,31 @@ class _TaskState:
     cancelled: bool = False
     process: subprocess.Popen | None = None
     cancel_callback: Callable[[], None] | None = None
+    deferred_calls: list["DeferredCall"] | None = None
+
+
+class DeferredCall:
+    """A call queued behind the currently running project stage."""
+
+    def __init__(self, callback: Callable[[], Any]):
+        self.callback = callback
+        self._finished = threading.Event()
+        self._result: Any = None
+        self._error: BaseException | None = None
+
+    def wait(self) -> Any:
+        self._finished.wait()
+        if self._error is not None:
+            raise self._error
+        return self._result
+
+    def succeed(self, result: Any) -> None:
+        self._result = result
+        self._finished.set()
+
+    def fail(self, error: BaseException) -> None:
+        self._error = error
+        self._finished.set()
 
 
 _lock = threading.Lock()
@@ -27,8 +52,11 @@ def controlled(project_id: str, stage: str):
     try:
         yield
         check_cancelled(project_id)
-    finally:
-        finish(project_id)
+    except BaseException as exc:
+        _fail_deferred_and_finish(project_id, exc)
+        raise
+    else:
+        _run_deferred_and_finish(project_id)
 
 
 def begin(project_id: str, stage: str) -> None:
@@ -36,12 +64,61 @@ def begin(project_id: str, stage: str) -> None:
         state = _states.get(project_id)
         if state:
             raise RuntimeError(f"Project already has a running {state.stage} task")
-        _states[project_id] = _TaskState(stage=stage)
+        _states[project_id] = _TaskState(stage=stage, deferred_calls=[])
+
+
+def defer_if_running(
+    project_id: str,
+    stage: str,
+    callback: Callable[[], Any],
+) -> DeferredCall | None:
+    """Queue work behind a matching active stage, or return None if it is idle.
+
+    Registration and stage teardown share the same lock, so a request cannot be
+    lost in the small window where the active operation is about to finish.
+    """
+    with _lock:
+        state = _states.get(project_id)
+        if state is None or state.stage != stage or state.cancelled:
+            return None
+        deferred = DeferredCall(callback)
+        if state.deferred_calls is None:
+            state.deferred_calls = []
+        state.deferred_calls.append(deferred)
+        return deferred
 
 
 def finish(project_id: str) -> None:
     with _lock:
         _states.pop(project_id, None)
+
+
+def _run_deferred_and_finish(project_id: str) -> None:
+    first_error: BaseException | None = None
+    while True:
+        with _lock:
+            state = _states.get(project_id)
+            if state is None:
+                break
+            deferred = state.deferred_calls.pop(0) if state.deferred_calls else None
+            if deferred is None:
+                _states.pop(project_id, None)
+                break
+        try:
+            deferred.succeed(deferred.callback())
+        except BaseException as exc:
+            deferred.fail(exc)
+            first_error = first_error or exc
+    if first_error is not None:
+        raise first_error
+
+
+def _fail_deferred_and_finish(project_id: str, error: BaseException) -> None:
+    with _lock:
+        state = _states.pop(project_id, None)
+        deferred_calls = list(state.deferred_calls or []) if state else []
+    for deferred in deferred_calls:
+        deferred.fail(error)
 
 
 def check_cancelled(project_id: str) -> None:

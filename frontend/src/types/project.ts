@@ -8,6 +8,9 @@ export interface Project {
     reference_audio_filename?: string
     voice_profile_name?: string
     tts_engine?: string
+    include_video?: boolean
+    video_mode?: VideoGenerationMode
+    semantic_review_mode?: SemanticReviewMode
     [key: string]: unknown
   }
   config_json?: string
@@ -19,3 +22,6 @@ export interface Project {
   workflow_duration_seconds?: number | null
   latest_task_status?: string | null
 }
+
+export type VideoGenerationMode = 'none' | 'landscape' | 'ai_semantic' | 'ai_generated_images'
+export type SemanticReviewMode = 'manual' | 'automatic'

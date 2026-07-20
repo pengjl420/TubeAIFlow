@@ -59,6 +59,9 @@ let pollTimer: number | undefined
 let videoPollTimer: number | undefined
 let oneClickTimer: number | undefined
 let taskPollTimer: number | undefined
+let ttsPolling = false
+let videoPolling = false
+let taskPolling = false
 
 const oneClickStage = ref('')
 const oneClickStartedAt = ref(0)
@@ -138,6 +141,7 @@ function stopOneClickTimer() {
 }
 
 const projectConfig = computed(() => {
+  if (project.value?.config) return project.value.config
   if (!project.value?.config_json) return {}
   try {
     const data = JSON.parse(project.value.config_json)
@@ -174,6 +178,27 @@ const currentSegmentText = computed(() => {
   return segment ? `#${segment.segment_id} ${segment.text}` : `#${currentId}`
 })
 
+const failedSegments = computed(() => (
+  segments.value.filter((segment) => segment.status === 'failed')
+))
+
+function segmentStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    completed: '已完成',
+    failed: '生成失败',
+    pending: '等待生成',
+    tts_running: '生成中',
+  }
+  return labels[status] || status
+}
+
+function segmentStatusTone(status: string) {
+  if (status === 'completed') return 'is-success'
+  if (status === 'failed') return 'is-danger'
+  if (status === 'tts_running') return 'is-warning'
+  return 'is-neutral'
+}
+
 function fallbackFinalAudioPath() {
   const dir = outputs.value?.output_dir || project.value?.output_dir || ''
   if (!dir || !outputFilename.value.trim()) return ''
@@ -197,7 +222,14 @@ const mediaVideoDir = computed(() => {
   return typeof value === 'string' ? value : ''
 })
 
-const includeVideo = computed(() => projectConfig.value.include_video === true)
+const videoMode = computed(() => {
+  const mode = projectConfig.value.video_mode
+  if (mode === 'ai_semantic' || mode === 'ai_generated_images' || mode === 'landscape' || mode === 'none') return mode
+  return projectConfig.value.include_video === true ? 'landscape' : 'none'
+})
+const includeVideo = computed(() => videoMode.value !== 'none')
+const usesAiSemanticVideo = computed(() => videoMode.value === 'ai_semantic' || videoMode.value === 'ai_generated_images')
+const usesLandscapeVideo = computed(() => videoMode.value === 'landscape')
 
 const finalVideoPath = computed(() => {
   if (!hasOutputFilename.value) return ''
@@ -233,12 +265,16 @@ const workflowSteps = computed(() => {
   const voiceReady = ttsStatus.value.total > 0 && ttsStatus.value.completed >= ttsStatus.value.total
   const audioReady = Boolean(finalAudioPath.value && outputs.value?.final_audio_path)
   const videoReady = Boolean(finalVideoPath.value && outputs.value?.final_video_path)
+  const videoActive = composingVideo.value || Boolean(
+    projectTask.value?.status === 'running'
+    && ['storyboard', 'asset_search', 'asset_review', 'image_generation', 'image_review', 'scene_render', 'final_render', 'quality_check', 'quality_review'].includes(projectTask.value.stage || ''),
+  )
   return [
     { label: '脚本', caption: scriptCharacterCount.value ? `${scriptCharacterCount.value} 字` : scriptReady ? '已保存' : '等待输入', state: scriptReady ? 'done' : 'current' },
     { label: '切段', caption: segmentReady ? `${segments.value.length} 段` : '尚未生成', state: segmentReady ? 'done' : scriptCharacterCount.value ? 'current' : 'pending' },
     { label: '配音', caption: voiceReady ? '音频已就绪' : ttsRunning.value ? '正在生成' : '等待生成', state: voiceReady ? 'done' : ttsRunning.value ? 'current' : 'pending' },
     { label: '字幕', caption: audioReady ? '已生成' : '等待合并', state: audioReady ? 'done' : mergingAudio.value || generatingSubtitles.value ? 'current' : 'pending' },
-    { label: '成片', caption: includeVideo.value ? (videoReady ? '已输出' : '等待合成') : '未启用', state: videoReady ? 'done' : composingVideo.value ? 'current' : 'pending' },
+    { label: '成片', caption: includeVideo.value ? (videoReady ? '已输出' : '等待合成') : '未启用', state: videoReady ? 'done' : videoActive ? 'current' : 'pending' },
   ]
 })
 
@@ -259,8 +295,9 @@ async function load() {
     await refreshProjectTaskStatus()
     if (projectTask.value && ['queued', 'running'].includes(projectTask.value.status)) {
       startTaskPolling()
+    } else if (ttsRunning.value) {
+      startPolling()
     }
-    if (ttsRunning.value) startPolling()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '项目加载失败'
   } finally {
@@ -374,6 +411,15 @@ function taskStageLabel(task: ProjectTaskStatus) {
     audio_merge: '合并完整音频',
     subtitles: '生成字幕',
     video: '生成视频',
+    storyboard: '生成视觉分镜',
+    asset_search: '检索语义素材',
+    asset_review: '等待素材审核',
+    image_generation: '本地生成分镜图片',
+    image_review: '等待图片审核',
+    scene_render: '渲染场景视频',
+    final_render: '合成最终视频',
+    quality_check: '执行质量检查',
+    quality_review: '等待质量复核',
     completed: '生成完成',
   }
   return labels[task.stage || ''] || task.stage || '准备执行'
@@ -418,6 +464,7 @@ function applyProjectTaskStatus(task: ProjectTaskStatus) {
   if (task.status === 'failed') error.value = task.error_message || '一键生成失败'
   if (task.status === 'cancelled') message.value = '任务已取消'
   if (task.status === 'paused') message.value = '任务已暂停；如果它属于批次，请从批次详情页恢复执行。'
+  if (task.status === 'review_required') message.value = task.error_message || 'AI 语义视频正在等待人工复核。'
 }
 
 async function refreshProjectTaskStatus() {
@@ -428,41 +475,64 @@ async function refreshProjectTaskStatus() {
 
 function startTaskPolling() {
   stopTaskPolling()
-  taskPollTimer = window.setInterval(async () => {
-    try {
-      const task = await refreshProjectTaskStatus()
-      if (task.status === 'running' && task.stage === 'tts') await refreshTtsStatus()
-      if (task.status === 'running' && task.stage === 'video') videoProgress.value = await getVideoStatus(projectId)
-      if (!['queued', 'running'].includes(task.status)) {
-        stopTaskPolling()
-        await refreshAfterChange()
-      }
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : '刷新任务状态失败'
+  // A workflow task owns all of its stage polling, including TTS progress.
+  // Keeping the standalone TTS poller alive here would duplicate requests.
+  stopPolling()
+  taskPolling = true
+  void pollProjectTask()
+}
+
+async function pollProjectTask() {
+  if (!taskPolling) return
+  try {
+    const task = await refreshProjectTaskStatus()
+    if (task.status === 'running' && task.stage === 'tts') await refreshTtsStatus()
+    if (task.status === 'running' && task.stage === 'video') videoProgress.value = await getVideoStatus(projectId)
+    if (!['queued', 'running'].includes(task.status)) {
+      stopTaskPolling()
+      await refreshAfterChange()
     }
-  }, 1500)
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '刷新任务状态失败'
+  } finally {
+    // Schedule only after the current request chain has completed so slow
+    // status requests can never overlap the next polling cycle.
+    if (taskPolling) {
+      taskPollTimer = window.setTimeout(() => void pollProjectTask(), 1500)
+    }
+  }
 }
 
 function stopTaskPolling() {
+  taskPolling = false
   if (taskPollTimer !== undefined) {
-    window.clearInterval(taskPollTimer)
+    window.clearTimeout(taskPollTimer)
     taskPollTimer = undefined
   }
 }
 
 function startPolling() {
   stopPolling()
-  pollTimer = window.setInterval(async () => {
-    try {
-      await refreshTtsStatus()
-      if (!ttsRequestActive.value && !ttsRunning.value) {
-        stopPolling()
-        await Promise.all([refreshSegments(), refreshOutputs()])
-      }
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : '刷新进度失败'
+  if (taskPolling) return
+  ttsPolling = true
+  void pollTtsStatus()
+}
+
+async function pollTtsStatus() {
+  if (!ttsPolling) return
+  try {
+    await refreshTtsStatus()
+    if (!ttsRequestActive.value && !ttsRunning.value) {
+      stopPolling()
+      await Promise.all([refreshSegments(), refreshOutputs()])
     }
-  }, 1500)
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '刷新进度失败'
+  } finally {
+    if (ttsPolling) {
+      pollTimer = window.setTimeout(() => void pollTtsStatus(), 1500)
+    }
+  }
 }
 
 async function stopGeneration() {
@@ -480,26 +550,36 @@ async function stopGeneration() {
 }
 
 function stopPolling() {
+  ttsPolling = false
   if (pollTimer !== undefined) {
-    window.clearInterval(pollTimer)
+    window.clearTimeout(pollTimer)
     pollTimer = undefined
   }
 }
 
 function startVideoPolling() {
   stopVideoPolling()
-  videoPollTimer = window.setInterval(async () => {
-    try {
-      videoProgress.value = await getVideoStatus(projectId)
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : '刷新视频进度失败'
+  videoPolling = true
+  void pollVideoStatus()
+}
+
+async function pollVideoStatus() {
+  if (!videoPolling) return
+  try {
+    videoProgress.value = await getVideoStatus(projectId)
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '刷新视频进度失败'
+  } finally {
+    if (videoPolling) {
+      videoPollTimer = window.setTimeout(() => void pollVideoStatus(), 1000)
     }
-  }, 1000)
+  }
 }
 
 function stopVideoPolling() {
+  videoPolling = false
   if (videoPollTimer !== undefined) {
-    window.clearInterval(videoPollTimer)
+    window.clearTimeout(videoPollTimer)
     videoPollTimer = undefined
   }
 }
@@ -641,7 +721,7 @@ async function oneClickGenerate() {
     error.value = '请先配置项目参考音频后再一键生成'
     return
   }
-  if (includeVideo.value && !mediaVideoDir.value) {
+  if (usesLandscapeVideo.value && !mediaVideoDir.value) {
     error.value = '请先在项目设置中选择素材视频目录后再一键生成'
     return
   }
@@ -719,7 +799,12 @@ onBeforeUnmount(() => {
         </div>
         <p>在同一条生产线上编辑脚本、生成配音字幕并输出成片。</p>
       </div>
-      <RouterLink class="secondary-button" :to="`/projects/${project.id}/config`">项目设置</RouterLink>
+      <div class="page-title-actions">
+        <RouterLink v-if="usesAiSemanticVideo" class="secondary-button" :to="`/projects/${project.id}/storyboard`">分镜工作区</RouterLink>
+        <RouterLink v-if="usesAiSemanticVideo" class="secondary-button" :to="`/projects/${project.id}/media`">素材审核</RouterLink>
+        <RouterLink v-if="usesAiSemanticVideo" class="primary-button" :to="`/projects/${project.id}/render`">智能视频流程</RouterLink>
+        <RouterLink class="secondary-button" :to="`/projects/${project.id}/config`">项目设置</RouterLink>
+      </div>
     </div>
 
     <div class="project-metrics-strip" aria-label="项目时间与时长">
@@ -778,7 +863,7 @@ onBeforeUnmount(() => {
           <button class="text-button" :disabled="oneClickGenerating" @click="splitSegments">生成切段</button>
           <button class="text-button" :disabled="ttsRunning || oneClickGenerating" @click="runTts">{{ ttsRunning ? 'TTS 生成中' : '开始 TTS' }}</button>
           <button class="text-button" :disabled="mergingAudio || generatingSubtitles || oneClickGenerating" @click="mergeAudio">{{ generatingSubtitles ? '字幕生成中' : mergingAudio ? '合并中' : '合并音频字幕' }}</button>
-          <button v-if="includeVideo" class="text-button" :disabled="composingVideo || oneClickGenerating" @click="composeVideo">{{ composingVideo ? '视频生成中' : '单独生成视频' }}</button>
+          <button v-if="usesLandscapeVideo" class="text-button" :disabled="composingVideo || oneClickGenerating" @click="composeVideo">{{ composingVideo ? '视频生成中' : '单独生成纯风景视频' }}</button>
           <button
             v-if="hasRunningGeneration"
             class="text-button danger-text"
@@ -826,7 +911,9 @@ onBeforeUnmount(() => {
         <div class="execution-intro">
           <span class="section-eyebrow">PRODUCTION</span>
           <h2>{{ hasRunningGeneration ? '正在执行生产任务' : '准备开始生成' }}</h2>
-          <p>{{ includeVideo ? '将依次完成切段、配音、字幕与视频合成。' : '将依次完成切段、配音与字幕生成。' }}</p>
+          <p v-if="usesAiSemanticVideo">将依次完成切段、配音、字幕与 AI 语义视频流程，并在素材审核阶段等待确认。</p>
+          <p v-else-if="usesLandscapeVideo">将依次完成切段、配音、字幕与纯风景素材拼接。</p>
+          <p v-else>将依次完成切段、配音与字幕生成。</p>
           <button class="primary-button primary-action" :disabled="oneClickGenerating || readingScriptFile" @click="oneClickGenerate">
             <span>{{ oneClickGenerating ? '●' : '▶' }}</span>
             {{ oneClickGenerating ? '正在一键生成' : '开始一键生成' }}
@@ -848,6 +935,33 @@ onBeforeUnmount(() => {
         </div>
         <p v-if="currentSegmentText" class="muted current-segment">当前生成：{{ currentSegmentText }}</p>
 
+        <div v-if="failedSegments.length" class="failed-tts-panel" role="alert">
+          <div class="failed-tts-heading">
+            <strong>有 {{ failedSegments.length }} 条配音生成失败</strong>
+            <p>可修改对应文本后单独重新生成，不需要重跑全部配音。</p>
+          </div>
+          <article v-for="segment in failedSegments" :key="segment.id" class="failed-tts-item">
+            <div class="failed-tts-meta">
+              <span class="segment-number">{{ segment.segment_id }}</span>
+              <span class="status-pill is-danger">生成失败</span>
+            </div>
+            <textarea
+              v-model="editedText[segment.segment_id]"
+              class="segment-editor failed-tts-editor"
+              rows="3"
+              :aria-label="`失败分段 ${segment.segment_id} 的文本`"
+            ></textarea>
+            <p class="failed-tts-error">{{ segment.error_message || 'TTS 引擎未生成音频文件' }}</p>
+            <button
+              class="primary-button"
+              :disabled="busySegments[segment.segment_id]"
+              @click="regenerateSegment(segment)"
+            >
+              {{ busySegments[segment.segment_id] ? '正在重新生成' : '重新生成此条配音' }}
+            </button>
+          </article>
+        </div>
+
         <div class="outputs-panel embedded-outputs">
           <div class="section-head">
             <h3>输出位置</h3>
@@ -863,7 +977,7 @@ onBeforeUnmount(() => {
             </button>
           </div>
           <dl class="output-path-list">
-            <div><dt>根目录</dt><dd>{{ outputs?.output_dir || project.output_dir || '暂无输出目录' }}</dd></div>
+            <div><dt>项目文件夹</dt><dd>{{ outputs?.work_dir || outputs?.output_dir || project.output_dir || '暂无输出目录' }}</dd></div>
             <div><dt>完整音频</dt><dd>{{ finalAudioPath || '生成后自动创建' }}</dd></div>
             <div><dt>字幕</dt><dd>{{ finalSrtPath || '生成后自动创建' }}</dd></div>
             <div v-if="includeVideo"><dt>最终视频</dt><dd>{{ finalVideoPath || '生成后自动创建' }}</dd></div>
@@ -889,7 +1003,7 @@ onBeforeUnmount(() => {
         <article v-for="segment in segments" :key="segment.id" class="segment-item">
           <div class="segment-head">
             <span class="segment-number">{{ segment.segment_id }}</span>
-            <span class="status-pill is-neutral">{{ segment.status }}</span>
+            <span class="status-pill" :class="segmentStatusTone(segment.status)">{{ segmentStatusLabel(segment.status) }}</span>
             <span v-if="segment.duration" class="segment-duration">{{ segment.duration.toFixed(2) }} 秒</span>
           </div>
           <textarea

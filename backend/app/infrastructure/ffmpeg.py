@@ -76,6 +76,71 @@ def probe_duration(audio_path: Path) -> float:
     return float(data["format"]["duration"])
 
 
+def probe_media(media_path: Path) -> dict:
+    """Read stable container and primary-video metadata with ffprobe."""
+    settings = get_settings()
+    command = [
+        _resolve_tool(settings.ffprobe_path, "ffprobe.exe"),
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration,format_name:stream=index,codec_type,codec_name,width,height,pix_fmt,r_frame_rate,avg_frame_rate",
+        "-of",
+        "json",
+        str(media_path),
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError(f"ffprobe executable was not found: {command[0]}") from exc
+    if result.returncode != 0:
+        logger.error("ffprobe failed for %s: %s", media_path, result.stderr)
+        raise RuntimeError(result.stderr.strip() or "ffprobe command failed")
+
+    data = json.loads(result.stdout)
+    streams = data.get("streams", [])
+    video_streams = [stream for stream in streams if stream.get("codec_type") == "video"]
+    audio_streams = [stream for stream in streams if stream.get("codec_type") == "audio"]
+    video_stream = next(
+        iter(video_streams),
+        {},
+    )
+    raw_duration = data.get("format", {}).get("duration")
+    frame_rate = video_stream.get("avg_frame_rate") or video_stream.get("r_frame_rate")
+    return {
+        "duration_ms": round(float(raw_duration) * 1000) if raw_duration else None,
+        "width": video_stream.get("width"),
+        "height": video_stream.get("height"),
+        "codec_name": video_stream.get("codec_name"),
+        "pixel_format": video_stream.get("pix_fmt"),
+        "frame_rate": frame_rate,
+        "frame_rate_value": _parse_frame_rate(frame_rate),
+        "video_stream_count": len(video_streams),
+        "audio_stream_count": len(audio_streams),
+        "format_name": data.get("format", {}).get("format_name"),
+    }
+
+
+def _parse_frame_rate(value: str | None) -> float | None:
+    if not value:
+        return None
+    numerator, separator, denominator = value.partition("/")
+    try:
+        if not separator:
+            return float(numerator)
+        divisor = float(denominator)
+        return float(numerator) / divisor if divisor else None
+    except ValueError:
+        return None
+
+
 def _resolve_tool(configured: str, executable_name: str) -> str:
     configured_path = Path(configured)
     if configured_path.is_absolute():

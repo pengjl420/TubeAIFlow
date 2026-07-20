@@ -13,6 +13,7 @@ from app.infrastructure.project_layout import (
     get_final_audio_path,
     get_final_srt_path,
     get_final_video_path,
+    get_legacy_project_work_dir,
     get_output_stem,
     get_project_output_dir,
     get_project_work_dir,
@@ -39,6 +40,8 @@ class ProjectSettingsRequest(BaseModel):
     output_filename: str = ""
     media_video_dir: str = ""
     include_video: bool = False
+    video_mode: str | None = None
+    semantic_review_mode: str | None = None
     tts_engine: str = project_service.DEFAULT_TTS_ENGINE
     reference_audio_text: str = ""
     voice_profile_id: str = ""
@@ -70,6 +73,8 @@ def create_project(
     output_filename: str = Form(""),
     media_video_dir: str = Form(""),
     include_video: bool = Form(False),
+    video_mode: str | None = Form(None),
+    semantic_review_mode: str | None = Form(None),
     tts_engine: str = Form(project_service.DEFAULT_TTS_ENGINE),
     reference_audio_text: str = Form(""),
     voice_profile_id: str = Form(""),
@@ -98,6 +103,8 @@ def create_project(
             reference_audio_text,
             include_video,
             voice_profile_id,
+            video_mode,
+            semantic_review_mode,
         )
         if voice_profile_id.strip():
             return ok(project)
@@ -149,49 +156,31 @@ def get_project_outputs(project_id: str, session: Session = Depends(get_session)
     final_srt_path = get_final_srt_path(project, get_settings().workspace_dir)
     final_video_path = get_final_video_path(project, get_settings().workspace_dir)
     output_files = []
+    seen_paths: set[Path] = set()
     if work_dir.is_dir():
         for path in sorted(work_dir.rglob("*")):
             if not path.is_file():
                 continue
+            seen_paths.add(path.resolve())
             stat = path.stat()
             output_files.append(
                 {
                     "name": path.name,
                     "path": str(path),
-                    "relative_path": str(path.relative_to(output_root)),
+                    "relative_path": str(path.relative_to(work_dir)),
                     "size": stat.st_size,
                     "modified_at": stat.st_mtime,
                 }
             )
-    if final_audio_path.is_file():
-        stat = final_audio_path.stat()
+    for final_path in (final_audio_path, final_video_path, final_srt_path):
+        if not final_path.is_file() or final_path.resolve() in seen_paths:
+            continue
+        stat = final_path.stat()
         output_files.append(
             {
-                "name": final_audio_path.name,
-                "path": str(final_audio_path),
-                "relative_path": final_audio_path.name,
-                "size": stat.st_size,
-                "modified_at": stat.st_mtime,
-            }
-        )
-    if final_video_path.is_file():
-        stat = final_video_path.stat()
-        output_files.append(
-            {
-                "name": final_video_path.name,
-                "path": str(final_video_path),
-                "relative_path": final_video_path.name,
-                "size": stat.st_size,
-                "modified_at": stat.st_mtime,
-            }
-        )
-    if final_srt_path.is_file():
-        stat = final_srt_path.stat()
-        output_files.append(
-            {
-                "name": final_srt_path.name,
-                "path": str(final_srt_path),
-                "relative_path": final_srt_path.name,
+                "name": final_path.name,
+                "path": str(final_path),
+                "relative_path": final_path.name,
                 "size": stat.st_size,
                 "modified_at": stat.st_mtime,
             }
@@ -252,6 +241,8 @@ def save_project_settings(
             payload.reference_audio_text,
             payload.include_video,
             payload.voice_profile_id,
+            payload.video_mode,
+            payload.semantic_review_mode,
         ))
     except (OSError, ValueError) as exc:
         logger.exception("Failed to save settings for project %s", project_id)
@@ -280,6 +271,7 @@ def get_reference_audio(project_id: str, session: Session = Depends(get_session)
             Path(project.reference_audio_path),
             [
                 get_project_work_dir(project, get_settings().workspace_dir),
+                get_legacy_project_work_dir(project, get_settings().workspace_dir),
                 project_dir(get_settings().workspace_dir, project_id),
                 get_settings().workspace_dir / "voices",
             ],

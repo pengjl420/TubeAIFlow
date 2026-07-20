@@ -8,7 +8,9 @@ from app.database import engine, get_session
 from app.models.narration import Segment
 from app.infrastructure import process_runner as task_control
 from app.infrastructure.project_layout import get_project_work_dir
+from app.services.narration import tts_service
 from app.services.projects import project_service
+from app.services.tasks import task_service, task_worker
 from app.workflows import narration_generation
 
 
@@ -62,6 +64,7 @@ def regenerate_segment(project_id: str, segment_id: str, session: Session = Depe
             data = narration_generation.regenerate_segment_and_refresh_outputs(
                 session, project, segment
             )
+        _resume_failed_workflow_after_tts_repair(session, project_id)
         return {"success": True, "data": data}
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(
@@ -86,7 +89,34 @@ def _regenerate_segment_after_active_tts(project_id: str, segment_id: str) -> di
         regenerated = narration_generation.regenerate_segment_and_refresh_outputs(
             session, project, segment
         )
+        _resume_failed_workflow_after_tts_repair(session, project_id)
         return regenerated.model_dump()
+
+
+def _resume_failed_workflow_after_tts_repair(session: Session, project_id: str) -> None:
+    """Continue a standalone one-click workflow once its last failed TTS segment is repaired."""
+    incomplete = session.exec(
+        select(Segment).where(
+            Segment.project_id == project_id,
+            Segment.status != "completed",
+        )
+    ).first()
+    if incomplete:
+        return
+
+    task = task_service.get_latest_project_workflow_task(
+        session, project_id, "narration_generation"
+    )
+    if (
+        not task
+        or task.batch_id is not None
+        or task.status != "failed"
+        or task.current_stage != "tts"
+    ):
+        return
+
+    task_service.resume_failed_task(session, task, current_stage="audio_merge")
+    task_worker.wake_worker()
 
 
 @router.get("/projects/{project_id}/tts/status")

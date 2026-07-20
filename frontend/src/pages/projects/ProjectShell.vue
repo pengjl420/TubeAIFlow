@@ -178,6 +178,27 @@ const currentSegmentText = computed(() => {
   return segment ? `#${segment.segment_id} ${segment.text}` : `#${currentId}`
 })
 
+const failedSegments = computed(() => (
+  segments.value.filter((segment) => segment.status === 'failed')
+))
+
+function segmentStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    completed: '已完成',
+    failed: '生成失败',
+    pending: '等待生成',
+    tts_running: '生成中',
+  }
+  return labels[status] || status
+}
+
+function segmentStatusTone(status: string) {
+  if (status === 'completed') return 'is-success'
+  if (status === 'failed') return 'is-danger'
+  if (status === 'tts_running') return 'is-warning'
+  return 'is-neutral'
+}
+
 function fallbackFinalAudioPath() {
   const dir = outputs.value?.output_dir || project.value?.output_dir || ''
   if (!dir || !outputFilename.value.trim()) return ''
@@ -912,6 +933,33 @@ onBeforeUnmount(() => {
         </div>
         <p v-if="currentSegmentText" class="muted current-segment">当前生成：{{ currentSegmentText }}</p>
 
+        <div v-if="failedSegments.length" class="failed-tts-panel" role="alert">
+          <div class="failed-tts-heading">
+            <strong>有 {{ failedSegments.length }} 条配音生成失败</strong>
+            <p>可修改对应文本后单独重新生成，不需要重跑全部配音。</p>
+          </div>
+          <article v-for="segment in failedSegments" :key="segment.id" class="failed-tts-item">
+            <div class="failed-tts-meta">
+              <span class="segment-number">{{ segment.segment_id }}</span>
+              <span class="status-pill is-danger">生成失败</span>
+            </div>
+            <textarea
+              v-model="editedText[segment.segment_id]"
+              class="segment-editor failed-tts-editor"
+              rows="3"
+              :aria-label="`失败分段 ${segment.segment_id} 的文本`"
+            ></textarea>
+            <p class="failed-tts-error">{{ segment.error_message || 'TTS 引擎未生成音频文件' }}</p>
+            <button
+              class="primary-button"
+              :disabled="busySegments[segment.segment_id]"
+              @click="regenerateSegment(segment)"
+            >
+              {{ busySegments[segment.segment_id] ? '正在重新生成' : '重新生成此条配音' }}
+            </button>
+          </article>
+        </div>
+
         <div class="outputs-panel embedded-outputs">
           <div class="section-head">
             <h3>输出位置</h3>
@@ -953,7 +1001,7 @@ onBeforeUnmount(() => {
         <article v-for="segment in segments" :key="segment.id" class="segment-item">
           <div class="segment-head">
             <span class="segment-number">{{ segment.segment_id }}</span>
-            <span class="status-pill is-neutral">{{ segment.status }}</span>
+            <span class="status-pill" :class="segmentStatusTone(segment.status)">{{ segmentStatusLabel(segment.status) }}</span>
             <span v-if="segment.duration" class="segment-duration">{{ segment.duration.toFixed(2) }} 秒</span>
           </div>
           <textarea

@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -162,6 +163,38 @@ class TaskQueueTests(unittest.TestCase):
             batch = session.get(BatchJob, "batch")
             self.assertEqual(batch.status, "completed")
             self.assertEqual(batch.completed, 1)
+
+    def test_failed_task_can_resume_from_verified_checkpoint(self) -> None:
+        with Session(self.engine) as session:
+            project = Project(id="project", name="Project", status="failed")
+            task = TaskRun(
+                id="task",
+                project_id=project.id,
+                status="failed",
+                current_stage="tts",
+                queue_sequence=1,
+                error_message="TTS 有 1 段生成失败",
+                finished_at="2026-07-20T00:00:00+00:00",
+                checkpoint_json=(
+                    '{"current_stage":"tts","stage_history":'
+                    '[{"event":"failed","stage":"tts","at":"earlier"}]}'
+                ),
+            )
+            session.add(project)
+            session.add(task)
+            session.commit()
+
+            task_service.resume_failed_task(session, task, current_stage="audio_merge")
+
+            self.assertEqual(task.status, "queued")
+            self.assertEqual(task.current_stage, "audio_merge")
+            self.assertIsNone(task.error_message)
+            self.assertIsNone(task.finished_at)
+            self.assertGreater(task.queue_sequence, 1)
+            self.assertEqual(project.status, "narration_in_progress")
+            checkpoint = json.loads(task.checkpoint_json)
+            self.assertEqual(checkpoint["current_stage"], "audio_merge")
+            self.assertEqual(checkpoint["stage_history"][-1]["event"], "resumed")
 
 
 class DatabaseMigrationTests(unittest.TestCase):

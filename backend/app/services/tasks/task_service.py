@@ -104,6 +104,41 @@ def resume_review_task(session: Session, task: TaskRun, *, current_stage: str | 
     session.refresh(task)
 
 
+def resume_failed_task(session: Session, task: TaskRun, *, current_stage: str) -> None:
+    """Requeue a failed task from a verified workflow checkpoint."""
+    if task.status != "failed":
+        raise ValueError("当前任务不处于失败状态")
+
+    now = utc_now_iso()
+    task.current_stage = current_stage
+    queue_paused_task(session, task)
+    try:
+        checkpoint = json.loads(task.checkpoint_json or "{}")
+    except json.JSONDecodeError:
+        checkpoint = {}
+    history = checkpoint.get("stage_history")
+    if not isinstance(history, list):
+        history = []
+    history.append({"event": "resumed", "stage": current_stage, "at": now})
+    checkpoint["current_stage"] = current_stage
+    checkpoint["stage_history"] = history[-100:]
+    task.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
+    session.add(task)
+
+    project = session.get(Project, task.project_id)
+    if project:
+        project.status = (
+            "video_in_progress"
+            if task.workflow == "video_synthesis" or current_stage == "video"
+            else "narration_in_progress"
+        )
+        project.updated_at = now
+        session.add(project)
+
+    session.commit()
+    session.refresh(task)
+
+
 def get_active_project_task(session: Session, project_id: str) -> TaskRun | None:
     return session.exec(
         select(TaskRun)

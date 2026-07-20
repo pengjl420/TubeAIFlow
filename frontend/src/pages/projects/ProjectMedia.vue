@@ -310,9 +310,6 @@ async function searchCandidates() {
 async function assign(candidate: SceneCandidate) {
   if (!selectedScene.value) return
   const manualOverride = candidate.status !== 'QUALIFIED'
-  if (manualOverride && !window.confirm(`该候选存在冲突或相关度不足：\n${candidate.conflicts.join('\n') || '系统评分未达到自动使用标准'}\n\n是否仍由你人工确认使用？`)) {
-    return
-  }
   assigningId.value = candidate.id
   error.value = ''
   try {

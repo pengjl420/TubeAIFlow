@@ -28,6 +28,13 @@ class StoryboardContent(BaseModel):
     must_include: list[str] = Field(default_factory=list)
     avoid: list[str] = Field(default_factory=list)
     confidence: float = Field(ge=0, le=1)
+    motion_prompt: str = "Subtle natural subject movement. A stable, gentle camera move. Preserve identity and composition."
+    scene_type: str = "general"
+    importance_score: int = Field(default=5, ge=0, le=10)
+    motion_score: int = Field(default=4, ge=0, le=10)
+    identity_risk: int = Field(default=5, ge=0, le=10)
+    text_density: int = Field(default=0, ge=0, le=10)
+    subject_count: int = Field(default=1, ge=0, le=20)
 
     @field_validator(
         "visual_summary",
@@ -39,6 +46,8 @@ class StoryboardContent(BaseModel):
         "primary_query",
         "fallback_category",
         "fallback_mood",
+        "motion_prompt",
+        "scene_type",
         mode="before",
     )
     @classmethod

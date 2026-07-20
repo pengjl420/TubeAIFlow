@@ -12,7 +12,7 @@ from app.infrastructure import gpu_resource
 from app.infrastructure.asset_layout import media_preview_dir
 from app.infrastructure.ffmpeg import probe_media, run_ffmpeg
 from app.integrations.vision.embedding import MODEL_NAME
-from app.integrations.vision.vector_index import remove_shot, upsert_shot
+from app.integrations.vision.vector_index import remove_shot, remove_shots, upsert_shot
 from app.models.media import (
     LIBRARY_ROLE_PROJECT_GENERATED,
     LIBRARY_ROLE_SEMANTIC,
@@ -357,8 +357,7 @@ def delete_assets(session: Session, media_ids: list[str]) -> dict:
         media_keyframes = [frame for frame in keyframes if frame.media_shot_id in {shot.id for shot in media_shots}]
         deleted_preview_files += _delete_preview_files(media_file, media_shots, media_keyframes)
 
-    for shot in shot_rows:
-        remove_shot(shot.id)
+    remove_shots(shot_ids)
 
     affected_scene_ids: set[str] = set()
     if shot_ids:

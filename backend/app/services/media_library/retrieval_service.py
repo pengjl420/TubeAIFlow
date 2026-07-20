@@ -314,6 +314,7 @@ def assign_candidate(
         payload.display_duration_ms
         or (scene.end_ms - scene.start_ms if candidate.selection_stage == "local_generated_image" else None)
     )
+    assignment.render_mode = payload.render_mode
     assignment.motion_type = payload.motion_type
     assignment.zoom_start = payload.zoom_start
     assignment.zoom_end = payload.zoom_end
@@ -533,7 +534,14 @@ def update_scene_assignment_render(
     assignment = session.get(SceneAssignment, assignment_id)
     if not assignment or assignment.project_id != project_id or assignment.scene_id != scene_id:
         raise ValueError("镜头轨道指派不存在")
-    for field in ("motion_type", "zoom_start", "zoom_end", "pan_direction", "crop_anchor"):
+    for field in (
+        "render_mode",
+        "motion_type",
+        "zoom_start",
+        "zoom_end",
+        "pan_direction",
+        "crop_anchor",
+    ):
         setattr(assignment, field, values[field])
     assignment.updated_at = utc_now_iso()
     session.add(assignment)
@@ -827,6 +835,7 @@ def _serialize_assignment(session: Session, assignment: SceneAssignment) -> dict
         "trim_end_ms": assignment.trim_end_ms,
         "playback_speed": assignment.playback_speed,
         "display_duration_ms": assignment.display_duration_ms,
+        "render_mode": assignment.render_mode,
         "motion_type": assignment.motion_type,
         "zoom_start": assignment.zoom_start,
         "zoom_end": assignment.zoom_end,

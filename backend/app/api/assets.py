@@ -30,7 +30,7 @@ MAX_UPLOAD_BYTES = 8 * 1024 * 1024 * 1024
 @router.get("/assets")
 def list_assets(
     page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=200, ge=1, le=1000),
+    page_size: int = Query(default=200, ge=1, le=500),
     library_role: str | None = Query(default=None),
     search: str = Query(default="", max_length=200),
     session: Session = Depends(get_session),

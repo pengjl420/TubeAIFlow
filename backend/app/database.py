@@ -303,6 +303,9 @@ def _apply_migrations() -> None:
             "CREATE INDEX IF NOT EXISTS ix_generated_image_variants_candidate_id ON generated_image_variants (candidate_id)",
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_generated_image_variant_scene_index ON generated_image_variants (scene_id, variant_index)",
         ],
+        11: [
+            "ALTER TABLE scene_assignments ADD COLUMN render_mode VARCHAR NOT NULL DEFAULT 'auto'",
+        ],
     }
     with engine.begin() as connection:
         connection.exec_driver_sql(

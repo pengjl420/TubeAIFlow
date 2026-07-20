@@ -47,6 +47,38 @@ class VectorIndexTests(unittest.TestCase):
         self.assertEqual(metadata["model"], MODEL_NAME)
         self.assertNotIn("vector", metadata["vectors"][str(mountain_id)])
 
+    def test_remove_shots_updates_the_index_once_for_a_batch(self) -> None:
+        first = _unit_vector(0)
+        second = _unit_vector(1)
+        remaining = _unit_vector(2)
+        with (
+            patch.object(vector_index, "get_settings", return_value=self.settings),
+            patch.object(vector_index, "embed_media", side_effect=[first, second, remaining]),
+            patch.object(vector_index, "_write_index", wraps=vector_index._write_index) as write_index,
+        ):
+            vector_index.upsert_shot("first", "first")
+            vector_index.upsert_shot("second", "second")
+            remaining_id = vector_index.upsert_shot("remaining", "remaining")
+            writes_before_delete = write_index.call_count
+            vector_index.remove_shots(["first", "second"])
+
+        self.assertEqual(write_index.call_count, writes_before_delete + 1)
+        metadata = json.loads(
+            (
+                self.workspace / "indexes" / f"{vector_index.INDEX_BASENAME}.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            metadata["vectors"],
+            {
+                str(remaining_id): {
+                    "vector_id": remaining_id,
+                    "media_shot_id": "remaining",
+                    "model": MODEL_NAME,
+                }
+            },
+        )
+
     def test_upsert_reuses_vector_id_and_replaces_vector(self) -> None:
         first = _unit_vector(0)
         replacement = _unit_vector(2)

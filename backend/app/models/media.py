@@ -108,6 +108,7 @@ class SceneAssignment(SQLModel, table=True):
     trim_end_ms: int | None = None
     playback_speed: float = 1.0
     display_duration_ms: int | None = None
+    render_mode: str = "auto"
     motion_type: str = "auto"
     zoom_start: float = 1.0
     zoom_end: float = 1.06

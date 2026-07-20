@@ -65,12 +65,19 @@ def search(query: str) -> dict[str, float]:
 
 
 def remove_shot(media_shot_id: str) -> None:
+    remove_shots([media_shot_id])
+
+
+def remove_shots(media_shot_ids: Sequence[str]) -> None:
+    shot_ids = set(media_shot_ids)
+    if not shot_ids:
+        return
     with _INDEX_LOCK:
         payload, index = _read_index()
         remove_ids = [
             int(vector_id)
             for vector_id, item in payload["vectors"].items()
-            if item.get("media_shot_id") == media_shot_id
+            if item.get("media_shot_id") in shot_ids
         ]
         if not remove_ids:
             return

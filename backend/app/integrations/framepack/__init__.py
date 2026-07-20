@@ -1,0 +1,2 @@
+"""Local FramePack worker integration."""
+

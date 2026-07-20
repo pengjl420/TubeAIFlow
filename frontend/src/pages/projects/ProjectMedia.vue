@@ -658,6 +658,14 @@ onMounted(load)
                 <small :title="assignment.selection_reason">{{ assignment.selection_reason }}</small>
                 <div v-if="assignment.media.media_type === 'image'" class="motion-controls">
                   <label>
+                    <span>渲染方式</span>
+                    <select v-model="assignment.render_mode">
+                      <option value="auto">自动路由</option>
+                      <option value="ffmpeg">FFmpeg</option>
+                      <option value="framepack">FramePack 优先</option>
+                    </select>
+                  </label>
+                  <label>
                     <span>动态效果</span>
                     <select v-model="assignment.motion_type">
                       <option value="auto">自动选择</option>

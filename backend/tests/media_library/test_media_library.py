@@ -490,7 +490,7 @@ class MediaLibraryTests(unittest.TestCase):
             session.add_all([media_file, shot, keyframe, project, scene, candidate, assignment])
             session.commit()
             with (
-                patch.object(ingestion_service, "remove_shot") as remove_vector,
+                patch.object(ingestion_service, "remove_shots") as remove_vectors,
                 patch.object(
                     ingestion_service,
                     "get_settings",
@@ -512,7 +512,7 @@ class MediaLibraryTests(unittest.TestCase):
         self.assertEqual(result["source_files_preserved"], 1)
         self.assertTrue(source.is_file())
         self.assertFalse(preview.exists())
-        remove_vector.assert_called_once_with(shot_id)
+        remove_vectors.assert_called_once_with([shot_id])
 
     def test_landscape_assets_only_appear_as_an_allowed_final_fallback(self) -> None:
         storyboard = StoryboardContent(

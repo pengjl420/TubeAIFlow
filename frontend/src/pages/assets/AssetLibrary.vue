@@ -470,6 +470,9 @@ onMounted(loadAssets)
         <option :value="24">每页 24 个</option>
         <option :value="36">每页 36 个</option>
         <option :value="48">每页 48 个</option>
+        <option :value="100">每页 100 个</option>
+        <option :value="200">每页 200 个</option>
+        <option :value="500">每页 500 个</option>
       </select>
       <button class="secondary-button" :disabled="!assets.length || deleting" @click="toggleFilteredSelection">
         {{ allFilteredSelected ? '取消本页全选' : '全选本页' }}

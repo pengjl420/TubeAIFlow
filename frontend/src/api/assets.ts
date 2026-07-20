@@ -102,11 +102,14 @@ export interface AssetDeleteResult {
 }
 
 export async function deleteAsset(mediaId: string): Promise<AssetDeleteResult> {
-  return unwrap(await apiClient.delete(`/assets/${encodeURIComponent(mediaId)}`))
+  return unwrap(await apiClient.delete(`/assets/${encodeURIComponent(mediaId)}`, { timeout: 0 }))
 }
 
 export async function deleteAssets(mediaIds: string[]): Promise<AssetDeleteResult> {
-  return unwrap(await apiClient.delete('/assets/batch', { data: { media_ids: mediaIds } }))
+  return unwrap(await apiClient.delete('/assets/batch', {
+    data: { media_ids: mediaIds },
+    timeout: 0,
+  }))
 }
 
 export async function listSceneCandidates(projectId: string, sceneId: string): Promise<SceneCandidate[]> {
@@ -193,6 +196,7 @@ export async function updateSceneAssignmentRender(
   return unwrap(await apiClient.patch(
     `/projects/${projectId}/storyboard/scenes/${encodeURIComponent(sceneId)}/assignments/${encodeURIComponent(assignment.id)}/render`,
     {
+      render_mode: assignment.render_mode,
       motion_type: assignment.motion_type,
       zoom_start: assignment.zoom_start,
       zoom_end: assignment.zoom_end,

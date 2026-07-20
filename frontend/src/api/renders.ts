@@ -55,7 +55,10 @@ export interface IntelligentRenderStatus {
   rendered_scene_count: number
   scene_render_results: Record<string, {
     provider: string
+    requested_provider?: string
     motion_presets: string[]
+    fallback_reason?: string | null
+    attempts?: number
     quality?: { passed: boolean; issues: string[] }
   }>
   visual_track_path: string

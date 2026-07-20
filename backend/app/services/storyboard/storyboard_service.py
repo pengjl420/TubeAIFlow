@@ -208,6 +208,9 @@ For every input scene return exactly one object using the same scene_id and thes
 scene_id, visual_summary, visual_type, entities, locations, time_period, scene_category,
 mood, shot_preference, primary_query, alternative_queries, fallback_category,
 fallback_mood, allow_landscape_fallback, must_include, avoid, confidence.
+Also return motion_prompt, scene_type, importance_score, motion_score, identity_risk,
+text_density and subject_count. motion_prompt describes only subtle subject/environment/camera
+motion plus identity consistency constraints; do not repeat image style keywords.
 entities, locations, alternative_queries, must_include and avoid MUST always be JSON arrays
 of strings. Use [] when there are no values. Never return a single string for these fields.
 All visual descriptions and search queries must be concise English suitable for stock-footage search.

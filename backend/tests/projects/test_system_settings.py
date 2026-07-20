@@ -2,6 +2,7 @@ import unittest
 from pathlib import Path
 
 from app.config import Settings
+from app.infrastructure.asset_layout import media_preview_dir, provider_download_dir
 from app.services.settings.system_settings_service import SECRET_FIELDS, get_public_settings
 from unittest.mock import patch
 
@@ -19,6 +20,9 @@ class SettingsModelTests(unittest.TestCase):
             cosyvoice_python="  ",
             cosyvoice_model_dir=None,
             vision_embedding_model_dir="",
+            image_generation_model_path="",
+            image_generation_config_dir="",
+            image_generation_python="",
         )
         self.assertIsNone(settings.qwen_tts_root)
         self.assertIsNone(settings.qwen_tts_python)
@@ -30,6 +34,9 @@ class SettingsModelTests(unittest.TestCase):
         self.assertIsNone(settings.cosyvoice_python)
         self.assertIsNone(settings.cosyvoice_model_dir)
         self.assertIsNone(settings.vision_embedding_model_dir)
+        self.assertIsNone(settings.image_generation_model_path)
+        self.assertIsNone(settings.image_generation_config_dir)
+        self.assertIsNone(settings.image_generation_python)
 
     def test_qwen_dtype_is_validated(self) -> None:
         with self.assertRaisesRegex(ValueError, "Unsupported Qwen3-TTS dtype"):
@@ -43,9 +50,42 @@ class SettingsModelTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unsupported vision embedding dtype"):
             Settings(vision_embedding_dtype="int8")
 
+    def test_image_generation_dtype_is_validated(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Unsupported image generation dtype"):
+            Settings(image_generation_dtype="int8")
+
     def test_media_search_cache_cannot_be_shorter_than_24_hours(self) -> None:
         with self.assertRaises(ValueError):
             Settings(media_search_cache_hours=23)
+
+    def test_empty_provider_storage_paths_use_defaults(self) -> None:
+        settings = Settings(pexels_storage_dir="", pixabay_storage_dir="  ")
+
+        self.assertIsNone(settings.pexels_storage_dir)
+        self.assertIsNone(settings.pixabay_storage_dir)
+
+    def test_provider_storage_contains_downloads_and_previews(self) -> None:
+        root = Path("D:/media/pexels")
+        settings = Settings(workspace_dir=Path("D:/workspace"), pexels_storage_dir=root)
+
+        self.assertEqual(provider_download_dir("pexels", settings), root)
+        self.assertEqual(
+            media_preview_dir("media_1", "pexels", settings),
+            root / "thumbnails" / "media_1",
+        )
+
+    def test_unconfigured_provider_keeps_existing_default_layout(self) -> None:
+        workspace = Path("D:/workspace")
+        settings = Settings(workspace_dir=workspace)
+
+        self.assertEqual(
+            provider_download_dir("pixabay", settings),
+            workspace / "assets" / "downloads" / "pixabay",
+        )
+        self.assertEqual(
+            media_preview_dir("media_2", "pixabay", settings),
+            workspace / "assets" / "media_2",
+        )
 
     def test_landscape_transition_defaults_total_one_hundred_percent(self) -> None:
         settings = Settings()

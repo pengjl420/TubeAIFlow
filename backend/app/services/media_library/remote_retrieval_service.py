@@ -6,6 +6,7 @@ import httpx
 from sqlmodel import Session, select
 
 from app.config import get_settings
+from app.infrastructure.asset_layout import provider_download_dir
 from app.models.media import MediaFile, MediaShot
 from app.schemas.media import RemoteMediaCandidate
 from app.schemas.storyboard import StoryboardContent
@@ -89,7 +90,7 @@ def _download_path(candidate: RemoteMediaCandidate) -> Path:
     if suffix not in {".mp4", ".mov", ".webm"}:
         suffix = ".mp4"
     url_hash = hashlib.sha256(candidate.download_url.encode("utf-8")).hexdigest()[:10]
-    directory = get_settings().workspace_dir / "assets" / "downloads" / candidate.provider
+    directory = provider_download_dir(candidate.provider)
     directory.mkdir(parents=True, exist_ok=True)
     return directory / f"{candidate.asset_id}_{url_hash}{suffix}"
 

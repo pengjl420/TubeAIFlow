@@ -8,6 +8,7 @@ from app.infrastructure import gpu_resource
 from app.integrations.vision.vector_index import search as vector_search
 from app.models.media import (
     LIBRARY_ROLE_LANDSCAPE_FALLBACK,
+    LIBRARY_ROLE_PROJECT_GENERATED,
     LIBRARY_ROLE_SEMANTIC,
     LIBRARY_ROLE_THEMED_FALLBACK,
     MediaFile,
@@ -309,6 +310,15 @@ def assign_candidate(
     assignment.trim_start_ms = payload.trim_start_ms
     assignment.trim_end_ms = payload.trim_end_ms
     assignment.playback_speed = payload.playback_speed
+    assignment.display_duration_ms = (
+        payload.display_duration_ms
+        or (scene.end_ms - scene.start_ms if candidate.selection_stage == "local_generated_image" else None)
+    )
+    assignment.motion_type = payload.motion_type
+    assignment.zoom_start = payload.zoom_start
+    assignment.zoom_end = payload.zoom_end
+    assignment.pan_direction = payload.pan_direction
+    assignment.crop_anchor = payload.crop_anchor
     assignment.transition = payload.transition
     assignment.manual_confirmed = True
     assignment.selection_stage = candidate.selection_stage
@@ -341,6 +351,12 @@ def assign_candidate(
         "trim_start_ms": assignment.trim_start_ms,
         "trim_end_ms": assignment.trim_end_ms,
         "playback_speed": assignment.playback_speed,
+        "display_duration_ms": assignment.display_duration_ms,
+        "motion_type": assignment.motion_type,
+        "zoom_start": assignment.zoom_start,
+        "zoom_end": assignment.zoom_end,
+        "pan_direction": assignment.pan_direction,
+        "crop_anchor": assignment.crop_anchor,
         "transition": assignment.transition,
         "manual_confirmed": assignment.manual_confirmed,
         "selection_stage": assignment.selection_stage,
@@ -506,6 +522,25 @@ def reorder_scene_assignments(
     return list_scene_assignments(session, project_id, scene_id)
 
 
+def update_scene_assignment_render(
+    session: Session,
+    project_id: str,
+    scene_id: str,
+    assignment_id: str,
+    values: dict,
+) -> dict:
+    _require_scene(session, project_id, scene_id)
+    assignment = session.get(SceneAssignment, assignment_id)
+    if not assignment or assignment.project_id != project_id or assignment.scene_id != scene_id:
+        raise ValueError("镜头轨道指派不存在")
+    for field in ("motion_type", "zoom_start", "zoom_end", "pan_direction", "crop_anchor"):
+        setattr(assignment, field, values[field])
+    assignment.updated_at = utc_now_iso()
+    session.add(assignment)
+    session.commit()
+    return list_scene_assignments(session, project_id, scene_id)
+
+
 def confirm_scene_fallback_assignments(
     session: Session, project_id: str, scene_id: str
 ) -> dict:
@@ -626,6 +661,7 @@ def _validate_candidate_role(
         "local_semantic": LIBRARY_ROLE_SEMANTIC,
         "remote_semantic": LIBRARY_ROLE_SEMANTIC,
         "manual_upload": LIBRARY_ROLE_SEMANTIC,
+        "local_generated_image": LIBRARY_ROLE_PROJECT_GENERATED,
         LIBRARY_ROLE_THEMED_FALLBACK: LIBRARY_ROLE_THEMED_FALLBACK,
         LIBRARY_ROLE_LANDSCAPE_FALLBACK: LIBRARY_ROLE_LANDSCAPE_FALLBACK,
     }.get(candidate.selection_stage)
@@ -641,6 +677,7 @@ def _selection_reason(stage: str) -> str:
     return {
         "local_semantic": "本地语义素材命中",
         "remote_semantic": "在线语义素材命中",
+        "local_generated_image": "本地模型生成的分镜图片",
         LIBRARY_ROLE_THEMED_FALLBACK: "语义素材无合格结果，使用主题化兜底",
         LIBRARY_ROLE_LANDSCAPE_FALLBACK: "语义和主题兜底均无结果，使用纯风景最终兜底",
     }.get(stage, "人工确认素材")
@@ -789,6 +826,12 @@ def _serialize_assignment(session: Session, assignment: SceneAssignment) -> dict
         "trim_start_ms": assignment.trim_start_ms,
         "trim_end_ms": assignment.trim_end_ms,
         "playback_speed": assignment.playback_speed,
+        "display_duration_ms": assignment.display_duration_ms,
+        "motion_type": assignment.motion_type,
+        "zoom_start": assignment.zoom_start,
+        "zoom_end": assignment.zoom_end,
+        "pan_direction": assignment.pan_direction,
+        "crop_anchor": assignment.crop_anchor,
         "transition": assignment.transition,
         "manual_confirmed": assignment.manual_confirmed,
         "selection_stage": assignment.selection_stage,

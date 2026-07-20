@@ -1,5 +1,6 @@
 from app.models.batch import BatchItem, BatchJob
 from app.models.media import (
+    GeneratedImageVariant,
     MediaFile,
     MediaKeyframe,
     MediaProviderState,
@@ -17,6 +18,7 @@ from app.models.task import TaskRun
 __all__ = [
     "BatchItem",
     "BatchJob",
+    "GeneratedImageVariant",
     "MediaFile",
     "MediaKeyframe",
     "MediaProviderState",

@@ -37,7 +37,7 @@ def reflow_scene_assignments(
 
         remaining_ms = scene_duration_ms - cursor_ms
         if media_file.media_type == "image":
-            placement_ms = min(DEFAULT_IMAGE_DURATION_MS, remaining_ms)
+            placement_ms = min(assignment.display_duration_ms or DEFAULT_IMAGE_DURATION_MS, remaining_ms)
         else:
             source_ms = _source_duration_ms(assignment, shot, media_file)
             if source_ms <= 0:

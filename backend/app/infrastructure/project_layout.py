@@ -44,6 +44,7 @@ def ensure_project_dirs(base_dir: Path) -> None:
         "timeline",
         "logs",
         "storyboard",
+        "media/generated_images",
         "media",
         "renders/scenes",
         "reports",

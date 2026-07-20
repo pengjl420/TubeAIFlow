@@ -224,11 +224,11 @@ const mediaVideoDir = computed(() => {
 
 const videoMode = computed(() => {
   const mode = projectConfig.value.video_mode
-  if (mode === 'ai_semantic' || mode === 'landscape' || mode === 'none') return mode
+  if (mode === 'ai_semantic' || mode === 'ai_generated_images' || mode === 'landscape' || mode === 'none') return mode
   return projectConfig.value.include_video === true ? 'landscape' : 'none'
 })
 const includeVideo = computed(() => videoMode.value !== 'none')
-const usesAiSemanticVideo = computed(() => videoMode.value === 'ai_semantic')
+const usesAiSemanticVideo = computed(() => videoMode.value === 'ai_semantic' || videoMode.value === 'ai_generated_images')
 const usesLandscapeVideo = computed(() => videoMode.value === 'landscape')
 
 const finalVideoPath = computed(() => {
@@ -267,7 +267,7 @@ const workflowSteps = computed(() => {
   const videoReady = Boolean(finalVideoPath.value && outputs.value?.final_video_path)
   const videoActive = composingVideo.value || Boolean(
     projectTask.value?.status === 'running'
-    && ['storyboard', 'asset_search', 'asset_review', 'scene_render', 'final_render', 'quality_check', 'quality_review'].includes(projectTask.value.stage || ''),
+    && ['storyboard', 'asset_search', 'asset_review', 'image_generation', 'image_review', 'scene_render', 'final_render', 'quality_check', 'quality_review'].includes(projectTask.value.stage || ''),
   )
   return [
     { label: '脚本', caption: scriptCharacterCount.value ? `${scriptCharacterCount.value} 字` : scriptReady ? '已保存' : '等待输入', state: scriptReady ? 'done' : 'current' },
@@ -414,6 +414,8 @@ function taskStageLabel(task: ProjectTaskStatus) {
     storyboard: '生成视觉分镜',
     asset_search: '检索语义素材',
     asset_review: '等待素材审核',
+    image_generation: '本地生成分镜图片',
+    image_review: '等待图片审核',
     scene_render: '渲染场景视频',
     final_render: '合成最终视频',
     quality_check: '执行质量检查',

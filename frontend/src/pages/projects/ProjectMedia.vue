@@ -8,6 +8,7 @@ import {
   confirmSceneFallbackAssignments,
   deleteSceneAssignment,
   getProjectAssignmentCoverage,
+  generateSceneImages,
   importAssets,
   ingestAsset,
   listAssets,
@@ -16,6 +17,7 @@ import {
   reorderSceneAssignments,
   searchSceneCandidates,
   updateAsset,
+  updateSceneAssignmentRender,
   uploadSceneAsset,
 } from '../../api/assets'
 import { getProject, selectDirectory } from '../../api/projects'
@@ -48,6 +50,7 @@ const indexingId = ref('')
 const updatingId = ref('')
 const assigningId = ref('')
 const editingTrack = ref(false)
+const savingMotionId = ref('')
 const confirmingFallback = ref(false)
 const uploadInput = ref<HTMLInputElement | null>(null)
 const uploadingSceneAsset = ref(false)
@@ -75,6 +78,7 @@ const reviewComplete = computed(() => scenes.value.length > 0 && assignedCount.v
 const filteredAssets = computed(() => roleFilter.value === 'all'
   ? assets.value
   : assets.value.filter((asset) => asset.library_role === roleFilter.value))
+const usesGeneratedImages = computed(() => project.value?.config?.video_mode === 'ai_generated_images')
 
 async function load() {
   loading.value = true
@@ -117,6 +121,29 @@ async function selectScene(sceneId: string) {
     coverageByScene.value = { ...coverageByScene.value, [sceneId]: track.coverage }
   } catch (err) {
     error.value = err instanceof Error ? err.message : '候选素材加载失败'
+  }
+}
+
+async function saveMotion(assignment: SceneAssignment) {
+  if (!selectedScene.value) return
+  savingMotionId.value = assignment.id
+  error.value = ''
+  try {
+    const track = await updateSceneAssignmentRender(
+      projectId,
+      selectedScene.value.id,
+      assignment,
+    )
+    assignments.value = track.assignments
+    coverageByScene.value = {
+      ...coverageByScene.value,
+      [selectedScene.value.id]: track.coverage,
+    }
+    message.value = '镜头动态参数已保存；重新渲染时只会刷新受影响的场景'
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '保存镜头动态参数失败'
+  } finally {
+    savingMotionId.value = ''
   }
 }
 
@@ -273,6 +300,7 @@ function selectionStageLabel(stage: SceneCandidate['selection_stage']) {
     themed_fallback: '主题兜底',
     landscape_fallback: '纯风景最终兜底',
     manual_upload: '人工上传',
+    local_generated_image: '本地模型生成',
   }[stage]
 }
 
@@ -285,6 +313,15 @@ async function searchCandidates() {
   error.value = ''
   message.value = ''
   try {
+    if (usesGeneratedImages.value) {
+      const result = await generateSceneImages(projectId, selectedScene.value.id)
+      candidates.value = result.candidates
+      const track = await listSceneAssignments(projectId, selectedScene.value.id)
+      assignments.value = track.assignments
+      coverageByScene.value = { ...coverageByScene.value, [selectedScene.value.id]: track.coverage }
+      message.value = `已生成 ${result.candidate_count} 张候选分镜图，请选择一张用于当前场景`
+      return
+    }
     const result = await searchSceneCandidates(projectId, selectedScene.value.id)
     candidates.value = result.candidates
     const track = await listSceneAssignments(projectId, selectedScene.value.id)
@@ -568,7 +605,7 @@ onMounted(load)
                 {{ uploadingSceneAsset ? '正在上传并处理…' : '上传替换素材' }}
               </button>
               <button class="primary-button" :disabled="searching || !selectedScene.storyboard" @click="searchCandidates">
-                {{ searching ? '正在检索素材…' : '检索素材' }}
+                {{ searching ? (usesGeneratedImages ? '正在生成图片…' : '正在检索素材…') : (usesGeneratedImages ? '重新生成候选图' : '检索素材') }}
               </button>
             </div>
           </div>
@@ -619,6 +656,32 @@ onMounted(load)
                   · {{ assignment.playback_speed.toFixed(2) }}×
                 </small>
                 <small :title="assignment.selection_reason">{{ assignment.selection_reason }}</small>
+                <div v-if="assignment.media.media_type === 'image'" class="motion-controls">
+                  <label>
+                    <span>动态效果</span>
+                    <select v-model="assignment.motion_type">
+                      <option value="auto">自动选择</option>
+                      <option value="static">静止</option>
+                      <option value="slow_zoom_in">缓慢推近</option>
+                      <option value="slow_zoom_out">缓慢拉远</option>
+                      <option value="pan_left_to_right">从左向右</option>
+                      <option value="pan_right_to_left">从右向左</option>
+                      <option value="pan_top_to_bottom">从上向下</option>
+                      <option value="pan_bottom_to_top">从下向上</option>
+                      <option value="diagonal_top_left">斜向左上</option>
+                      <option value="diagonal_top_right">斜向右上</option>
+                      <option value="portrait_push_in">人物推近</option>
+                      <option value="environment_pull_out">环境拉远</option>
+                      <option value="subtle_breathing">轻微呼吸</option>
+                      <option value="random_safe">稳定随机</option>
+                    </select>
+                  </label>
+                  <label><span>起始缩放</span><input v-model.number="assignment.zoom_start" type="number" min="1" max="1.2" step="0.01" /></label>
+                  <label><span>结束缩放</span><input v-model.number="assignment.zoom_end" type="number" min="1" max="1.2" step="0.01" /></label>
+                  <button class="mini-button" :disabled="savingMotionId === assignment.id" @click="saveMotion(assignment)">
+                    {{ savingMotionId === assignment.id ? '保存中…' : '保存动态' }}
+                  </button>
+                </div>
               </div>
               <div class="shot-track-actions">
                 <button class="mini-button" :disabled="editingTrack || index === 0" @click="moveTrackItem(index, -1)">上移</button>

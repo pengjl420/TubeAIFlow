@@ -9,7 +9,7 @@ from app.config import get_settings
 from app.models.project import Project
 from app.models.narration import Segment
 from app.models.batch import BatchItem, BatchJob
-from app.models.media import SceneAssignment, SceneCandidate
+from app.models.media import GeneratedImageVariant, MediaFile, MediaShot, SceneAssignment, SceneCandidate
 from app.models.task import TaskRun
 from app.models.storyboard import SubtitleCue, VisualScene
 from app.infrastructure.file_storage import ensure_inside_any, project_dir
@@ -36,6 +36,7 @@ SUPPORTED_TTS_ENGINES = {DEFAULT_TTS_ENGINE, "chatterbox", "cosyvoice"}
 VIDEO_MODE_NONE = "none"
 VIDEO_MODE_LANDSCAPE = "landscape"
 VIDEO_MODE_AI_SEMANTIC = "ai_semantic"
+VIDEO_MODE_AI_GENERATED_IMAGES = "ai_generated_images"
 SEMANTIC_REVIEW_MANUAL = "manual"
 SEMANTIC_REVIEW_AUTO = "automatic"
 SUPPORTED_SEMANTIC_REVIEW_MODES = {
@@ -46,6 +47,7 @@ SUPPORTED_VIDEO_MODES = {
     VIDEO_MODE_NONE,
     VIDEO_MODE_LANDSCAPE,
     VIDEO_MODE_AI_SEMANTIC,
+    VIDEO_MODE_AI_GENERATED_IMAGES,
 }
 EDITABLE_STATUSES = {"created", "script_imported", "segmented"}
 GENERATING_STATUSES = {
@@ -208,6 +210,20 @@ def delete_project(session: Session, project: Project) -> dict:
         select(SceneAssignment).where(SceneAssignment.project_id == project.id)
     ).all():
         session.delete(assignment)
+    generated_variants = list(
+        session.exec(
+            select(GeneratedImageVariant).where(GeneratedImageVariant.project_id == project.id)
+        ).all()
+    )
+    generated_media_ids = {item.media_file_id for item in generated_variants if item.media_file_id}
+    for variant in generated_variants:
+        session.delete(variant)
+    for media_id in generated_media_ids:
+        for shot in session.exec(select(MediaShot).where(MediaShot.media_file_id == media_id)).all():
+            session.delete(shot)
+        media_file = session.get(MediaFile, media_id)
+        if media_file and media_file.provider == "local_image_generation":
+            session.delete(media_file)
     for candidate in session.exec(
         select(SceneCandidate).where(SceneCandidate.project_id == project.id)
     ).all():

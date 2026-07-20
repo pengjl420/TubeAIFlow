@@ -164,11 +164,12 @@ onMounted(async () => {
             <option value="none">不生成视频（仅配音与原文 SRT）</option>
             <option value="landscape">纯风景素材拼接</option>
             <option value="ai_semantic">AI 语义视频拼接</option>
+            <option value="ai_generated_images">本地 AI 分镜图片视频</option>
           </select>
           <small>所有方式共用 TTS、音频合并和 SRT 逻辑。</small>
         </label>
 
-        <label v-if="videoMode === 'ai_semantic'" class="field">
+        <label v-if="videoMode === 'ai_semantic' || videoMode === 'ai_generated_images'" class="field">
           <span>素材审核方式</span>
           <select v-model="semanticReviewMode">
             <option value="manual">人工审核拼接</option>

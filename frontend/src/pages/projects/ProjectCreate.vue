@@ -161,6 +161,7 @@ onMounted(async () => {
             <option value="none">不生成视频（仅配音与原文 SRT）</option>
             <option value="landscape">纯风景素材拼接</option>
             <option value="ai_semantic">AI 语义视频拼接</option>
+            <option value="ai_generated_images">本地 AI 分镜图片视频</option>
           </select>
           <span class="muted">三种方式共用切段、TTS、音频合并和 SRT 生成，只在字幕完成后分流。</span>
         </label>
@@ -179,7 +180,7 @@ onMounted(async () => {
           </div>
           <span class="muted">生成最终视频时会扫描该目录中的视频素材。</span>
         </label>
-        <label v-if="videoMode === 'ai_semantic'" class="field reference-field">
+        <label v-if="videoMode === 'ai_semantic' || videoMode === 'ai_generated_images'" class="field reference-field">
           <span>素材审核方式</span>
           <select v-model="semanticReviewMode">
             <option value="manual">人工审核拼接</option>

@@ -80,7 +80,10 @@ def run_project_generation(
         )
         if video_mode == project_service.VIDEO_MODE_LANDSCAPE:
             stage = "video"
-        elif video_mode == project_service.VIDEO_MODE_AI_SEMANTIC:
+        elif video_mode in {
+            project_service.VIDEO_MODE_AI_SEMANTIC,
+            project_service.VIDEO_MODE_AI_GENERATED_IMAGES,
+        }:
             stage = "storyboard"
         else:
             stage = "completed"

@@ -45,6 +45,8 @@ const stageLabels: Record<string, string> = {
   storyboard: '生成视觉分镜',
   asset_search: '检索语义素材',
   asset_review: '等待素材审核',
+  image_generation: '本地生成分镜图片',
+  image_review: '等待图片审核',
   scene_render: '渲染场景视频',
   final_render: '合成最终视频',
   quality_check: '执行质量检查',

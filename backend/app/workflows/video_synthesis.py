@@ -1,13 +1,14 @@
 from collections.abc import Callable
 from sqlmodel import Session, select
 
-from app.infrastructure import gpu_resource
+from app.infrastructure import gpu_resource, process_runner as task_control
 from app.models.media import LIBRARY_ROLE_SEMANTIC
 from app.models.project import Project
 from app.models.storyboard import SubtitleCue, VisualScene
 from app.services.media_library import ingestion_service, retrieval_service
+from app.services.image_generation import image_generation_service, image_selection_service
 from app.services.quality import qa_service
-from app.services.rendering import final_renderer, scene_renderer
+from app.services.rendering import final_renderer, scene_renderer, visual_track_composer
 from app.services.rendering import timeline_composer
 from app.services.storyboard import storyboard_service
 from app.services.projects import project_service
@@ -18,7 +19,10 @@ STAGES = {
     "storyboard",
     "asset_search",
     "asset_review",
+    "image_generation",
+    "image_review",
     "scene_render",
+    "visual_track",
     "final_render",
     "quality_check",
     "quality_review",
@@ -44,7 +48,32 @@ def run_video_synthesis(
 
     if stage == "storyboard":
         regenerate_storyboard(session, project)
-        stage = "asset_search"
+        stage = (
+            "image_generation"
+            if project_service.get_project_video_mode(project)
+            == project_service.VIDEO_MODE_AI_GENERATED_IMAGES
+            else "asset_search"
+        )
+        on_stage_changed(stage)
+
+    if stage == "image_generation":
+        with task_control.controlled(project.id, "image_generation"):
+            image_generation_service.generate_project_images(session, project)
+        image_selection_service.score_project_images(session, project)
+        if (
+            project_service.get_semantic_review_mode(project)
+            == project_service.SEMANTIC_REVIEW_AUTO
+        ):
+            for scene in _scenes(session, project.id):
+                image_selection_service.auto_assign_best_image(session, project, scene.id)
+        stage = "image_review"
+        on_stage_changed(stage)
+
+    if stage == "image_review":
+        missing = assignment_gap(session, project.id)
+        if missing:
+            raise ReviewRequired("image_review", f"仍有 {missing} 个场景需要确认生成图片")
+        stage = "scene_render"
         on_stage_changed(stage)
 
     if stage == "asset_search":
@@ -72,6 +101,11 @@ def run_video_synthesis(
 
     if stage == "scene_render":
         scene_renderer.render_all_scenes(session, project)
+        stage = "visual_track"
+        on_stage_changed(stage)
+
+    if stage == "visual_track":
+        visual_track_composer.compose_visual_track(session, project)
         stage = "final_render"
         on_stage_changed(stage)
 
@@ -91,10 +125,15 @@ def run_video_synthesis(
 
 
 def initial_stage(session: Session, project_id: str) -> str:
+    project = session.get(Project, project_id)
     scenes = _scenes(session, project_id)
     if not scenes:
         return "storyboard"
-    return "scene_render" if assignment_gap(session, project_id) == 0 else "asset_search"
+    if assignment_gap(session, project_id) == 0:
+        return "scene_render"
+    if project and project_service.get_project_video_mode(project) == project_service.VIDEO_MODE_AI_GENERATED_IMAGES:
+        return "image_generation"
+    return "asset_search"
 
 
 def regenerate_storyboard(session: Session, project: Project) -> dict:

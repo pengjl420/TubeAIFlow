@@ -261,6 +261,48 @@ def _apply_migrations() -> None:
             "CREATE INDEX IF NOT EXISTS ix_scene_assignments_scene_sequence "
             "ON scene_assignments (scene_id, sequence_index)",
         ],
+        10: [
+            "ALTER TABLE scene_assignments ADD COLUMN display_duration_ms INTEGER",
+            "ALTER TABLE scene_assignments ADD COLUMN motion_type VARCHAR NOT NULL DEFAULT 'auto'",
+            "ALTER TABLE scene_assignments ADD COLUMN zoom_start FLOAT NOT NULL DEFAULT 1.0",
+            "ALTER TABLE scene_assignments ADD COLUMN zoom_end FLOAT NOT NULL DEFAULT 1.06",
+            "ALTER TABLE scene_assignments ADD COLUMN pan_direction VARCHAR NOT NULL DEFAULT 'center'",
+            "ALTER TABLE scene_assignments ADD COLUMN crop_anchor VARCHAR NOT NULL DEFAULT 'center'",
+            """
+            CREATE TABLE IF NOT EXISTS generated_image_variants (
+                id VARCHAR NOT NULL PRIMARY KEY,
+                project_id VARCHAR NOT NULL,
+                scene_id VARCHAR NOT NULL,
+                variant_index INTEGER NOT NULL,
+                path VARCHAR NOT NULL,
+                prompt VARCHAR NOT NULL,
+                negative_prompt VARCHAR NOT NULL DEFAULT '',
+                model_path VARCHAR NOT NULL,
+                model_name VARCHAR NOT NULL DEFAULT '',
+                workflow_version VARCHAR NOT NULL DEFAULT 'sdxl_single_file_v1',
+                input_signature VARCHAR NOT NULL,
+                seed INTEGER NOT NULL,
+                width INTEGER NOT NULL,
+                height INTEGER NOT NULL,
+                steps INTEGER NOT NULL,
+                guidance_scale FLOAT NOT NULL,
+                status VARCHAR NOT NULL DEFAULT 'pending',
+                generation_seconds FLOAT,
+                error_message VARCHAR,
+                media_file_id VARCHAR,
+                candidate_id VARCHAR,
+                created_at VARCHAR NOT NULL,
+                updated_at VARCHAR NOT NULL
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_generated_image_variants_project_id ON generated_image_variants (project_id)",
+            "CREATE INDEX IF NOT EXISTS ix_generated_image_variants_scene_id ON generated_image_variants (scene_id)",
+            "CREATE INDEX IF NOT EXISTS ix_generated_image_variants_input_signature ON generated_image_variants (input_signature)",
+            "CREATE INDEX IF NOT EXISTS ix_generated_image_variants_status ON generated_image_variants (status)",
+            "CREATE INDEX IF NOT EXISTS ix_generated_image_variants_media_file_id ON generated_image_variants (media_file_id)",
+            "CREATE INDEX IF NOT EXISTS ix_generated_image_variants_candidate_id ON generated_image_variants (candidate_id)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_generated_image_variant_scene_index ON generated_image_variants (scene_id, variant_index)",
+        ],
     }
     with engine.begin() as connection:
         connection.exec_driver_sql(

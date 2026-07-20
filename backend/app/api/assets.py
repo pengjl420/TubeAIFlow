@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse
 from sqlmodel import Session
 
 from app.config import get_settings
+from app.infrastructure import process_runner as task_control
 from app.database import get_session
 from app.schemas.media import (
     AssetBatchDeleteRequest,
@@ -14,9 +15,11 @@ from app.schemas.media import (
     AssetUpdateRequest,
     SceneAssignmentRequest,
     SceneAssignmentReorderRequest,
+    SceneAssignmentRenderUpdate,
 )
 from app.models.media import MediaFile, MediaKeyframe, MediaShot
 from app.services.media_library import ingestion_service, retrieval_service
+from app.services.image_generation import image_generation_service, image_selection_service
 from app.services.projects import project_service
 
 
@@ -204,6 +207,52 @@ def search_scene_candidates(
     return {"success": True, "data": data}
 
 
+@router.post("/projects/{project_id}/storyboard/scenes/{scene_id}/generate-images")
+def generate_scene_images(
+    project_id: str,
+    scene_id: str,
+    session: Session = Depends(get_session),
+) -> dict:
+    project = _require_project(session, project_id)
+    if project_service.get_project_video_mode(project) != project_service.VIDEO_MODE_AI_GENERATED_IMAGES:
+        raise HTTPException(
+            status_code=409,
+            detail={"success": False, "error": "当前项目未启用本地图片生成模式"},
+        )
+    try:
+        with task_control.controlled(project.id, "image_generation"):
+            data = image_generation_service.generate_scene_images(session, project, scene_id)
+        data["selection"] = image_selection_service.score_scene_images(
+            session, project, scene_id
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"success": False, "error": str(exc)},
+        ) from exc
+    data["candidates"] = retrieval_service.list_scene_candidates(
+        session, project_id, scene_id
+    )
+    return {"success": True, "data": data}
+
+
+@router.get("/projects/{project_id}/storyboard/scenes/{scene_id}/generated-images")
+def list_generated_scene_images(
+    project_id: str,
+    scene_id: str,
+    session: Session = Depends(get_session),
+) -> dict:
+    _require_project(session, project_id)
+    return {
+        "success": True,
+        "data": {
+            "variants": image_generation_service.list_scene_variants(
+                session, project_id, scene_id
+            )
+        },
+    }
+
+
 @router.post("/projects/{project_id}/storyboard/scenes/{scene_id}/assign")
 def assign_scene_candidate(
     project_id: str,
@@ -264,6 +313,28 @@ def reorder_scene_assignments(
     try:
         data = retrieval_service.reorder_scene_assignments(
             session, project_id, scene_id, payload.assignment_ids
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"success": False, "error": str(exc)}) from exc
+    return {"success": True, "data": data}
+
+
+@router.patch("/projects/{project_id}/storyboard/scenes/{scene_id}/assignments/{assignment_id}/render")
+def update_scene_assignment_render(
+    project_id: str,
+    scene_id: str,
+    assignment_id: str,
+    payload: SceneAssignmentRenderUpdate,
+    session: Session = Depends(get_session),
+) -> dict:
+    _require_project(session, project_id)
+    try:
+        data = retrieval_service.update_scene_assignment_render(
+            session,
+            project_id,
+            scene_id,
+            assignment_id,
+            payload.model_dump(),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"success": False, "error": str(exc)}) from exc
@@ -359,4 +430,5 @@ def _media_response(value: str) -> FileResponse:
     path = Path(value).resolve()
     if not path.is_file():
         raise HTTPException(status_code=404, detail="预览文件不存在")
-    return FileResponse(path, media_type="image/jpeg")
+    media_type = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+    return FileResponse(path, media_type=media_type)

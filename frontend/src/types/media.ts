@@ -63,7 +63,7 @@ export interface SceneCandidate {
     total: number
   }
   status: 'NO_RESULT' | 'LOW_RELEVANCE' | 'QUALIFIED' | 'FALLBACK_REQUIRED'
-  selection_stage: 'local_semantic' | 'remote_semantic' | 'themed_fallback' | 'landscape_fallback' | 'manual_upload'
+  selection_stage: 'local_semantic' | 'remote_semantic' | 'themed_fallback' | 'landscape_fallback' | 'manual_upload' | 'local_generated_image'
   is_fallback: boolean
   conflicts: string[]
   retrieval: {
@@ -132,6 +132,31 @@ export interface SceneAssignment {
   trim_start_ms: number
   trim_end_ms: number | null
   playback_speed: number
+  display_duration_ms: number | null
+  motion_type:
+    | 'auto'
+    | 'static'
+    | 'slow_zoom_in'
+    | 'slow_zoom_out'
+    | 'pan_left_to_right'
+    | 'pan_right_to_left'
+    | 'pan_top_to_bottom'
+    | 'pan_bottom_to_top'
+    | 'diagonal_top_left'
+    | 'diagonal_top_right'
+    | 'portrait_push_in'
+    | 'environment_pull_out'
+    | 'subtle_breathing'
+    | 'random_safe'
+    | 'zoom_in'
+    | 'zoom_out'
+    | 'pan_left'
+    | 'pan_right'
+    | 'still'
+  zoom_start: number
+  zoom_end: number
+  pan_direction: 'center' | 'left' | 'right' | 'up' | 'down'
+  crop_anchor: 'center' | 'left' | 'right' | 'top' | 'bottom'
   transition: string
   manual_confirmed: boolean
   selection_stage: SceneCandidate['selection_stage'] | 'manual'

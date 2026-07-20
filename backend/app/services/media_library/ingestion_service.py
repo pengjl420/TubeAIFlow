@@ -9,10 +9,12 @@ from sqlmodel import Session, select
 
 from app.config import get_settings
 from app.infrastructure import gpu_resource
+from app.infrastructure.asset_layout import media_preview_dir
 from app.infrastructure.ffmpeg import probe_media, run_ffmpeg
 from app.integrations.vision.embedding import MODEL_NAME
 from app.integrations.vision.vector_index import remove_shot, upsert_shot
 from app.models.media import (
+    LIBRARY_ROLE_PROJECT_GENERATED,
     LIBRARY_ROLE_SEMANTIC,
     LIBRARY_ROLES,
     MediaFile,
@@ -159,6 +161,8 @@ def list_assets(
     library_role: str | None = None,
 ) -> list[dict]:
     statement = select(MediaFile)
+    if library_role is None:
+        statement = statement.where(MediaFile.library_role != LIBRARY_ROLE_PROJECT_GENERATED)
     if library_role:
         if library_role not in LIBRARY_ROLES:
             raise ValueError(f"未知素材角色：{library_role}")
@@ -190,6 +194,8 @@ def list_asset_page(
         raise ValueError(f"未知素材角色：{library_role}")
 
     filters = []
+    if library_role is None:
+        filters.append(MediaFile.library_role != LIBRARY_ROLE_PROJECT_GENERATED)
     if library_role:
         filters.append(MediaFile.library_role == library_role)
     normalized_search = search.strip()
@@ -239,8 +245,16 @@ def list_asset_page(
 
 
 def _asset_library_summary(session: Session) -> dict:
-    asset_count = int(session.exec(select(func.count()).select_from(MediaFile)).one())
-    shot_count = int(session.exec(select(func.count()).select_from(MediaShot)).one())
+    asset_count = int(session.exec(
+        select(func.count()).select_from(MediaFile).where(
+            MediaFile.library_role != LIBRARY_ROLE_PROJECT_GENERATED
+        )
+    ).one())
+    shot_count = int(session.exec(
+        select(func.count()).select_from(MediaShot).where(
+            MediaShot.library_role != LIBRARY_ROLE_PROJECT_GENERATED
+        )
+    ).one())
     semantic_asset_count = int(session.exec(
         select(func.count())
         .select_from(MediaFile)
@@ -376,7 +390,7 @@ def _delete_preview_files(
     shots: list[MediaShot],
     keyframes: list[MediaKeyframe],
 ) -> int:
-    preview_root = (get_settings().workspace_dir / "assets" / media_file.id).resolve()
+    preview_root = media_preview_dir(media_file.id, media_file.provider, get_settings())
     source_path = Path(media_file.path).resolve()
     candidates = {frame.path for frame in keyframes}
     candidates.update(shot.thumbnail_path for shot in shots if shot.thumbnail_path)
@@ -564,7 +578,7 @@ def _ingest_shot(
     source_path: Path,
 ) -> None:
     session.exec(delete(MediaKeyframe).where(MediaKeyframe.media_shot_id == shot.id))
-    frame_dir = get_settings().workspace_dir / "assets" / media_file.id / shot.id
+    frame_dir = media_preview_dir(media_file.id, media_file.provider, get_settings()) / shot.id
     frame_dir.mkdir(parents=True, exist_ok=True)
     timestamps = _keyframe_timestamps(shot, media_file.media_type)
     frames = []

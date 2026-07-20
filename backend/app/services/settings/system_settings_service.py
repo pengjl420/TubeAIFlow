@@ -91,6 +91,13 @@ def _validate_paths(settings: Settings) -> None:
     workspace.mkdir(parents=True, exist_ok=True)
     if not workspace.is_dir():
         raise ValueError("Workspace path is not a directory")
+    for field_name in ("pexels_storage_dir", "pixabay_storage_dir"):
+        path: Path | None = getattr(settings, field_name)
+        if path is not None:
+            path = path.expanduser().resolve()
+            path.mkdir(parents=True, exist_ok=True)
+            if not path.is_dir():
+                raise ValueError(f"{field_name} must be a directory")
     for field_name in (
         "qwen_tts_root",
         "qwen_tts_model_dir",
@@ -99,6 +106,7 @@ def _validate_paths(settings: Settings) -> None:
         "cosyvoice_root",
         "cosyvoice_model_dir",
         "vision_embedding_model_dir",
+        "image_generation_config_dir",
     ):
         path: Path | None = getattr(settings, field_name)
         if path is not None and not path.is_dir():
@@ -109,3 +117,10 @@ def _validate_paths(settings: Settings) -> None:
         raise ValueError("chatterbox_python must be an existing file")
     if settings.cosyvoice_python is not None and not settings.cosyvoice_python.is_file():
         raise ValueError("cosyvoice_python must be an existing file")
+    if (
+        settings.image_generation_model_path is not None
+        and not settings.image_generation_model_path.is_file()
+    ):
+        raise ValueError("image_generation_model_path must be an existing file")
+    if settings.image_generation_python is not None and not settings.image_generation_python.is_file():
+        raise ValueError("image_generation_python must be an existing file")

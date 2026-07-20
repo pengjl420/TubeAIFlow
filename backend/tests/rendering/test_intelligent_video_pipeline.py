@@ -68,6 +68,33 @@ class IntelligentVideoPipelineTests(unittest.TestCase):
             auto_assign.assert_called_once_with(session, project, scene.id)
             self.assertEqual(changed, ["asset_review"])
 
+    def test_generated_image_mode_uses_image_generation_review_gate(self) -> None:
+        with Session(self.engine) as session:
+            project, _scene = self._project_with_scene(session)
+            project.config_json = '{"video_mode":"ai_generated_images","semantic_review_mode":"manual"}'
+            session.add(project)
+            session.commit()
+            changed = []
+            with (
+                patch.object(
+                    video_synthesis.image_generation_service,
+                    "generate_project_images",
+                ) as generate,
+                patch.object(
+                    video_synthesis.image_selection_service,
+                    "score_project_images",
+                ) as score,
+            ):
+                with self.assertRaises(video_synthesis.ReviewRequired) as raised:
+                    video_synthesis.run_video_synthesis(
+                        session, project, "image_generation", changed.append
+                    )
+
+            generate.assert_called_once_with(session, project)
+            score.assert_called_once_with(session, project)
+            self.assertEqual(raised.exception.stage, "image_review")
+            self.assertEqual(changed, ["image_review"])
+
     def test_confirmed_assignments_continue_through_qa(self) -> None:
         with Session(self.engine) as session:
             project, scene = self._project_with_scene(session)
@@ -85,6 +112,10 @@ class IntelligentVideoPipelineTests(unittest.TestCase):
             changed = []
             with (
                 patch.object(video_synthesis.scene_renderer, "render_all_scenes") as render_scenes,
+                patch.object(
+                    video_synthesis.visual_track_composer,
+                    "compose_visual_track",
+                ) as compose_visual_track,
                 patch.object(video_synthesis.final_renderer, "compose_final_video") as render_final,
                 patch.object(
                     video_synthesis.qa_service,
@@ -98,9 +129,10 @@ class IntelligentVideoPipelineTests(unittest.TestCase):
 
             self.assertEqual(
                 changed,
-                ["scene_render", "final_render", "quality_check", "completed"],
+                ["scene_render", "visual_track", "final_render", "quality_check", "completed"],
             )
             render_scenes.assert_called_once_with(session, project)
+            compose_visual_track.assert_called_once_with(session, project)
             render_final.assert_called_once_with(session, project)
             qa.assert_called_once_with(session, project)
             self.assertEqual(media_file.id, "media-1")
@@ -128,7 +160,11 @@ class IntelligentVideoPipelineTests(unittest.TestCase):
             with (
                 patch.object(scene_renderer, "get_settings", return_value=settings),
                 patch.object(scene_renderer, "run_ffmpeg", side_effect=fake_ffmpeg) as ffmpeg,
-                patch.object(scene_renderer, "probe_duration", return_value=5.0),
+                patch.object(
+                    scene_renderer,
+                    "check_scene_video",
+                    return_value=self._quality(5.0),
+                ),
             ):
                 first = scene_renderer.render_scene(session, project, scene, assignment)
                 second = scene_renderer.render_scene(session, project, scene, assignment)
@@ -209,7 +245,11 @@ class IntelligentVideoPipelineTests(unittest.TestCase):
             with (
                 patch.object(scene_renderer, "get_settings", return_value=settings),
                 patch.object(scene_renderer, "run_ffmpeg", side_effect=fake_ffmpeg) as ffmpeg,
-                patch.object(scene_renderer, "probe_duration", return_value=10.0),
+                patch.object(
+                    scene_renderer,
+                    "check_scene_video",
+                    return_value=self._quality(10.0),
+                ),
             ):
                 scene_renderer.render_scene(session, project, scene, clips)
 
@@ -280,6 +320,8 @@ class IntelligentVideoPipelineTests(unittest.TestCase):
             scene_path = project_dir / "renders" / "scenes" / "scene_0001.mp4"
             scene_path.parent.mkdir(parents=True, exist_ok=True)
             scene_path.write_bytes(b"scene")
+            visual_track = project_dir / "renders" / "visual_track.mp4"
+            visual_track.write_bytes(b"visual")
 
             with (
                 patch.object(qa_service, "get_settings", return_value=settings),
@@ -288,7 +330,12 @@ class IntelligentVideoPipelineTests(unittest.TestCase):
                 patch.object(
                     qa_service,
                     "probe_media",
-                    return_value={"width": 1920, "height": 1080, "codec_name": "h264"},
+                    return_value={
+                        "width": 1920,
+                        "height": 1080,
+                        "codec_name": "h264",
+                        "audio_stream_count": 0,
+                    },
                 ),
             ):
                 report = qa_service.run_quality_check(session, project)
@@ -310,6 +357,23 @@ class IntelligentVideoPipelineTests(unittest.TestCase):
         session.add_all([project, scene])
         session.commit()
         return project, scene
+
+    @staticmethod
+    def _quality(duration: float) -> dict:
+        return {
+            "passed": True,
+            "metadata": {
+                "duration_ms": round(duration * 1000),
+                "width": 1920,
+                "height": 1080,
+                "codec_name": "h264",
+                "pixel_format": "yuv420p",
+                "frame_rate_value": 30.0,
+                "video_stream_count": 1,
+                "audio_stream_count": 0,
+            },
+            "issues": [],
+        }
 
     def _media(
         self, session: Session, source: Path | None = None

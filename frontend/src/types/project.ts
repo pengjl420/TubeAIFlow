@@ -23,5 +23,5 @@ export interface Project {
   latest_task_status?: string | null
 }
 
-export type VideoGenerationMode = 'none' | 'landscape' | 'ai_semantic'
+export type VideoGenerationMode = 'none' | 'landscape' | 'ai_semantic' | 'ai_generated_images'
 export type SemanticReviewMode = 'manual' | 'automatic'

@@ -26,6 +26,8 @@ export interface SystemSettings {
   pexels_api_key_configured: boolean
   pixabay_api_key: string
   pixabay_api_key_configured: boolean
+  pexels_storage_dir: string | null
+  pixabay_storage_dir: string | null
   media_search_cache_hours: number
   media_search_download_limit: number
   auto_fallback_enabled: boolean
@@ -33,6 +35,18 @@ export interface SystemSettings {
   auto_fallback_review_required: boolean
   auto_fallback_max_ratio_percent: number
   auto_fallback_max_consecutive_shots: number
+  image_generation_model_path: string | null
+  image_generation_config_dir: string | null
+  image_generation_python: string | null
+  image_generation_device: string
+  image_generation_dtype: 'bfloat16' | 'float16' | 'float32'
+  image_generation_width: number
+  image_generation_height: number
+  image_generation_steps: number
+  image_generation_guidance_scale: number
+  image_generation_candidates_per_scene: number
+  image_generation_cpu_offload: boolean
+  image_generation_negative_prompt: string
   qwen_tts_root: string | null
   qwen_tts_python: string | null
   qwen_tts_model_dir: string | null

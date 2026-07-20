@@ -118,7 +118,10 @@ def start_video_workflow(project_id: str, session: Session = Depends(get_session
     project = project_service.get_project(session, project_id)
     if not project:
         raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
-    if project_service.get_project_video_mode(project) != project_service.VIDEO_MODE_AI_SEMANTIC:
+    if project_service.get_project_video_mode(project) not in {
+        project_service.VIDEO_MODE_AI_SEMANTIC,
+        project_service.VIDEO_MODE_AI_GENERATED_IMAGES,
+    }:
         raise HTTPException(
             status_code=409,
             detail={"success": False, "error": "当前项目未启用 AI 语义视频生成"},
@@ -142,7 +145,7 @@ def start_video_workflow(project_id: str, session: Session = Depends(get_session
         resume_stage = video_synthesis.initial_stage(session, project_id)
         if resume_stage in {"storyboard", "asset_search"}:
             pass
-        elif latest.current_stage == "asset_review":
+        elif latest.current_stage in {"asset_review", "image_review"}:
             missing = video_synthesis.assignment_gap(session, project_id)
             if missing:
                 raise HTTPException(
@@ -152,7 +155,7 @@ def start_video_workflow(project_id: str, session: Session = Depends(get_session
                         "error": f"仍有 {missing} 个场景未确认素材，请先完成素材审核",
                     },
                 )
-            resume_stage = "asset_review"
+            resume_stage = latest.current_stage
         else:
             resume_stage = "scene_render"
         task_service.resume_review_task(session, latest, current_stage=resume_stage)

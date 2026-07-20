@@ -6,10 +6,12 @@ from app.shared.time import utc_now_iso
 LIBRARY_ROLE_SEMANTIC = "semantic"
 LIBRARY_ROLE_THEMED_FALLBACK = "themed_fallback"
 LIBRARY_ROLE_LANDSCAPE_FALLBACK = "landscape_fallback"
+LIBRARY_ROLE_PROJECT_GENERATED = "project_generated"
 LIBRARY_ROLES = {
     LIBRARY_ROLE_SEMANTIC,
     LIBRARY_ROLE_THEMED_FALLBACK,
     LIBRARY_ROLE_LANDSCAPE_FALLBACK,
+    LIBRARY_ROLE_PROJECT_GENERATED,
 }
 
 
@@ -105,11 +107,45 @@ class SceneAssignment(SQLModel, table=True):
     trim_start_ms: int = 0
     trim_end_ms: int | None = None
     playback_speed: float = 1.0
+    display_duration_ms: int | None = None
+    motion_type: str = "auto"
+    zoom_start: float = 1.0
+    zoom_end: float = 1.06
+    pan_direction: str = "center"
+    crop_anchor: str = "center"
     transition: str = "cut"
     manual_confirmed: bool = True
     selection_stage: str = Field(default="manual", index=True)
     selection_reason: str = ""
     is_fallback: bool = False
+    created_at: str = Field(default_factory=utc_now_iso)
+    updated_at: str = Field(default_factory=utc_now_iso)
+
+
+class GeneratedImageVariant(SQLModel, table=True):
+    __tablename__ = "generated_image_variants"
+
+    id: str = Field(primary_key=True)
+    project_id: str = Field(index=True)
+    scene_id: str = Field(index=True)
+    variant_index: int
+    path: str
+    prompt: str
+    negative_prompt: str = ""
+    model_path: str
+    model_name: str = ""
+    workflow_version: str = "sdxl_single_file_v1"
+    input_signature: str = Field(index=True)
+    seed: int
+    width: int
+    height: int
+    steps: int
+    guidance_scale: float
+    status: str = Field(default="pending", index=True)
+    generation_seconds: float | None = None
+    error_message: str | None = None
+    media_file_id: str | None = Field(default=None, index=True)
+    candidate_id: str | None = Field(default=None, index=True)
     created_at: str = Field(default_factory=utc_now_iso)
     updated_at: str = Field(default_factory=utc_now_iso)
 

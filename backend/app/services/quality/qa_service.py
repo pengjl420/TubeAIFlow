@@ -48,6 +48,11 @@ def run_quality_check(session: Session, project: Project) -> dict:
     _check_timeline(scenes, issues)
     audio_path = get_final_audio_path(project, get_settings().workspace_dir)
     video_path = get_final_video_path(project, get_settings().workspace_dir)
+    visual_track_path = (
+        get_project_work_dir(project, get_settings().workspace_dir)
+        / "renders"
+        / "visual_track.mp4"
+    )
     audio_duration = _duration_or_issue(audio_path, "audio_missing", "完整配音文件不存在", issues)
     video_duration = _duration_or_issue(video_path, "video_missing", "最终视频不存在", issues)
     if audio_duration is not None and video_duration is not None:
@@ -73,6 +78,15 @@ def run_quality_check(session: Session, project: Project) -> dict:
                 )
     if not get_final_srt_path(project, get_settings().workspace_dir).is_file():
         _issue(issues, "subtitle_missing", "error", "项目 SRT 字幕文件不存在")
+    if not visual_track_path.is_file():
+        _issue(issues, "visual_track_missing", "error", "纯视频轨道不存在")
+    else:
+        try:
+            visual_metadata = probe_media(visual_track_path)
+            if visual_metadata.get("audio_stream_count") != 0:
+                _issue(issues, "visual_track_has_audio", "error", "纯视频轨道包含意外音频流")
+        except RuntimeError as exc:
+            _issue(issues, "visual_track_invalid", "error", str(exc))
 
     for scene in scenes:
         scene_assignments = assignments.get(scene.id, [])

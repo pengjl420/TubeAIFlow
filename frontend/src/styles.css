@@ -1307,6 +1307,11 @@ main {
   margin-bottom: 14px;
 }
 
+.provider-storage-actions {
+  display: flex;
+  gap: 9px;
+}
+
 .output-path-list {
   display: grid;
   gap: 0;
@@ -2015,6 +2020,10 @@ main {
 .shot-track-copy { display: grid; gap: 4px; min-width: 0; }
 .shot-track-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .shot-track-copy small { color: var(--ink-soft); }
+.motion-controls { display: grid; grid-template-columns: minmax(140px, 1.5fr) repeat(2, minmax(90px, 1fr)) auto; gap: 8px; align-items: end; margin-top: 6px; }
+.motion-controls label { display: grid; gap: 3px; color: var(--ink-soft); font-size: 12px; }
+.motion-controls select, .motion-controls input { width: 100%; min-height: 32px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); }
+@media (max-width: 900px) { .motion-controls { grid-template-columns: 1fr 1fr; } }
 .auto-fallback-badge { color: var(--warning); font-size: 10px; font-weight: 800; }
 .shot-track-actions { display: flex; flex-wrap: wrap; gap: 5px; justify-content: flex-end; }
 .track-empty { border: 1px dashed var(--line); border-radius: 10px; color: var(--ink-soft); font-size: 12px; padding: 18px; text-align: center; }

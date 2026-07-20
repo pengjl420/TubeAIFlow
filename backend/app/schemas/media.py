@@ -2,6 +2,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.schemas.render import MotionPreset
+
 
 LibraryRole = Literal["semantic", "themed_fallback", "landscape_fallback"]
 ReviewStatus = Literal["pending", "approved", "rejected"]
@@ -56,6 +58,12 @@ class SceneAssignmentRequest(BaseModel):
     trim_start_ms: int = Field(default=0, ge=0)
     trim_end_ms: int | None = Field(default=None, gt=0)
     playback_speed: float = Field(default=1.0, ge=0.5, le=2.0)
+    display_duration_ms: int | None = Field(default=None, ge=500, le=60000)
+    motion_type: MotionPreset = "auto"
+    zoom_start: float = Field(default=1.0, ge=1.0, le=1.2)
+    zoom_end: float = Field(default=1.06, ge=1.0, le=1.2)
+    pan_direction: Literal["center", "left", "right", "up", "down"] = "center"
+    crop_anchor: Literal["center", "left", "right", "top", "bottom"] = "center"
     transition: str = Field(default="cut", min_length=1, max_length=30)
 
 
@@ -67,6 +75,14 @@ class SceneAssignmentReorderRequest(BaseModel):
         if len(set(self.assignment_ids)) != len(self.assignment_ids):
             raise ValueError("镜头轨道中不能包含重复指派")
         return self
+
+
+class SceneAssignmentRenderUpdate(BaseModel):
+    motion_type: MotionPreset
+    zoom_start: float = Field(default=1.0, ge=1.0, le=1.2)
+    zoom_end: float = Field(default=1.06, ge=1.0, le=1.2)
+    pan_direction: Literal["center", "left", "right", "up", "down"] = "center"
+    crop_anchor: Literal["center", "left", "right", "top", "bottom"] = "center"
 
 
 class RemoteMediaCandidate(BaseModel):

@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session
@@ -11,7 +13,13 @@ from app.models.media import SceneAssignment
 from app.models.storyboard import VisualScene
 from app.services.projects import project_service
 from app.services.quality import qa_service
-from app.services.rendering import final_renderer, rough_cut_service, scene_renderer, timeline_composer
+from app.services.rendering import (
+    final_renderer,
+    rough_cut_service,
+    scene_renderer,
+    timeline_composer,
+    visual_track_composer,
+)
 
 
 router = APIRouter(tags=["videos"])
@@ -88,7 +96,18 @@ def render_scene(project_id: str, scene_id: str, session: Session = Depends(get_
 def render_final(project_id: str, session: Session = Depends(get_session)) -> dict:
     project = _require_project(session, project_id)
     try:
+        visual_track_composer.compose_visual_track(session, project)
         data = final_renderer.compose_final_video(session, project)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail={"success": False, "error": str(exc)}) from exc
+    return {"success": True, "data": data}
+
+
+@router.post("/projects/{project_id}/render/visual-track")
+def render_visual_track(project_id: str, session: Session = Depends(get_session)) -> dict:
+    project = _require_project(session, project_id)
+    try:
+        data = visual_track_composer.compose_visual_track(session, project)
     except (OSError, RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail={"success": False, "error": str(exc)}) from exc
     return {"success": True, "data": data}
@@ -121,6 +140,14 @@ def intelligent_render_status(project_id: str, session: Session = Depends(get_se
     rendered = sum(scene_renderer.scene_output_path(project, scene).is_file() for scene in scenes)
     work_dir = get_project_work_dir(project, get_settings().workspace_dir)
     intelligent_render_complete = (work_dir / "reports" / "render_report.json").is_file()
+    visual_track_path = work_dir / "renders" / "visual_track.mp4"
+    scene_manifest_path = work_dir / "renders" / "scenes" / "manifest.json"
+    scene_manifest = {}
+    if scene_manifest_path.is_file():
+        try:
+            scene_manifest = json.loads(scene_manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            scene_manifest = {}
     final_video_path = get_final_video_path(project, get_settings().workspace_dir)
     return {
         "success": True,
@@ -129,6 +156,9 @@ def intelligent_render_status(project_id: str, session: Session = Depends(get_se
             "assignment_count": completed_scene_count,
             "shot_assignment_count": len(assignments),
             "rendered_scene_count": rendered,
+            "scene_render_results": scene_manifest,
+            "visual_track_path": str(visual_track_path),
+            "visual_track_exists": visual_track_path.is_file(),
             "final_video_path": str(final_video_path),
             "final_video_exists": final_video_path.is_file() and intelligent_render_complete,
             "qa_report": qa_service.read_report(project),

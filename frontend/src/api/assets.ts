@@ -6,6 +6,7 @@ import type {
   ReviewStatus,
   SceneCandidate,
   SceneAssignmentTrack,
+  SceneAssignment,
   SceneCoverage,
   SceneSearchResult,
 } from '../types/media'
@@ -123,6 +124,20 @@ export async function searchSceneCandidates(projectId: string, sceneId: string):
   ))
 }
 
+export async function generateSceneImages(projectId: string, sceneId: string): Promise<{
+  project_id: string
+  scene_count: number
+  candidate_count: number
+  generated_count: number
+  candidates: SceneCandidate[]
+}> {
+  return unwrap(await apiClient.post(
+    `/projects/${projectId}/storyboard/scenes/${encodeURIComponent(sceneId)}/generate-images`,
+    undefined,
+    { timeout: 0 },
+  ))
+}
+
 export async function assignSceneCandidate(
   projectId: string,
   sceneId: string,
@@ -167,6 +182,23 @@ export async function reorderSceneAssignments(
   return unwrap(await apiClient.put(
     `/projects/${projectId}/storyboard/scenes/${encodeURIComponent(sceneId)}/assignments/order`,
     { assignment_ids: assignmentIds },
+  ))
+}
+
+export async function updateSceneAssignmentRender(
+  projectId: string,
+  sceneId: string,
+  assignment: SceneAssignment,
+): Promise<SceneAssignmentTrack> {
+  return unwrap(await apiClient.patch(
+    `/projects/${projectId}/storyboard/scenes/${encodeURIComponent(sceneId)}/assignments/${encodeURIComponent(assignment.id)}/render`,
+    {
+      motion_type: assignment.motion_type,
+      zoom_start: assignment.zoom_start,
+      zoom_end: assignment.zoom_end,
+      pan_direction: assignment.pan_direction,
+      crop_anchor: assignment.crop_anchor,
+    },
   ))
 }
 

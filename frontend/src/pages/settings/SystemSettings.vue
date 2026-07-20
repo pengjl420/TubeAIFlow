@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 
 import { rememberApiAddress } from '../../api/client'
+import { selectDirectory } from '../../api/projects'
 import {
   clearSystemSecret,
   getFfmpegStatus,
@@ -114,6 +115,21 @@ async function clearApiKey(field: 'deepseek_api_key' | 'pexels_api_key' | 'pixab
     message.value = `${label} API Key 已清除`
   } catch (err) {
     error.value = err instanceof Error ? err.message : '密钥清除失败'
+  }
+}
+
+async function chooseProviderStorage(provider: 'pexels' | 'pixabay') {
+  if (!settings.value) return
+  const field = `${provider}_storage_dir` as 'pexels_storage_dir' | 'pixabay_storage_dir'
+  error.value = ''
+  try {
+    const selected = await selectDirectory(
+      settings.value[field] || settings.value.workspace_dir,
+      `选择 ${provider === 'pexels' ? 'Pexels' : 'Pixabay'} 素材存储文件夹`,
+    )
+    if (selected) settings.value[field] = selected
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '无法打开文件夹选择器'
   }
 }
 
@@ -272,6 +288,39 @@ onMounted(load)
           </div>
           <div class="notice">
             可以取消全部勾选来关闭纯风景视频转场。启用任意效果时，已启用效果的占比合计必须为 100%。
+          </div>
+        </div>
+      </details>
+
+      <details class="panel settings-disclosure">
+        <summary>
+          <span class="settings-disclosure-heading"><strong>本地分镜图片生成</strong><small>SDXL 单文件模型</small></span>
+          <span class="settings-disclosure-icon" aria-hidden="true">⌄</span>
+        </summary>
+        <div class="settings-disclosure-content">
+          <p class="section-description">用于 ai_generated_images 模式。模型在独立子进程中批量加载，生成完成后释放显存。</p>
+          <div class="form-grid">
+            <label class="field full-width">
+              <span>模型文件</span>
+              <input v-model="settings.image_generation_model_path" placeholder="D:\TubeAIFlow\models\image_generation\...\checkpoint.safetensors" />
+            </label>
+            <label class="field full-width"><span>SDXL 管线配置目录</span><input v-model="settings.image_generation_config_dir" placeholder="D:\TubeAIFlow\models\image_generation\...\diffusers_config" /></label>
+            <label class="field full-width">
+              <span>Python 可执行文件（可选）</span>
+              <input v-model="settings.image_generation_python" placeholder="留空时使用后端 Python；环境需安装 diffusers" />
+            </label>
+            <label class="field"><span>运行设备</span><input v-model="settings.image_generation_device" placeholder="cuda:0" /></label>
+            <label class="field">
+              <span>计算精度</span>
+              <select v-model="settings.image_generation_dtype"><option value="float16">FP16</option><option value="bfloat16">BF16</option><option value="float32">FP32</option></select>
+            </label>
+            <label class="field"><span>图片宽度</span><input v-model.number="settings.image_generation_width" type="number" min="512" max="2048" step="64" /></label>
+            <label class="field"><span>图片高度</span><input v-model.number="settings.image_generation_height" type="number" min="512" max="2048" step="64" /></label>
+            <label class="field"><span>采样步数</span><input v-model.number="settings.image_generation_steps" type="number" min="1" max="100" /></label>
+            <label class="field"><span>CFG</span><input v-model.number="settings.image_generation_guidance_scale" type="number" min="0" max="30" step="0.1" /></label>
+            <label class="field"><span>每场景候选数</span><input v-model.number="settings.image_generation_candidates_per_scene" type="number" min="1" max="4" /></label>
+            <label class="checkbox-field"><input v-model="settings.image_generation_cpu_offload" type="checkbox" /><span><strong>CPU Offload</strong><small>8GB 显存建议开启，降低显存峰值。</small></span></label>
+            <label class="field full-width"><span>全局负面提示词</span><textarea v-model="settings.image_generation_negative_prompt" rows="3"></textarea></label>
           </div>
         </div>
       </details>
@@ -520,6 +569,30 @@ onMounted(load)
             </label>
           </div>
           <div class="notice">检索顺序固定为本地素材 → Pexels → Pixabay。平台返回 429 时会进入冷却并自动尝试下一平台，不会轮换同平台的其他 Key。</div>
+          <div class="form-grid provider-storage-grid">
+            <label class="field full-width">
+              <span>Pexels 素材存储文件夹</span>
+              <span class="inline-form">
+                <input v-model="settings.pexels_storage_dir" placeholder="留空时使用工作目录下的 assets/downloads/pexels" />
+                <span class="provider-storage-actions">
+                  <button class="secondary-button" type="button" @click="chooseProviderStorage('pexels')">选择文件夹</button>
+                  <button v-if="settings.pexels_storage_dir" class="secondary-button" type="button" @click="settings.pexels_storage_dir = null">恢复默认</button>
+                </span>
+              </span>
+              <small>下载的视频以及生成的缩略图和关键帧都会保存在此文件夹中。</small>
+            </label>
+            <label class="field full-width">
+              <span>Pixabay 素材存储文件夹</span>
+              <span class="inline-form">
+                <input v-model="settings.pixabay_storage_dir" placeholder="留空时使用工作目录下的 assets/downloads/pixabay" />
+                <span class="provider-storage-actions">
+                  <button class="secondary-button" type="button" @click="chooseProviderStorage('pixabay')">选择文件夹</button>
+                  <button v-if="settings.pixabay_storage_dir" class="secondary-button" type="button" @click="settings.pixabay_storage_dir = null">恢复默认</button>
+                </span>
+              </span>
+              <small>下载的视频以及生成的缩略图和关键帧都会保存在此文件夹中。</small>
+            </label>
+          </div>
           <div class="form-grid fallback-settings-grid">
             <label class="checkbox-field full-width">
               <input v-model="settings.auto_fallback_enabled" type="checkbox" />

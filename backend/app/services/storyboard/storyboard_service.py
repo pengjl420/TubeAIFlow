@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 
 from pydantic import ValidationError
 from sqlalchemy import delete
@@ -25,6 +26,12 @@ STORYBOARD_LIST_FIELDS = (
     "alternative_queries",
     "must_include",
     "avoid",
+)
+STORYBOARD_TEN_POINT_FIELDS = (
+    "importance_score",
+    "motion_score",
+    "identity_risk",
+    "text_density",
 )
 
 logger = logging.getLogger(__name__)
@@ -177,7 +184,7 @@ def _request_storyboard_batch(
 
 
 def _normalize_llm_storyboard_payload(payload: dict) -> dict:
-    """Repair safe scalar/list variations before strict schema validation."""
+    """Repair safe, unambiguous LLM variations before strict validation."""
     if not isinstance(payload, dict) or not isinstance(payload.get("scenes"), list):
         return payload
 
@@ -195,6 +202,17 @@ def _normalize_llm_storyboard_payload(payload: dict) -> dict:
             elif isinstance(value, str):
                 value = value.strip()
                 normalized_scene[field_name] = [value] if value else []
+        for field_name in STORYBOARD_TEN_POINT_FIELDS:
+            value = normalized_scene.get(field_name)
+            if (
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and math.isfinite(value)
+                and 10 < value <= 100
+            ):
+                # Models sometimes use a percentage scale despite the requested
+                # ten-point scale. Half-up rounding preserves values such as 85 as 9.
+                normalized_scene[field_name] = math.floor(value / 10 + 0.5)
         normalized_scenes.append(normalized_scene)
     normalized["scenes"] = normalized_scenes
     return normalized
@@ -211,6 +229,13 @@ fallback_mood, allow_landscape_fallback, must_include, avoid, confidence.
 Also return motion_prompt, scene_type, importance_score, motion_score, identity_risk,
 text_density and subject_count. motion_prompt describes only subtle subject/environment/camera
 motion plus identity consistency constraints; do not repeat image style keywords.
+importance_score, motion_score, identity_risk and text_density MUST be integers from 0 to 10,
+never percentages from 0 to 100. importance_score measures narrative importance; motion_score
+measures how much natural subject or environmental motion benefits the scene; identity_risk
+measures the risk that generated motion changes a recognizable person, brand or object;
+text_density measures the amount of text that must remain legible. subject_count MUST be an
+integer from 0 to 20. Example: {"importance_score":8,"motion_score":4,"identity_risk":6,
+"text_density":0,"subject_count":1}.
 entities, locations, alternative_queries, must_include and avoid MUST always be JSON arrays
 of strings. Use [] when there are no values. Never return a single string for these fields.
 All visual descriptions and search queries must be concise English suitable for stock-footage search.
@@ -248,7 +273,10 @@ def _storyboard_repair_prompt(
         {
             "instruction": (
                 "Repair the previous response so it exactly matches the required JSON schema. "
-                "Return JSON only, keep every scene_id unchanged, and do not omit scenes."
+                "Return JSON only, keep every scene_id unchanged, and do not omit scenes. "
+                "importance_score, motion_score, identity_risk and text_density must each be "
+                "an integer from 0 to 10, never a percentage from 0 to 100. subject_count must "
+                "be an integer from 0 to 20, and confidence must be a number from 0 to 1."
             ),
             "required_scenes": json.loads(_storyboard_user_prompt(scene_values))["scenes"],
             "validation_errors": validation_error.errors(

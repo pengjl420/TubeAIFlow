@@ -8,6 +8,25 @@ MIN_PLAYBACK_SPEED = 0.85
 DEFAULT_IMAGE_DURATION_MS = 8_000
 
 
+def timeline_frame(ms: int, fps: int) -> int:
+    """Map an absolute timeline position to the nearest video frame."""
+    if ms < 0:
+        raise ValueError("Timeline position cannot be negative")
+    if fps <= 0:
+        raise ValueError("FPS must be greater than zero")
+    return (ms * fps + 500) // 1000
+
+
+def scene_frame_window(scene: VisualScene, fps: int) -> tuple[int, int, int]:
+    """Return frame boundaries derived from absolute scene times."""
+    start_frame = timeline_frame(scene.start_ms, fps)
+    end_frame = timeline_frame(scene.end_ms, fps)
+    frame_count = end_frame - start_frame
+    if frame_count <= 0:
+        raise ValueError(f"Scene {scene.scene_index} is shorter than one output frame")
+    return start_frame, end_frame, frame_count
+
+
 def scene_assignments(session: Session, scene_id: str) -> list[SceneAssignment]:
     return list(
         session.exec(

@@ -96,10 +96,10 @@ if /I "%~1"=="--check" (
 
 echo.
 echo Starting backend on http://127.0.0.1:%BACKEND_PORT% ...
-start "TubeAIFlow Backend" cmd /k "cd /d ""%BACKEND_DIR%"" && ""%BACKEND_PYTHON%"" -m app.run"
+start "TubeAIFlow Backend" /D "%BACKEND_DIR%" cmd.exe /k ".venv\Scripts\python.exe -m app.run"
 
 echo Starting frontend: http://127.0.0.1:5173
-start "TubeAIFlow Frontend" cmd /k "cd /d ""%FRONTEND_DIR%"" && npm.cmd run dev"
+start "TubeAIFlow Frontend" /D "%FRONTEND_DIR%" cmd.exe /k "npm.cmd run dev"
 
 echo.
 echo TubeAIFlow is starting.

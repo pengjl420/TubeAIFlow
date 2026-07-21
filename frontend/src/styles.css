@@ -402,6 +402,31 @@ main {
   padding: 19px;
 }
 
+.metric-card-button {
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+  width: 100%;
+}
+
+.metric-card-button:hover {
+  border-color: #83b8b2;
+  box-shadow: 0 10px 24px rgba(34, 88, 85, 0.1);
+  transform: translateY(-2px);
+}
+
+.metric-card-button:focus-visible {
+  outline: 3px solid rgba(52, 127, 137, 0.24);
+  outline-offset: 2px;
+}
+
+.metric-card-button[aria-pressed='true'] {
+  border-color: #347f89;
+  box-shadow: 0 0 0 2px rgba(52, 127, 137, 0.12);
+}
+
 .metric-card.accent-card {
   background: linear-gradient(135deg, #347f89, #52a298);
   border-color: transparent;

@@ -1919,3 +1919,324 @@ Top 3 / Top 5 召回率
 - `subtitles.srt` 内容与输入逐字稿一致，时间轴连续且不越过配音结束时间。
 - 所有自动选择素材均为 `QUALIFIED`，或明确标记为人工确认/兜底。
 - 最终导出包含素材来源与 QA 报告。
+
+---
+
+## 19. 数字人接入规划（Duix-Avatar）
+
+本节用于约束后续数字人能力的开发。当前阶段只保留设计与接口边界，不应提前创建空目录、空模型或不可运行的占位代码。第一期数字人引擎采用本地部署的 Duix-Avatar，后续如需增加其他引擎，也必须复用本节定义的业务模型和工作流边界。
+
+Duix-Avatar 在系统中的定位是“音频驱动的非实时数字人视频生成引擎”，不是 TTS 引擎、普通素材 Provider、实时交互服务或最终视频编辑器。TubeAIFlow 继续负责配音、字幕、时间轴、场景规划、画面合成、任务恢复和质量检查。
+
+### 19.1 接入目标与优先级
+
+按以下顺序实现数字人显示模式：
+
+1. `picture_in_picture`：矩形画中画，数字人以固定区域叠加在视觉素材上。
+2. `full_screen`：指定场景使用全屏数字人画面。
+3. `cutout`：对纯色背景数字人执行抠像后叠加。
+
+第一版只要求开场、结尾或人工指定场景出镜，不默认让数字人全程出现。自然背景视频的 AI 人像分割、自动姿态生成、实时交互和多人数字人不属于第一版范围。
+
+数字人失败不得阻断配音、字幕和无数字人视频的导出。项目启用数字人且生成失败时，应进入 `review_required` 或允许用户明确选择“跳过数字人后继续渲染”，不得静默降级。
+
+### 19.2 模块边界
+
+后续按实际实现内容逐步增加以下文件，不提前创建空文件：
+
+```text
+backend/app/
+  api/
+    avatars.py
+  models/
+    avatar.py
+  schemas/
+    avatar.py
+  services/
+    avatar/
+      avatar_profile_service.py
+      avatar_generation_service.py
+      avatar_compositor.py
+  integrations/
+    avatar/
+      duix_client.py
+```
+
+职责要求：
+
+- `integrations/avatar/duix_client.py` 只处理 Duix 健康检查、任务提交、状态查询、响应解析、超时、重试和宿主机/容器路径映射。
+- `avatar_generation_service.py` 负责生成粒度、输入签名、缓存、任务恢复、输出校验和数字人片段状态，不直接拼装 HTTP 接口细节。
+- `avatar_compositor.py` 负责 FFmpeg 抠像、缩放、定位、遮罩和叠加，不直接调用 Duix。
+- API 层只做参数校验并调用 service 或 workflow，不直接轮询 Duix、执行 FFmpeg 或修改其他领域内部数据。
+- Duix Electron 客户端不是运行时依赖；后端直接调用本地 Docker 服务开放的 HTTP API。
+- 第一版复用项目已经生成的最终配音，不接入 Duix 自带 Fish Speech 或 ASR。只需要部署 Duix 视频生成服务的 lite 版本。
+
+### 19.3 核心数据概念
+
+数字人对象必须与 `VoiceSegment`、`VisualScene`、`MediaFile`、`MediaShot` 和 `SceneAssignment` 分离，不得把数字人片段伪装成语义检索素材。
+
+建议数据模型：
+
+- `AvatarProfile`：数字人档案，保存名称、引擎、模板视频、背景类型、默认布局、启用状态和授权信息。
+- `AvatarClip`：某项目的一段数字人生成结果，保存音频区间、输入签名、Duix task code、状态、进度、输出路径、真实时长和错误信息。
+- `AvatarPlacement`：数字人在最终时间轴中的显示区间和布局，保存模式、位置、尺寸、边距、层级、抠像参数及人工确认状态。
+
+至少需要支持以下状态：
+
+```text
+pending
+submitted
+generating
+ready
+failed
+cancelled
+```
+
+要求：
+
+- `AvatarClip` 必须记录 `start_ms`、`end_ms`，并可追溯到使用的音频文件及配置快照。
+- Duix task code 必须持久化；服务重启后先恢复查询，不能无条件重新提交。
+- 输入签名至少包含音频哈希、模板视频哈希、时间区间、引擎版本和关键生成参数。
+- `AvatarPlacement` 可以关联一个或多个 `VisualScene`，但其时间边界最终必须使用毫秒级项目时间轴表示。
+- 肖像、声音和模板素材的授权状态必须保存在 `AvatarProfile` 或关联审计记录中。
+
+### 19.4 工作流接入
+
+数字人能力继续归属于 `video_synthesis`，不新增第三条顶级工作流。建议阶段如下：
+
+```text
+storyboard
+→ asset_search / image_generation
+→ asset_review / image_review
+→ avatar_plan
+→ avatar_generation
+→ avatar_review
+→ scene_render
+→ visual_track
+→ avatar_composite
+→ final_render
+→ quality_check
+→ quality_review
+```
+
+要求：
+
+- 未启用数字人的项目应直接跳过 `avatar_plan`、`avatar_generation`、`avatar_review` 和 `avatar_composite`。
+- `avatar_plan` 决定哪些场景或时间段出镜，不负责生成视频。
+- `avatar_generation` 使用已有最终配音或从其无损切出的片段驱动 Duix。
+- `avatar_review` 至少允许预览、重试、禁用该片段和调整布局。
+- `avatar_composite` 在 `visual_track.mp4` 生成后执行，输出独立的 `avatar_composited_track.mp4`。
+- `final_render` 根据配置选择纯视觉轨道或数字人合成轨道，并始终使用 TubeAIFlow 的最终配音文件。
+- 每一阶段必须支持检查点恢复；只修改布局时不得重新调用 Duix，只需重做 `avatar_composite` 及后续阶段。
+
+### 19.5 音频切分与同步
+
+Duix 只负责根据音频生成口型画面。最终视频不得使用 Duix 输出中的音轨，必须继续使用 TubeAIFlow 生成的完整配音，以避免重复编码、双音轨和累计同步误差。
+
+生成粒度规则：
+
+- 概念验证可以使用完整 `full_voice.wav` 一次生成。
+- 正式实现优先按章节或连续出镜区间分块，建议单块约 30—90 秒，并允许配置。
+- 不建议逐条 SubtitleCue 生成，避免人物动作频繁重置和接缝明显。
+- 生成片段必须从最终配音无损或高质量切出，不得重新执行 TTS。
+
+每个数字人输出在合成前统一规格：
+
+```text
+帧率：与项目一致，默认 30 fps CFR
+视频编码：H.264 中间文件或支持透明通道的受控中间格式
+音轨：删除
+时间基：归一化
+时长：严格裁剪或补帧到目标帧数
+```
+
+数字人片段实际时长与目标音频区间误差超过 100 ms 时不得自动进入最终合成。禁止通过改变数字人播放速度修正明显时长误差，因为这会破坏口型同步；应优先检查 Duix 输出、时间基和首尾静音。
+
+### 19.6 Duix API 与路径映射
+
+默认本地接口：
+
+```text
+POST http://127.0.0.1:8383/easy/submit
+GET  http://127.0.0.1:8383/easy/query?code={task_code}
+```
+
+提交参数至少包含：
+
+```json
+{
+  "audio_url": "容器可读取的音频路径",
+  "video_url": "容器可读取的模板视频路径",
+  "code": "唯一任务标识",
+  "chaofen": 0,
+  "watermark_switch": 0,
+  "pn": 1
+}
+```
+
+不得把任意 Windows 路径直接传给容器。系统设置必须显式保存：
+
+- Duix 服务地址。
+- 宿主机共享目录。
+- Duix 容器内共享目录。
+- 请求超时、轮询间隔、任务超时和重试次数。
+
+路径转换必须通过统一函数完成，并校验：
+
+- 输入文件位于允许的共享目录中。
+- 转换后的容器路径不包含目录穿越。
+- 提交前输入存在且可读。
+- 查询成功后结果路径能够安全映射回宿主机路径。
+- 返回文件确实位于配置的 Duix 输出目录内。
+
+所有请求和响应应记录必要诊断信息，但日志不得保存完整隐私音频、访问凭证或不必要的个人信息。
+
+### 19.7 合成规则
+
+`picture_in_picture`：
+
+- 第一版推荐模式，不要求透明通道。
+- 支持左下、右下和自定义位置，默认避开字幕安全区。
+- 保持人物原始宽高比，禁止拉伸。
+- 可以添加圆角、边框或阴影，但必须由少量明确配置控制。
+
+`full_screen`：
+
+- 使用数字人画面覆盖指定时间段的视觉轨道。
+- 必须缩放裁剪到项目分辨率，不能改变人物比例。
+- 场景切换仍遵循项目转场规则。
+
+`cutout`：
+
+- 第一版只保证纯绿或纯蓝背景模板。
+- 使用 FFmpeg `chromakey` 或 `colorkey`、边缘调整和 `overlay` 完成。
+- 抠像参数属于 AvatarProfile 默认配置，允许项目级覆盖。
+- 自然背景 AI 抠像必须作为独立可选阶段实现，并经过帧间稳定性验证后才能默认启用。
+
+所有模式均应：
+
+- 只修改视频轨道，不混入 Duix 音轨。
+- 避免遮挡字幕、人物姓名条和重要画面主体。
+- 将最终位置、尺寸、滤镜参数和输入文件写入 render report。
+- 使用输入签名缓存；布局、视频尺寸或抠像参数变化时使合成缓存失效。
+
+### 19.8 GPU 与任务调度
+
+Duix Docker 与 Qwen3-TTS、视觉 Embedding、图片生成和 FramePack 共享单张 GPU 时，必须串行执行。调用 Duix 提交后，GPU 独占范围应覆盖从任务提交到生成完成或失败的整个周期，不能提交后立即释放锁。
+
+现有 `infrastructure/gpu_resource.py` 的文件锁只能协调遵守该锁的 TubeAIFlow 进程，不能直接控制 Docker 容器显存，因此还需要：
+
+- 在系统诊断页检测 Duix 服务、Docker、NVIDIA 驱动和可用显存。
+- 记录 Duix 容器空闲时是否常驻显存，并在支持的部署方式下提供明确的启动/停止策略。
+- 禁止数字人生成与 FramePack、SDXL、Embedding 或 TTS 并行。
+- 等待 GPU 和等待 Duix 生成时持续更新 TaskRun 心跳，避免被误判为僵死任务。
+- 用户取消任务时停止轮询并标记取消；只有在 Duix 提供可靠取消接口后才调用远端取消。
+- 不得通过杀死全部 Docker 容器或清理其他项目任务来实现取消。
+
+生产环境如需并行批量生成，应优先使用独立 GPU 或独立 Duix 工作节点，而不是绕过 GPU 独占锁。
+
+### 19.9 API 规划
+
+具体路径可以根据现有兼容性调整，但建议提供：
+
+```text
+GET    /api/avatars
+POST   /api/avatars
+GET    /api/avatars/{avatar_id}
+PUT    /api/avatars/{avatar_id}
+DELETE /api/avatars/{avatar_id}
+
+POST /api/avatars/duix/health-check
+
+GET  /api/projects/{project_id}/avatar/plan
+PUT  /api/projects/{project_id}/avatar/plan
+POST /api/projects/{project_id}/avatar/generate
+GET  /api/projects/{project_id}/avatar/status
+POST /api/projects/{project_id}/avatar/clips/{clip_id}/retry
+POST /api/projects/{project_id}/avatar/clips/{clip_id}/confirm
+POST /api/projects/{project_id}/avatar/composite
+```
+
+API 不得暴露容器内部实现对象、未经清理的 Duix 原始响应或不受控文件路径。删除 AvatarProfile 时，如仍被项目引用，应拒绝删除或执行可审计的软禁用，不能破坏已有项目的可重渲染性。
+
+### 19.10 前端规划
+
+系统设置页增加 Duix 服务地址、共享路径和健康检查；数字人档案页负责模板、背景类型、默认抠像参数和授权信息。
+
+项目配置至少支持：
+
+```text
+数字人：关闭 / 开场结尾 / 指定场景 / 全程
+显示模式：画中画 / 全屏 / 抠像
+人物档案
+默认位置、尺寸和边距
+字幕安全区避让
+生成分块时长
+```
+
+故事板页面允许对场景设置数字人出镜和布局。渲染页面展示数字人规划、生成、审核和合成进度，并提供失败原因、重试和跳过操作。页面状态优先保留在对应页面，不把所有数字人编辑状态放入全局 Pinia。
+
+### 19.11 QA 与验收
+
+数字人 QA 至少包括：
+
+- Duix 输出文件存在、可解码且视频流完整。
+- 实际帧率、分辨率、像素格式和时长符合项目要求。
+- 数字人片段与目标音频区间误差小于 100 ms。
+- 最终合成只包含预期音轨，配音没有重叠、回声或重复编码造成的明显异常。
+- Placement 时间轴无负时长、重叠冲突或越过项目结尾。
+- 画中画和抠像人物未越过画面边界，且不遮挡字幕安全区。
+- 抠像输出检查大面积残留背景、明显边缘闪烁和人物主体缺失。
+- 数字人片段失败、人工跳过和降级行为全部进入 `qa.json` 与 render report。
+- Manifest 记录数字人引擎、引擎版本、AvatarProfile、任务配置快照和授权状态，不记录不必要的个人敏感数据。
+
+自动 QA 不能可靠判断嘴型自然度时，必须把相关片段标记为人工审核项，不得伪造自动通过结果。
+
+测试至少覆盖：
+
+- Duix 提交、轮询中、成功、失败、超时和异常响应的固定 Fixture。
+- 宿主机与容器路径双向映射及目录穿越拒绝。
+- 服务重启后根据 task code 恢复轮询。
+- 输入签名缓存、音频变化后失效、只改布局时不重新生成。
+- 画中画、全屏和纯色抠像的短视频 FFmpeg 集成测试。
+- 数字人关闭时原有视频工作流完全不受影响。
+
+### 19.12 隐私、授权与许可证
+
+- 创建 AvatarProfile 前必须提示用户确认拥有肖像、模板视频和声音使用权。
+- 授权记录至少保存授权状态、适用范围、记录时间和可选凭证路径；凭证默认不得打包进公开导出物。
+- 不允许在没有明确授权的情况下预置或克隆公众人物、客户、员工或其他第三方形象与声音。
+- 面向公开发布时应支持添加数字人或 AI 生成内容标识，具体规则由发布地区和平台配置决定。
+- Duix-Avatar 的 README 与正式 LICENSE 对商业许可门槛存在不一致。开发和发布前必须复核仓库当前 LICENSE；正式商用前应取得书面许可确认。
+- 如许可证要求署名、NOTICE、用户协议声明或商业授权，必须在安装包、关于页面、文档和发布流程中落实，不能只在代码注释中记录。
+- 不得把 Duix 镜像、模型或代码直接重新打包进 TubeAIFlow 安装包，除非已确认再分发权限和全部许可证义务。
+
+### 19.13 分阶段实施与完成标准
+
+第一阶段：技术验证
+
+- 用户自行部署 Duix lite 服务。
+- 完成健康检查、路径映射、单音频提交、进度查询和结果导入。
+- 使用数秒固定样本验证画中画合成、时长和最终配音一致性。
+
+第二阶段：可用 MVP
+
+- 实现 AvatarProfile、AvatarClip、AvatarPlacement 与数据库迁移。
+- 接入 `video_synthesis` 检查点、任务恢复和 GPU 独占调度。
+- 支持开场结尾、指定场景、画中画和全屏模式。
+- 支持纯色背景抠像、人工审核、项目配置和 QA 报告。
+
+第三阶段：生产增强
+
+- 根据真实测试决定是否实现自然背景视频抠像。
+- 增加批量任务、独立 Duix 节点、性能统计和安装诊断。
+- 完成许可证、授权审计、发布标识和多硬件兼容测试。
+
+数字人 MVP 只有在以下条件全部满足时才视为完成：
+
+- 关闭数字人后现有配音、字幕、素材和视频生成回归测试全部通过。
+- Duix 不可用时错误可读、任务可恢复，并可由用户明确跳过数字人继续导出。
+- 数字人片段可单独重试，布局修改不触发重新生成。
+- 最终视频时长与完整配音误差小于 100 ms，且只使用 TubeAIFlow 最终配音。
+- 输出 Manifest、render report 和 `qa.json` 能完整追踪数字人生成与合成配置。
+- 肖像与声音授权状态已记录，许可证要求已得到确认和落实。

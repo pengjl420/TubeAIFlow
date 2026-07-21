@@ -8,6 +8,8 @@ def check_scene_video(
     video_path: Path,
     expected_duration: float,
     config: ProjectRenderConfig,
+    *,
+    expected_frame_count: int | None = None,
 ) -> dict:
     if not video_path.is_file() or video_path.stat().st_size <= 0:
         raise RuntimeError(f"场景视频不存在或为空：{video_path}")
@@ -26,17 +28,32 @@ def check_scene_video(
         issues.append(f"视频编码不是 {_expected_codec_name(video.video_codec)}")
     if metadata.get("pixel_format") != video.pixel_format:
         issues.append(f"像素格式不是 {video.pixel_format}")
-    if abs(actual_duration - expected_duration) > tolerance + 0.002:
-        issues.append(
-            f"时长误差 {abs(actual_duration - expected_duration):.3f}s 超过 {tolerance:.3f}s"
-        )
     frame_rate = metadata.get("frame_rate_value")
     if frame_rate is None or abs(frame_rate - video.fps) > 0.01:
         issues.append(f"帧率不是 {video.fps} FPS")
+
+    actual_frame_count = metadata.get("frame_count")
+    if actual_frame_count is None and frame_rate is not None:
+        actual_frame_count = round(actual_duration * frame_rate)
+    if expected_frame_count is not None and actual_frame_count is not None:
+        frame_difference = abs(actual_frame_count - expected_frame_count)
+        if frame_difference > config.policy.duration_tolerance_frames:
+            issues.append(
+                f"帧数误差 {frame_difference} 帧超过 "
+                f"{config.policy.duration_tolerance_frames} 帧"
+            )
+    elif abs(actual_duration - expected_duration) > tolerance + 0.002:
+        issues.append(
+            f"时长误差 {abs(actual_duration - expected_duration):.3f}s "
+            f"超过 {tolerance:.3f}s"
+        )
+
     result = {
         "passed": not issues,
         "path": str(video_path),
         "expected_duration_seconds": expected_duration,
+        "expected_frame_count": expected_frame_count,
+        "actual_frame_count": actual_frame_count,
         "metadata": metadata,
         "issues": issues,
     }
@@ -47,4 +64,3 @@ def check_scene_video(
 
 def _expected_codec_name(codec: str) -> str:
     return "h264" if codec in {"libx264", "h264"} else codec
-

@@ -84,7 +84,7 @@ def probe_media(media_path: Path) -> dict:
         "-v",
         "error",
         "-show_entries",
-        "format=duration,format_name:stream=index,codec_type,codec_name,width,height,pix_fmt,r_frame_rate,avg_frame_rate",
+        "format=duration,format_name:stream=index,codec_type,codec_name,width,height,pix_fmt,r_frame_rate,avg_frame_rate,time_base,duration_ts,nb_frames",
         "-of",
         "json",
         str(media_path),
@@ -122,6 +122,9 @@ def probe_media(media_path: Path) -> dict:
         "pixel_format": video_stream.get("pix_fmt"),
         "frame_rate": frame_rate,
         "frame_rate_value": _parse_frame_rate(frame_rate),
+        "time_base": video_stream.get("time_base"),
+        "duration_ts": _parse_optional_int(video_stream.get("duration_ts")),
+        "frame_count": _parse_optional_int(video_stream.get("nb_frames")),
         "video_stream_count": len(video_streams),
         "audio_stream_count": len(audio_streams),
         "format_name": data.get("format", {}).get("format_name"),
@@ -138,6 +141,13 @@ def _parse_frame_rate(value: str | None) -> float | None:
         divisor = float(denominator)
         return float(numerator) / divisor if divisor else None
     except ValueError:
+        return None
+
+
+def _parse_optional_int(value: str | int | None) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
         return None
 
 

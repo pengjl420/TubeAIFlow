@@ -27,6 +27,7 @@ from app.services.rendering.scene_quality_checker import check_scene_video
 
 
 logger = logging.getLogger(__name__)
+RENDER_TIMING_VERSION = 3
 
 
 def render_all_scenes(session: Session, project: Project) -> dict:
@@ -90,9 +91,6 @@ def render_scene(
     if not assignments or any(not item.manual_confirmed for item in assignments):
         raise ValueError("请先在素材审核中确认该场景使用的镜头")
 
-    duration = (scene.end_ms - scene.start_ms) / 1000
-    if duration <= 0:
-        raise ValueError("场景时长必须大于零")
     settings = get_settings()
     base_dir = get_project_work_dir(project, settings.workspace_dir)
     ensure_project_dirs(base_dir)
@@ -119,6 +117,10 @@ def render_scene(
         clips.append((item, shot, media_file, source_path))
 
     config = get_project_render_config(project)
+    start_frame, end_frame, frame_count = timeline_composer.scene_frame_window(
+        scene, config.video.fps
+    )
+    duration = frame_count / config.video.fps
     presets = _resolved_presets(project, scene, clips)
     route = route or scene_router.route_single_scene(session, scene, assignments, settings)
     provider_config = _provider_config(settings) if route.provider == "framepack" else {}
@@ -141,7 +143,12 @@ def render_scene(
     )
     if previous and previous.get("signature") == signature and cache_provider_matches and output_path.is_file():
         try:
-            quality = check_scene_video(output_path, duration, config)
+            quality = check_scene_video(
+                output_path,
+                duration,
+                config,
+                expected_frame_count=frame_count,
+            )
             return _result(
                 scene,
                 output_path,
@@ -171,6 +178,7 @@ def render_scene(
                 output_path,
                 settings,
                 config,
+                frame_count,
             )
             attempts = details["attempts"]
         except (OSError, RuntimeError, ValueError) as exc:
@@ -181,18 +189,42 @@ def render_scene(
                 scene.id,
                 fallback_reason,
             )
-            args = _scene_ffmpeg_args(output_path, duration, clips, presets, config.video)
+            args = _scene_ffmpeg_args(
+                output_path,
+                frame_count,
+                scene.start_ms,
+                clips,
+                presets,
+                config.video,
+            )
             run_ffmpeg(args, project.id)
     else:
-        args = _scene_ffmpeg_args(output_path, duration, clips, presets, config.video)
+        args = _scene_ffmpeg_args(
+            output_path,
+            frame_count,
+            scene.start_ms,
+            clips,
+            presets,
+            config.video,
+        )
         run_ffmpeg(args, project.id)
-    quality = check_scene_video(output_path, duration, config)
+    quality = check_scene_video(
+        output_path,
+        duration,
+        config,
+        expected_frame_count=frame_count,
+    )
     actual_duration = quality["metadata"]["duration_ms"] / 1000
     manifest[scene.id] = {
         "scene_index": scene.scene_index,
+        "render_timing_version": RENDER_TIMING_VERSION,
         "signature": signature,
         "path": str(output_path),
         "duration_seconds": actual_duration,
+        "timeline_duration_seconds": (scene.end_ms - scene.start_ms) / 1000,
+        "start_frame": start_frame,
+        "end_frame": end_frame,
+        "frame_count": frame_count,
         "requested_provider": route.provider,
         "provider": actual_provider,
         "route_reason": route.reason,
@@ -250,9 +282,36 @@ def scene_output_path(project: Project, scene: VisualScene) -> Path:
     )
 
 
+def scene_renders_need_timing_refresh(
+    project: Project,
+    scenes: list[VisualScene],
+    config,
+) -> bool:
+    """Detect manifests created before absolute frame timing was introduced."""
+    base_dir = get_project_work_dir(project, get_settings().workspace_dir)
+    manifest_path = base_dir / "renders" / "scenes" / "manifest.json"
+    if not manifest_path.is_file():
+        return False
+    manifest = _read_json(manifest_path)
+    for scene in scenes:
+        start_frame, end_frame, frame_count = timeline_composer.scene_frame_window(
+            scene, config.video.fps
+        )
+        entry = manifest.get(scene.id)
+        if not entry or (
+            entry.get("render_timing_version") != RENDER_TIMING_VERSION
+            or entry.get("start_frame") != start_frame
+            or entry.get("end_frame") != end_frame
+            or entry.get("frame_count") != frame_count
+        ):
+            return True
+    return False
+
+
 def _scene_ffmpeg_args(
     output_path: Path,
-    duration: float,
+    frame_count: int,
+    scene_start_ms: int,
     clips: list[tuple[SceneAssignment, MediaShot, MediaFile, Path]],
     presets: list[str],
     video_config,
@@ -260,6 +319,7 @@ def _scene_ffmpeg_args(
     args = ["-y"]
     filters = []
     labels = []
+    allocated_frame_count = 0
     for index, (assignment, shot, media_file, source_path) in enumerate(clips):
         if media_file.media_type == "image":
             args.extend(["-loop", "1", "-i", str(source_path)])
@@ -276,6 +336,20 @@ def _scene_ffmpeg_args(
         placement_duration = (
             assignment.scene_offset_end_ms - assignment.scene_offset_start_ms
         ) / 1000
+        clip_start_frame = timeline_composer.timeline_frame(
+            scene_start_ms + assignment.scene_offset_start_ms,
+            video_config.fps,
+        )
+        clip_end_frame = timeline_composer.timeline_frame(
+            scene_start_ms + assignment.scene_offset_end_ms,
+            video_config.fps,
+        )
+        clip_frame_count = clip_end_frame - clip_start_frame
+        if clip_frame_count <= 0:
+            raise ValueError(
+                f"镜头 {assignment.sequence_index} 的显示时长不足一帧"
+            )
+        allocated_frame_count += clip_frame_count
         label = f"v{index}"
         filters.append(
             _visual_filter(
@@ -287,9 +361,14 @@ def _scene_ffmpeg_args(
                 assignment,
                 presets[index],
                 video_config,
+                target_frame_count=clip_frame_count,
             )
         )
         labels.append(f"[{label}]")
+    if allocated_frame_count != frame_count:
+        raise RuntimeError(
+            f"镜头帧数之和 {allocated_frame_count} 与场景目标帧数 {frame_count} 不一致"
+        )
     if len(labels) == 1:
         filters.append(f"{labels[0]}null[v]")
     else:
@@ -301,8 +380,8 @@ def _scene_ffmpeg_args(
             filter_graph,
             "-map",
             "[v]",
-            "-t",
-            f"{duration:.3f}",
+            "-frames:v",
+            str(frame_count),
             "-an",
             "-c:v",
             video_config.video_codec,
@@ -331,13 +410,15 @@ def _visual_filter(
     assignment: SceneAssignment,
     preset: str,
     video_config,
+    *,
+    target_frame_count: int | None = None,
 ) -> str:
     target_width = video_config.width
     target_height = video_config.height
     target_fps = video_config.fps
     timing = f"setpts=(PTS-STARTPTS)/{speed:.6f}"
     if media_file.media_type == "image":
-        frames = max(1, round(duration * target_fps))
+        frames = target_frame_count or max(1, round(duration * target_fps))
         start_zoom = min(assignment.zoom_start, assignment.zoom_end)
         end_zoom = max(assignment.zoom_start, assignment.zoom_end)
         if preset in {
@@ -388,7 +469,7 @@ def _visual_filter(
         motion_filter = (
             f"zoompan=z='{zoom}':x='{x}':y='{y}':d=1:"
             f"s={target_width}x{target_height}:fps={target_fps},"
-            f"trim=duration={duration:.3f},setpts=PTS-STARTPTS,"
+            f"trim=end_frame={frames},setpts=PTS-STARTPTS,"
             f"format={video_config.pixel_format},setparams=range=tv[{output_label}]"
         )
         if media_file.width and media_file.height and media_file.width / media_file.height < 1.2:
@@ -406,9 +487,10 @@ def _visual_filter(
             f"crop={target_width}:{target_height},"
             f"{motion_filter}"
         )
+    frames = target_frame_count or max(1, round(duration * target_fps))
     finish = (
         f"fps={target_fps},tpad=stop_mode=clone:stop_duration=0.250,"
-        f"trim=duration={duration:.3f},setpts=PTS-STARTPTS,"
+        f"trim=end_frame={frames},setpts=PTS-STARTPTS,"
         f"format={video_config.pixel_format},setparams=range=tv[{output_label}]"
     )
     if media_file.width and media_file.height and media_file.width / media_file.height < 1.2:
@@ -435,6 +517,7 @@ def _render_signature(
     provider_config: dict,
 ) -> str:
     value = {
+        "render_timing_version": RENDER_TIMING_VERSION,
         "scene": [scene.id, scene.start_ms, scene.end_ms],
         "clips": [
             {

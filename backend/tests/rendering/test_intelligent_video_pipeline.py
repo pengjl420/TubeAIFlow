@@ -174,6 +174,7 @@ class IntelligentVideoPipelineTests(unittest.TestCase):
             self.assertEqual(ffmpeg.call_count, 1)
             args = ffmpeg.call_args.args[0]
             self.assertEqual(args[args.index("-c:v") + 1], "libx264")
+            self.assertEqual(args[args.index("-frames:v") + 1], "150")
             self.assertIn("1920:1080", args[args.index("-filter_complex") + 1])
 
     def test_manual_upload_assignment_uses_semantic_media_role(self) -> None:

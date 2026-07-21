@@ -22,6 +22,7 @@ def render_framepack_scene(
     output_path: Path,
     settings: Settings,
     render_config: ProjectRenderConfig,
+    frame_count: int,
 ) -> dict:
     runtime_dir = settings.workspace_dir / ".runtime" / "framepack" / project.id / scene.id.replace(":", "_")
     runtime_dir.mkdir(parents=True, exist_ok=True)
@@ -29,7 +30,7 @@ def render_framepack_scene(
     raw_output = runtime_dir / "raw.mp4"
     shutil.copyfile(source_path, staged_input)
     storyboard = _storyboard(scene)
-    duration = (scene.end_ms - scene.start_ms) / 1000
+    duration = frame_count / render_config.video.fps
     client = FramePackClient(settings)
     last_error: Exception | None = None
     attempts = 0
@@ -56,7 +57,14 @@ def render_framepack_scene(
                     result = client.render(request, project.id)
                     if not result.output_path or not raw_output.is_file():
                         raise FramePackError("FramePack Worker 未生成输出文件")
-                    _normalize(raw_output, output_path, duration, project.id, render_config)
+                    _normalize(
+                        raw_output,
+                        output_path,
+                        duration,
+                        frame_count,
+                        project.id,
+                        render_config,
+                    )
                     return {
                         "attempts": attempts,
                         "job_id": result.job_id,
@@ -74,6 +82,7 @@ def _normalize(
     raw_path: Path,
     output_path: Path,
     duration: float,
+    frame_count: int,
     project_id: str,
     config: ProjectRenderConfig,
 ) -> None:
@@ -90,7 +99,7 @@ def _normalize(
                 f"trim=duration={duration:.3f},setpts=PTS-STARTPTS,"
                 f"format={video.pixel_format},setparams=range=tv"
             ),
-            "-t", f"{duration:.3f}", "-an", "-c:v", video.video_codec,
+            "-frames:v", str(frame_count), "-an", "-c:v", video.video_codec,
             "-preset", video.preset, "-crf", str(video.crf),
             "-pix_fmt", video.pixel_format, "-r", str(video.fps),
             "-movflags", "+faststart", str(output_path),

@@ -10,7 +10,8 @@ from app.models.project import Project
 from app.models.storyboard import VisualScene
 from app.services.rendering.render_config import get_project_render_config
 from app.services.rendering.scene_quality_checker import check_scene_video
-from app.services.rendering.scene_renderer import scene_output_path
+from app.services.rendering import scene_renderer
+from app.services.rendering.timeline_composer import scene_frame_window
 
 
 def compose_visual_track(session: Session, project: Project) -> dict:
@@ -23,7 +24,7 @@ def compose_visual_track(session: Session, project: Project) -> dict:
     )
     if not scenes:
         raise ValueError("项目尚未生成视觉场景")
-    scene_paths = [scene_output_path(project, scene) for scene in scenes]
+    scene_paths = [scene_renderer.scene_output_path(project, scene) for scene in scenes]
     missing = [path.name for path in scene_paths if not path.is_file()]
     if missing:
         raise ValueError(f"仍有 {len(missing)} 个场景未完成渲染")
@@ -37,7 +38,12 @@ def compose_visual_track(session: Session, project: Project) -> dict:
     )
     output_path = base_dir / "renders" / "visual_track.mp4"
     config = get_project_render_config(project)
-    expected_duration = sum((scene.end_ms - scene.start_ms) / 1000 for scene in scenes)
+    if scene_renderer.scene_renders_need_timing_refresh(project, scenes, config):
+        scene_renderer.render_all_scenes(session, project)
+    frame_windows = [scene_frame_window(scene, config.video.fps) for scene in scenes]
+    expected_frame_count = sum(window[2] for window in frame_windows)
+    expected_duration = expected_frame_count / config.video.fps
+    timeline_duration = sum((scene.end_ms - scene.start_ms) / 1000 for scene in scenes)
     run_ffmpeg(
         [
             "-y", "-f", "concat", "-safe", "0", "-i", str(concat_path),
@@ -46,11 +52,18 @@ def compose_visual_track(session: Session, project: Project) -> dict:
         ],
         project.id,
     )
-    quality = check_scene_video(output_path, expected_duration, config)
+    quality = check_scene_video(
+        output_path,
+        expected_duration,
+        config,
+        expected_frame_count=expected_frame_count,
+    )
     report = {
         "path": str(output_path),
         "scene_count": len(scenes),
         "duration_seconds": expected_duration,
+        "timeline_duration_seconds": timeline_duration,
+        "expected_frame_count": expected_frame_count,
         "quality": quality,
     }
     report_path = base_dir / "reports" / "visual_track_report.json"

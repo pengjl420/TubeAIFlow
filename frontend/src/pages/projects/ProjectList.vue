@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { deleteProject, listProjects } from '../../api/projects'
@@ -49,19 +49,22 @@ const generatingStatuses = new Set([
   'narration_in_progress', 'video_in_progress', 'segmenting', 'tts', 'tts_running',
   'audio_merge', 'subtitles', 'rendering', 'video_composing',
 ])
+const waitingStatuses = new Set(['narration_ready', 'review_required'])
 
 const filteredProjects = computed(() => {
   const keyword = query.value.trim().toLocaleLowerCase()
   return projects.value.filter((project) => {
     const matchesQuery = !keyword || project.name.toLocaleLowerCase().includes(keyword)
     const matchesStatus = statusFilter.value === 'all'
-      || (statusFilter.value === 'generating' ? isGenerating(project) : project.status === statusFilter.value)
+      || (statusFilter.value === 'generating' && isGenerating(project))
+      || (statusFilter.value === 'waiting' && waitingStatuses.has(project.status))
+      || project.status === statusFilter.value
     return matchesQuery && matchesStatus
   })
 })
 
 const activeCount = computed(() => projects.value.filter((item) => isGenerating(item)).length)
-const readyCount = computed(() => projects.value.filter((item) => ['narration_ready', 'review_required'].includes(item.status)).length)
+const waitingCount = computed(() => projects.value.filter((item) => waitingStatuses.has(item.status)).length)
 const completedCount = computed(() => projects.value.filter((item) => item.status === 'completed').length)
 const selectableProjects = computed(() => filteredProjects.value.filter((project) => !isGenerating(project)))
 const selectedProjects = computed(() => projects.value.filter((project) => (
@@ -107,6 +110,13 @@ function projectWorkflowDuration(project: Project) {
 
 function openProject(projectId: string) {
   void router.push(`/projects/${projectId}`)
+}
+
+async function locateWaitingProjects() {
+  query.value = ''
+  statusFilter.value = 'waiting'
+  await nextTick()
+  document.getElementById('project-list')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 function voiceProfileName(project: Project) {
@@ -312,11 +322,17 @@ onBeforeUnmount(() => {
         <strong>{{ activeCount }}</strong>
         <small>任务正在后台执行</small>
       </article>
-      <article class="metric-card">
+      <button
+        class="metric-card metric-card-button"
+        type="button"
+        :aria-pressed="statusFilter === 'waiting'"
+        aria-label="筛选并定位配音字幕已就绪或等待复核的项目"
+        @click="locateWaitingProjects"
+      >
         <span class="metric-label">等待处理</span>
-        <strong>{{ readyCount }}</strong>
-        <small>可继续合成或复核</small>
-      </article>
+        <strong>{{ waitingCount }}</strong>
+        <small>配音已就绪或等待复核 · 点击定位</small>
+      </button>
       <article class="metric-card">
         <span class="metric-label">已完成</span>
         <strong>{{ completedCount }}</strong>
@@ -324,7 +340,7 @@ onBeforeUnmount(() => {
       </article>
     </div>
 
-    <div class="section-toolbar">
+    <div id="project-list" class="section-toolbar">
       <div>
         <h2>最近项目</h2>
         <p>继续未完成的制作，或查看已经生成的文件。</p>
@@ -338,6 +354,7 @@ onBeforeUnmount(() => {
           <option value="all">全部状态</option>
           <option value="created">待开始</option>
           <option value="generating">生成中</option>
+          <option value="waiting">等待处理</option>
           <option value="narration_ready">配音已就绪</option>
           <option value="review_required">等待复核</option>
           <option value="completed">已完成</option>

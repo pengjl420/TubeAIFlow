@@ -106,7 +106,83 @@ class _InvalidStoryboardListDeepSeek(_FakeDeepSeek):
         return result
 
 
+class _PercentScoreRepairDeepSeek(_FakeDeepSeek):
+    def __init__(self) -> None:
+        self.storyboard_calls = 0
+
+    def chat_json(self, system_prompt: str, user_prompt: str) -> dict:
+        payload = json.loads(user_prompt)
+        if "subtitle_cues" in payload:
+            return super().chat_json(system_prompt, user_prompt)
+
+        self.storyboard_calls += 1
+        scenes = payload.get("scenes") or payload.get("required_scenes")
+        result = {
+            "scenes": [
+                {
+                    "scene_id": scene["scene_id"],
+                    "visual_summary": "A historical business documentary scene",
+                    "visual_type": "historical_reconstruction",
+                    "entities": [],
+                    "locations": [],
+                    "time_period": "1990s",
+                    "scene_category": "business",
+                    "mood": "focused",
+                    "shot_preference": "wide_or_medium",
+                    "primary_query": "1990s business office documentary",
+                    "alternative_queries": ["historical office workers"],
+                    "fallback_category": "business",
+                    "fallback_mood": "neutral",
+                    "must_include": ["office"],
+                    "avoid": ["modern smartphone"],
+                    "confidence": 0.82,
+                    "importance_score": 85,
+                    "motion_score": 40,
+                    "identity_risk": 60,
+                    "text_density": 20,
+                    "subject_count": 1,
+                }
+                for scene in scenes
+            ]
+        }
+        if self.storyboard_calls == 1:
+            result["scenes"][0]["must_include"] = {"subject": "office"}
+        return result
+
+
 class StoryboardServiceTests(unittest.TestCase):
+    def test_percentage_storyboard_scores_are_normalized_to_ten_point_scale(self) -> None:
+        payload = {
+            "scenes": [
+                {
+                    "importance_score": 85,
+                    "motion_score": 20,
+                    "identity_risk": 60,
+                    "text_density": 0,
+                }
+            ]
+        }
+
+        normalized = storyboard_service._normalize_llm_storyboard_payload(payload)
+
+        self.assertEqual(normalized["scenes"][0]["importance_score"], 9)
+        self.assertEqual(normalized["scenes"][0]["motion_score"], 2)
+        self.assertEqual(normalized["scenes"][0]["identity_risk"], 6)
+        self.assertEqual(normalized["scenes"][0]["text_density"], 0)
+
+    def test_repaired_percentage_scores_are_normalized_and_persisted(self) -> None:
+        client = _PercentScoreRepairDeepSeek()
+        with self.project_session(cue_count=1) as (session, project, settings):
+            with patch.object(storyboard_service, "get_settings", return_value=settings):
+                result = storyboard_service.generate_storyboard(session, project, client=client)
+
+        self.assertEqual(client.storyboard_calls, 2)
+        storyboard = result["scenes"][0]["storyboard"]
+        self.assertEqual(storyboard["importance_score"], 9)
+        self.assertEqual(storyboard["motion_score"], 4)
+        self.assertEqual(storyboard["identity_risk"], 6)
+        self.assertEqual(storyboard["text_density"], 2)
+
     def test_scalar_storyboard_list_fields_are_normalized_at_llm_boundary(self) -> None:
         with self.project_session() as (session, project, settings):
             with patch.object(storyboard_service, "get_settings", return_value=settings):

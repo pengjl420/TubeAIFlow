@@ -1,3 +1,4 @@
+import json
 import logging
 from pathlib import Path
 
@@ -30,6 +31,7 @@ def create_voice(
     tts_engine: str = Form("qwen3_tts"),
     reference_audio_text: str = Form(""),
     cosyvoice_speed: float = Form(1.0),
+    tags: str | None = Form(None),
     file: UploadFile = File(...),
     session: Session = Depends(get_session),
 ) -> dict:
@@ -40,6 +42,7 @@ def create_voice(
             tts_engine=tts_engine,
             reference_audio_text=reference_audio_text,
             cosyvoice_speed=cosyvoice_speed,
+            tags=_parse_tags(tags),
             source=file.file,
             original_filename=file.filename or "reference.wav",
         )
@@ -56,6 +59,7 @@ def update_voice(
     tts_engine: str = Form("qwen3_tts"),
     reference_audio_text: str = Form(""),
     cosyvoice_speed: float | None = Form(None),
+    tags: str | None = Form(None),
     file: UploadFile | None = File(None),
     session: Session = Depends(get_session),
 ) -> dict:
@@ -70,6 +74,7 @@ def update_voice(
             tts_engine=tts_engine,
             reference_audio_text=reference_audio_text,
             cosyvoice_speed=cosyvoice_speed,
+            tags=_parse_tags(tags) if tags is not None else None,
             source=file.file if file else None,
             original_filename=file.filename if file else None,
         )
@@ -107,3 +112,29 @@ def delete_voice(profile_id: str, session: Session = Depends(get_session)) -> di
     except (OSError, ValueError) as exc:
         logger.exception("Failed to delete voice profile %s", profile_id)
         fail(str(exc))
+
+
+@router.post("/voices/{profile_id}/duplicate")
+def duplicate_voice(profile_id: str, session: Session = Depends(get_session)) -> dict:
+    profile = voice_profile_service.get_profile(session, profile_id)
+    if not profile:
+        fail("音色不存在", 404)
+    try:
+        duplicate = voice_profile_service.duplicate_profile(session, profile)
+        return {"success": True, "data": voice_profile_service.serialize_profile(duplicate)}
+    except (OSError, ValueError) as exc:
+        logger.exception("Failed to duplicate voice profile %s", profile_id)
+        fail(str(exc))
+
+
+def _parse_tags(value: str | None) -> list[str]:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        fail("音色标签格式无效")
+        raise exc
+    if not isinstance(parsed, list):
+        fail("音色标签必须是列表")
+    return [str(item) for item in parsed]

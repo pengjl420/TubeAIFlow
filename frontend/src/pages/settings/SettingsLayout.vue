@@ -16,8 +16,21 @@ const navigation = [
 </script>
 
 <template>
-  <section class="settings-center">
-    <aside class="settings-navigation panel"><div><span class="section-eyebrow">SYSTEM SETTINGS</span><h2>设置中心</h2><p>全局运行环境与生产默认值</p></div><nav><RouterLink v-for="item in navigation" :key="item.path" :to="`/settings/${item.path}`" active-class="is-active"><component :is="item.icon" :size="17" /><span>{{ item.label }}</span></RouterLink></nav></aside>
-    <div class="settings-content"><RouterView /></div>
+  <section class="settings-center settings-design-shell">
+    <header class="settings-title">
+      <h1>系统设置</h1>
+      <p>统一管理系统基础环境、AI 服务、配音引擎、视觉模型与生成策略</p>
+    </header>
+    <div class="settings-workspace">
+      <aside class="settings-navigation">
+        <nav aria-label="系统设置分类">
+          <RouterLink v-for="item in navigation" :key="item.path" :to="`/settings/${item.path}`" active-class="is-active">
+            <component :is="item.icon" :size="17" :stroke-width="1.8" />
+            <span>{{ item.label }}</span>
+          </RouterLink>
+        </nav>
+      </aside>
+      <div class="settings-content"><RouterView /></div>
+    </div>
   </section>
 </template>

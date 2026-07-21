@@ -160,7 +160,7 @@ onMounted(load)
 </script>
 
 <template>
-  <section v-if="project">
+  <section v-if="project" class="project-config-page">
     <div class="page-title">
       <div>
         <span class="page-kicker">PROJECT SETTINGS</span>

@@ -3,6 +3,7 @@ import { apiClient, unwrap } from './client'
 export interface ProjectTaskStatus {
   id: string | null
   project_id?: string
+  batch_id?: string | null
   status: 'idle' | 'queued' | 'running' | 'paused' | 'review_required' | 'completed' | 'failed' | 'cancelled'
   running: boolean
   queued: boolean

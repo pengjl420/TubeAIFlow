@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from app.models.media import MediaFile, MediaKeyframe, MediaShot, SceneAssignment, SceneCandidate
+from app.models.media import MediaFile, MediaKeyframe, MediaQueryCache, MediaShot, SceneAssignment, SceneCandidate
 from app.models.project import Project
 from app.models.storyboard import VisualScene
 from app.schemas.media import SceneAssignmentRequest
@@ -27,6 +27,30 @@ class MediaLibraryTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.engine.dispose()
         self.temp_dir.cleanup()
+
+    def test_clear_search_cache_preserves_media_records(self) -> None:
+        with Session(self.engine) as session:
+            media = MediaFile(
+                id="media-1",
+                path=str(self.root / "source.mp4"),
+                filename="source.mp4",
+                media_type="video",
+                file_hash="hash-1",
+            )
+            session.add(media)
+            session.add(MediaQueryCache(
+                id="cache-1",
+                provider="pexels",
+                query="city",
+                expires_at="2099-01-01T00:00:00Z",
+            ))
+            session.commit()
+
+            result = ingestion_service.clear_search_cache(session)
+
+            self.assertEqual(result["deleted_query_cache_entries"], 1)
+            self.assertIsNotNone(session.get(MediaFile, media.id))
+            self.assertIsNone(session.get(MediaQueryCache, "cache-1"))
 
     def test_import_directory_deduplicates_files_and_creates_fixed_interval_shots(self) -> None:
         media_dir = self.root / "source"

@@ -112,6 +112,10 @@ export async function deleteAssets(mediaIds: string[]): Promise<AssetDeleteResul
   }))
 }
 
+export async function cleanupAssetCache(): Promise<{ deleted_query_cache_entries: number; source_files_preserved: boolean }> {
+  return unwrap(await apiClient.post('/assets/cleanup-cache'))
+}
+
 export async function listSceneCandidates(projectId: string, sceneId: string): Promise<SceneCandidate[]> {
   const result = unwrap<{ candidates: SceneCandidate[] }>(await apiClient.get(
     `/projects/${projectId}/storyboard/scenes/${encodeURIComponent(sceneId)}/candidates`,

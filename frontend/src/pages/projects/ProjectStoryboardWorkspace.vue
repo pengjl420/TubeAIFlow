@@ -236,7 +236,7 @@ onMounted(load)
       <strong>生成提醒</strong><span>{{ warning }}</span>
     </div>
 
-    <div class="storyboard-input-grid project-storyboard-input">
+    <div v-if="!scenes.length" class="storyboard-input-grid project-storyboard-input">
       <article class="panel">
         <div class="section-head">
           <div><span class="section-eyebrow">SOURCE TIMELINE</span><h2>项目字幕</h2></div>

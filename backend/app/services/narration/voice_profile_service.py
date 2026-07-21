@@ -28,7 +28,20 @@ WINDOWS_RESERVED_NAMES = {
 
 def list_profiles(session: Session) -> list[dict]:
     profiles = session.exec(select(VoiceProfile).order_by(VoiceProfile.created_at.desc())).all()
-    return [serialize_profile(profile) for profile in profiles]
+    projects = list(session.exec(select(Project)).all())
+    usage: dict[str, dict[str, int]] = {}
+    for project in projects:
+        profile_id = str(load_project_config(project).get("voice_profile_id") or "")
+        if not profile_id:
+            continue
+        counts = usage.setdefault(profile_id, {"usage_count": 0, "running_project_count": 0})
+        counts["usage_count"] += 1
+        if project.status in {"narration_in_progress", "video_in_progress"}:
+            counts["running_project_count"] += 1
+    return [
+        {**serialize_profile(profile), **usage.get(profile.id, {"usage_count": 0, "running_project_count": 0})}
+        for profile in profiles
+    ]
 
 
 def get_profile(session: Session, profile_id: str) -> VoiceProfile | None:
@@ -42,12 +55,13 @@ def create_profile(
     tts_engine: str,
     reference_audio_text: str,
     cosyvoice_speed: float = 1.0,
+    tags: list[str] | None = None,
     source: BinaryIO,
     original_filename: str,
 ) -> VoiceProfile:
     profile_id = uuid.uuid4().hex[:12]
     validated_name = _validate_name(name)
-    config = _validated_config(tts_engine, reference_audio_text, original_filename, cosyvoice_speed)
+    config = _validated_config(tts_engine, reference_audio_text, original_filename, cosyvoice_speed, tags)
     audio_path = _save_audio(profile_id, validated_name, source, original_filename)
     now = utc_now_iso()
     profile = VoiceProfile(
@@ -75,6 +89,7 @@ def update_profile(
     tts_engine: str,
     reference_audio_text: str,
     cosyvoice_speed: float | None = None,
+    tags: list[str] | None = None,
     source: BinaryIO | None = None,
     original_filename: str | None = None,
 ) -> VoiceProfile:
@@ -83,7 +98,9 @@ def update_profile(
     filename = original_filename or str(current_config.get("original_filename") or Path(profile.reference_audio_path).name)
     if cosyvoice_speed is None:
         cosyvoice_speed = profile_cosyvoice_speed(current_config)
-    config = _validated_config(tts_engine, reference_audio_text, filename, cosyvoice_speed)
+    if tags is None:
+        tags = list(current_config.get("tags") or [])
+    config = _validated_config(tts_engine, reference_audio_text, filename, cosyvoice_speed, tags)
     old_path = Path(profile.reference_audio_path)
     if source is not None:
         audio_path = _save_audio(
@@ -135,6 +152,31 @@ def delete_profile(session: Session, profile: VoiceProfile) -> None:
         pass
 
 
+def duplicate_profile(session: Session, profile: VoiceProfile) -> VoiceProfile:
+    source_path = Path(profile.reference_audio_path)
+    if not source_path.is_file():
+        raise ValueError("参考音频文件不存在，无法复制音色")
+    config = load_profile_config(profile)
+    base_name = f"{profile.name} - 副本"
+    existing_names = {item.name for item in session.exec(select(VoiceProfile)).all()}
+    name = base_name
+    suffix = 2
+    while name in existing_names:
+        name = f"{base_name} {suffix}"
+        suffix += 1
+    with source_path.open("rb") as source:
+        return create_profile(
+            session,
+            name=name,
+            tts_engine=str(config.get("tts_engine") or "qwen3_tts"),
+            reference_audio_text=str(config.get("reference_audio_text") or ""),
+            cosyvoice_speed=profile_cosyvoice_speed(config),
+            tags=list(config.get("tags") or []),
+            source=source,
+            original_filename=str(config.get("original_filename") or source_path.name),
+        )
+
+
 def serialize_profile(profile: VoiceProfile) -> dict:
     config = load_profile_config(profile)
     return {
@@ -144,6 +186,7 @@ def serialize_profile(profile: VoiceProfile) -> dict:
         "reference_audio_text": str(config.get("reference_audio_text") or ""),
         "cosyvoice_speed": profile_cosyvoice_speed(config),
         "original_filename": str(config.get("original_filename") or Path(profile.reference_audio_path).name),
+        "tags": list(config.get("tags") or []),
         "created_at": profile.created_at,
         "updated_at": profile.updated_at,
     }
@@ -307,6 +350,7 @@ def _validated_config(
     reference_audio_text: str,
     original_filename: str,
     cosyvoice_speed: float,
+    tags: list[str] | None = None,
 ) -> dict:
     engine = tts_engine.strip().lower()
     if engine not in SUPPORTED_TTS_ENGINES:
@@ -315,11 +359,19 @@ def _validated_config(
     if engine == "cosyvoice" and not transcript:
         raise ValueError("CosyVoice 需要填写参考音频逐字稿")
     speed = _validate_cosyvoice_speed(cosyvoice_speed)
+    normalized_tags: list[str] = []
+    for raw_tag in tags or []:
+        tag = str(raw_tag).strip()
+        if tag and tag not in normalized_tags:
+            normalized_tags.append(tag[:20])
+        if len(normalized_tags) >= 8:
+            break
     return {
         "tts_engine": engine,
         "reference_audio_text": transcript,
         "cosyvoice_speed": speed,
         "original_filename": Path(original_filename).name,
+        "tags": normalized_tags,
     }
 
 

@@ -294,6 +294,17 @@ def get_asset(session: Session, media_id: str) -> dict:
     return item
 
 
+def clear_search_cache(session: Session) -> dict:
+    """Clear disposable provider query responses without touching source media or indexes."""
+    from app.models.media import MediaQueryCache
+
+    rows = list(session.exec(select(MediaQueryCache)).all())
+    for row in rows:
+        session.delete(row)
+    session.commit()
+    return {"deleted_query_cache_entries": len(rows), "source_files_preserved": True}
+
+
 def update_asset(
     session: Session,
     media_id: str,

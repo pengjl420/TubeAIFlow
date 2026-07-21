@@ -2,9 +2,9 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  Archive, ArrowDown, ArrowRight, AudioLines, CheckCircle2, ChevronDown, Clock3,
-  Download, FileVideo2, Folder, FolderKanban, MoreVertical, Play, Plus, RefreshCw,
-  Search, Trash2, Upload, WandSparkles, XCircle,
+  ArrowRight, AudioLines, CheckCircle2, Clock3, Download, FileVideo2, Folder,
+  FolderKanban, MoreVertical, Play, Plus, RefreshCw, Search, Trash2,
+  WandSparkles, XCircle,
 } from 'lucide-vue-next'
 
 import { deleteProject, listProjects } from '../../api/projects'
@@ -19,6 +19,8 @@ const error = ref('')
 const query = ref('')
 const statusFilter = ref('all')
 const modeFilter = ref('all')
+const voiceFilter = ref('all')
+const sortOrder = ref<'updated_desc' | 'updated_asc' | 'name_asc' | 'name_desc'>('updated_desc')
 const selectedProjectIds = ref<Set<string>>(new Set())
 const actingProjectId = ref('')
 const batchDeleting = ref(false)
@@ -39,14 +41,23 @@ const waitingStatuses = new Set(['tts_completed', 'audio_merged', 'narration_rea
 
 const filteredProjects = computed(() => {
   const keyword = query.value.trim().toLowerCase()
-  return projects.value.filter((project) => {
+  const filtered = projects.value.filter((project) => {
     const matchesQuery = !keyword || project.name.toLowerCase().includes(keyword) || project.id.toLowerCase().includes(keyword)
     const matchesStatus = statusFilter.value === 'all'
       || (statusFilter.value === 'generating' && isGenerating(project))
       || (statusFilter.value === 'waiting' && waitingStatuses.has(project.status))
       || project.status === statusFilter.value
     const mode = project.config?.video_mode || 'none'
-    return matchesQuery && matchesStatus && (modeFilter.value === 'all' || mode === modeFilter.value)
+    return matchesQuery
+      && matchesStatus
+      && (modeFilter.value === 'all' || mode === modeFilter.value)
+      && (voiceFilter.value === 'all' || voiceName(project) === voiceFilter.value)
+  })
+  return filtered.sort((left, right) => {
+    if (sortOrder.value === 'name_asc') return left.name.localeCompare(right.name, 'zh-CN')
+    if (sortOrder.value === 'name_desc') return right.name.localeCompare(left.name, 'zh-CN')
+    const delta = Date.parse(left.updated_at) - Date.parse(right.updated_at)
+    return sortOrder.value === 'updated_asc' ? delta : -delta
   })
 })
 const activeCount = computed(() => projects.value.filter(isGenerating).length)
@@ -56,6 +67,13 @@ const failedCount = computed(() => projects.value.filter((item) => item.status =
 const selectable = computed(() => filteredProjects.value.filter((item) => !isGenerating(item)))
 const selectedProjects = computed(() => projects.value.filter((item) => selectedProjectIds.value.has(item.id) && !isGenerating(item)))
 const allSelected = computed(() => selectable.value.length > 0 && selectable.value.every((item) => selectedProjectIds.value.has(item.id)))
+const voiceOptions = computed(() => [...new Set(projects.value.map(voiceName))].sort((a, b) => a.localeCompare(b, 'zh-CN')))
+const voiceDistribution = computed(() => {
+  const counts = new Map<string, number>()
+  projects.value.forEach((project) => counts.set(voiceName(project), (counts.get(voiceName(project)) || 0) + 1))
+  return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)
+})
+const maxVoiceCount = computed(() => Math.max(1, ...voiceDistribution.value.map(([, count]) => count)))
 
 function isGenerating(project: Project) { return generatingStatuses.has(project.status) || project.latest_task_status === 'running' }
 function statusLabel(project: Project) { return statusLabels[project.status] || '待处理' }
@@ -142,7 +160,26 @@ async function removeSelected() {
   showToast({ title: `已删除 ${deleted.size} 个项目`, description: '相关内容已移入回收站', tone: deleted.size === targets.length ? 'success' : 'warning' })
   batchDeleting.value = false
 }
-function unsupported(label: string) { showToast({ title: `${label}暂未启用`, description: '当前版本尚未提供对应的批量接口。', tone: 'info' }) }
+function exportSelectedList() {
+  const targets = selectedProjects.value.length ? selectedProjects.value : filteredProjects.value
+  if (!targets.length) {
+    showToast({ title: '没有可导出的项目', description: '请调整筛选条件后重试。', tone: 'warning' })
+    return
+  }
+  const quote = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`
+  const rows = [
+    ['项目 ID', '项目名称', '状态', '视频模式', '音色', '音频时长（秒）', '输出目录', '更新时间'],
+    ...targets.map((project) => [project.id, project.name, statusLabel(project), videoMode(project), voiceName(project), project.audio_duration_seconds || '', project.output_dir || '', project.updated_at]),
+  ]
+  const blob = new Blob([`\uFEFF${rows.map((row) => row.map(quote).join(',')).join('\r\n')}`], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `TubeAIFlow-projects-${new Date().toISOString().slice(0, 10)}.csv`
+  link.click()
+  URL.revokeObjectURL(url)
+  showToast({ title: `已导出 ${targets.length} 个项目`, description: '项目清单已保存为 CSV。', tone: 'success' })
+}
 
 async function loadProjects() {
   loading.value = true; error.value = ''
@@ -164,7 +201,7 @@ onBeforeUnmount(() => { if (refreshTimer !== undefined) window.clearInterval(ref
   <section class="taf-project-list-page">
     <header class="taf-page-heading">
       <div><h1>项目</h1><p>管理所有单视频项目，快速进入生产流程</p></div>
-      <div class="taf-heading-actions"><button class="secondary-button" @click="unsupported('导入项目')"><Upload :size="17" /> 导入项目</button><RouterLink class="primary-link" to="/projects/new"><Plus :size="18" /> 新建项目</RouterLink></div>
+      <div class="taf-heading-actions"><RouterLink class="secondary-button" to="/batches/new"><FolderKanban :size="17" /> 批量导入脚本</RouterLink><RouterLink class="primary-link" to="/projects/new"><Plus :size="18" /> 新建项目</RouterLink></div>
     </header>
 
     <div class="taf-project-metrics">
@@ -181,8 +218,8 @@ onBeforeUnmount(() => { if (refreshTimer !== undefined) window.clearInterval(ref
           <label><Search :size="17" /><input v-model="query" type="search" placeholder="搜索项目名称" /></label>
           <select v-model="statusFilter"><option value="all">全部状态</option><option value="generating">生成中</option><option value="waiting">等待处理</option><option value="review_required">等待审核</option><option value="completed">已完成</option><option value="failed">失败/异常</option></select>
           <select v-model="modeFilter"><option value="all">全部视频模式</option><option value="ai_generated_images">图文快剪</option><option value="ai_semantic">访谈纪实</option><option value="landscape">Vlog</option><option value="none">仅配音字幕</option></select>
-          <button class="taf-filter-button">最近更新时间 <ChevronDown :size="14" /></button>
-          <button class="taf-filter-button">负责人 / 音色 <ChevronDown :size="14" /></button>
+          <select v-model="sortOrder" aria-label="项目排序"><option value="updated_desc">最近更新优先</option><option value="updated_asc">最早更新优先</option><option value="name_asc">名称 A–Z</option><option value="name_desc">名称 Z–A</option></select>
+          <select v-model="voiceFilter" aria-label="音色筛选"><option value="all">全部音色</option><option v-for="name in voiceOptions" :key="name" :value="name">{{ name }}</option></select>
           <span class="taf-filter-spacer"></span><button class="taf-filter-button" :disabled="loading" @click="loadProjects"><RefreshCw :size="15" /></button>
         </div>
 
@@ -207,7 +244,7 @@ onBeforeUnmount(() => { if (refreshTimer !== undefined) window.clearInterval(ref
       <aside class="taf-project-aside">
         <section class="taf-card taf-bulk-card">
           <header><h2>批量操作</h2><button @click="selectedProjectIds = new Set()">清空选择</button></header><p>已选中 <b>{{ selectedProjects.length }}</b> 项</p>
-          <button @click="unsupported('批量归档')"><Archive :size="16" /> 批量归档</button>
+          <button @click="exportSelectedList"><Download :size="16" /> {{ selectedProjects.length ? '导出所选清单' : '导出当前清单' }}</button>
           <button class="danger" :disabled="batchDeleting || !selectedProjects.length" @click="removeSelected"><Trash2 :size="16" /> {{ batchDeleting ? '删除中...' : '批量删除' }}</button>
           <button @click="router.push('/voices')"><WandSparkles :size="16" /> 批量分配音色</button>
           <button @click="router.push('/batches/new')"><FolderKanban :size="16" /> 批量移至批次 <ArrowRight :size="14" /></button>
@@ -215,7 +252,7 @@ onBeforeUnmount(() => { if (refreshTimer !== undefined) window.clearInterval(ref
 
         <section class="taf-card taf-donut-card"><h2>项目状态分布</h2><div class="taf-donut" :style="{ '--complete': `${projects.length ? completedCount / projects.length * 100 : 0}%` }"><span><strong>{{ projects.length }}</strong>总项目</span></div><ul><li><i class="blue"></i>配音生成中 <b>{{ activeCount }}</b></li><li><i class="orange"></i>等待审核 <b>{{ waitingCount }}</b></li><li><i class="green"></i>已完成 <b>{{ completedCount }}</b></li><li><i class="red"></i>失败/异常 <b>{{ failedCount }}</b></li></ul></section>
 
-        <section class="taf-card taf-owner-card"><h2>项目负责人 Top 5</h2><div v-for="(name, index) in ['张三', '李四', '王五', '赵六', '孙七']" :key="name"><span>{{ name }}</span><i><b :style="{ width: `${88 - index * 12}%` }"></b></i><small>{{ Math.max(1, projects.length - index) }}</small></div></section>
+        <section class="taf-card taf-owner-card"><h2>项目音色 Top 5</h2><div v-if="!voiceDistribution.length" class="taf-empty-row">暂无音色数据</div><div v-for="([name, count]) in voiceDistribution" :key="name"><span>{{ name }}</span><i><b :style="{ width: `${count / maxVoiceCount * 100}%` }"></b></i><small>{{ count }}</small></div></section>
       </aside>
     </div>
   </section>

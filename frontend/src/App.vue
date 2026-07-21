@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   AudioLines,
@@ -25,7 +25,9 @@ const route = useRoute()
 const router = useRouter()
 const projects = ref<Project[]>([])
 const search = ref('')
+const searchInput = ref<HTMLInputElement | null>(null)
 const createMenuOpen = ref(false)
+const sidebarCollapsed = ref(localStorage.getItem('tubeaiflow.sidebar-collapsed') === 'true')
 let refreshTimer: number | undefined
 
 const navigation = [
@@ -64,15 +66,32 @@ function selectCreate(path: string) {
   void router.push(path)
 }
 
+function toggleSidebar() {
+  sidebarCollapsed.value = !sidebarCollapsed.value
+  localStorage.setItem('tubeaiflow.sidebar-collapsed', String(sidebarCollapsed.value))
+}
+
+function handleShortcut(event: KeyboardEvent) {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+    event.preventDefault()
+    void nextTick(() => searchInput.value?.focus())
+  }
+  if (event.key === 'Escape') createMenuOpen.value = false
+}
+
 onMounted(() => {
   void refreshGlobalState()
   refreshTimer = window.setInterval(refreshGlobalState, 15000)
+  window.addEventListener('keydown', handleShortcut)
 })
-onBeforeUnmount(() => { if (refreshTimer !== undefined) window.clearInterval(refreshTimer) })
+onBeforeUnmount(() => {
+  if (refreshTimer !== undefined) window.clearInterval(refreshTimer)
+  window.removeEventListener('keydown', handleShortcut)
+})
 </script>
 
 <template>
-  <div class="app-shell taf-shell">
+  <div class="app-shell taf-shell" :class="{ 'sidebar-is-collapsed': sidebarCollapsed }">
     <aside class="sidebar taf-sidebar">
       <RouterLink class="brand taf-brand" to="/dashboard" aria-label="返回工作台">
         <span class="brand-mark taf-brand-mark"><span></span></span>
@@ -92,7 +111,7 @@ onBeforeUnmount(() => { if (refreshTimer !== undefined) window.clearInterval(ref
         <div><i></i><span>本地模式</span></div>
         <div><span>后端服务</span><b><i></i>运行中</b></div>
       </div>
-      <button class="taf-sidebar-collapse" aria-label="收起侧栏">‹‹</button>
+      <button class="taf-sidebar-collapse" type="button" :aria-label="sidebarCollapsed ? '展开侧栏' : '收起侧栏'" @click="toggleSidebar">{{ sidebarCollapsed ? '››' : '‹‹' }}</button>
     </aside>
 
     <div class="app-content taf-content">
@@ -103,7 +122,7 @@ onBeforeUnmount(() => { if (refreshTimer !== undefined) window.clearInterval(ref
 
         <form class="global-search taf-global-search" role="search" @submit.prevent="submitSearch">
           <Search :size="18" />
-          <input v-model="search" type="search" placeholder="搜索项目、任务、素材、音色..." aria-label="全局搜索" />
+          <input ref="searchInput" v-model="search" type="search" placeholder="搜索项目、任务、素材、音色..." aria-label="全局搜索" />
           <kbd>Ctrl + K</kbd>
         </form>
 

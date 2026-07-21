@@ -8,9 +8,9 @@ import {
   Sparkles, Video, X, Zap,
 } from 'lucide-vue-next'
 
-import { getAssetLibrary, importAssets, ingestAsset, type AssetLibrarySummary } from '../../api/assets'
+import { cleanupAssetCache, getAssetLibrary, importAssets, ingestAsset, type AssetLibrarySummary } from '../../api/assets'
 import { selectDirectory } from '../../api/projects'
-import { showToast } from '../../services/feedback'
+import { confirmAction, showToast } from '../../services/feedback'
 import type { LibraryRole, MediaAsset } from '../../types/media'
 
 type IndexStatus = 'running' | 'pending' | 'completed' | 'failed'
@@ -227,6 +227,20 @@ function createCleanupPlan() {
   showToast({ title: '清理清单已生成', description: '未删除任何源素材，可按清单确认后再处理。', tone: 'success' })
 }
 
+async function cleanupCache() {
+  if (!await confirmAction({ eyebrow: '清理素材缓存', title: '清理在线素材搜索缓存？', description: '仅清理可重新生成的 Pexels / Pixabay 查询缓存，不会删除原始素材、预览帧或向量索引。', confirmText: '清理缓存', tone: 'warning' })) return
+  processing.value = true
+  error.value = ''
+  try {
+    const result = await cleanupAssetCache()
+    showToast({ title: '素材缓存已清理', description: `已移除 ${result.deleted_query_cache_entries} 条查询缓存，原始素材均已保留。`, tone: 'success' })
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '缓存清理失败'
+  } finally {
+    processing.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -239,7 +253,7 @@ onMounted(load)
       </div>
       <div class="ops-actions">
         <template v-if="section === 'storage'">
-          <button class="ops-button" @click="createCleanupPlan"><Sparkles :size="16" /> 清理缓存</button>
+          <button class="ops-button" :disabled="processing" @click="cleanupCache"><Sparkles :size="16" /> 清理缓存</button>
           <button class="ops-button" :disabled="processing || !staleAssets.length" @click="buildIndex(staleAssets)"><RotateCcw :size="16" /> 重建索引占用</button>
           <RouterLink class="ops-button" to="/assets"><FolderOpen :size="16" /> 打开素材目录</RouterLink>
           <button class="ops-primary" @click="exportStorageReport"><Download :size="16" /> 导出存储报告</button>

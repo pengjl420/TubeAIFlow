@@ -100,6 +100,17 @@ def start_project_workflow(project_id: str, session: Session = Depends(get_sessi
                 "error": "Project belongs to a paused task; resume its batch before starting it again",
             },
         )
+    latest = task_service.get_latest_project_workflow_task(
+        session, project_id, "narration_generation"
+    )
+    if latest and latest.status == "failed":
+        task_service.resume_failed_task(
+            session,
+            latest,
+            current_stage=latest.current_stage or "segmenting",
+        )
+        task_worker.wake_worker()
+        return {"success": True, "data": task_service.serialize_task(session, latest)}
     try:
         task = task_service.enqueue_project_task(
             session,
@@ -141,7 +152,14 @@ def start_video_workflow(project_id: str, session: Session = Depends(get_session
         return {"success": True, "data": task_service.serialize_task(session, active)}
 
     latest = _latest_ai_video_task(session, project_id)
-    if latest and latest.status == "review_required":
+    if latest and latest.status == "failed":
+        task_service.resume_failed_task(
+            session,
+            latest,
+            current_stage=latest.current_stage or video_synthesis.initial_stage(session, project_id),
+        )
+        task = latest
+    elif latest and latest.status == "review_required":
         resume_stage = video_synthesis.initial_stage(session, project_id)
         if resume_stage in {"storyboard", "asset_search"}:
             pass

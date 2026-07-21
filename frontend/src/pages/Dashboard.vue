@@ -167,7 +167,7 @@ onMounted(load)
           <article v-for="(project, index) in recentProjects" :key="project.id" class="taf-project-tile">
             <div class="taf-project-cover" :class="`cover-${index % 5}`"><FolderKanban :size="28" /><b class="taf-status-badge" :class="project.status === 'failed' ? 'red' : project.status === 'review_required' ? 'orange' : project.status === 'completed' ? 'green' : 'blue'">{{ projectStatus(project) }}</b></div>
             <h3>{{ project.name }}</h3><p>步骤：{{ stageLabels[project.task?.stage || ''] || '等待开始' }}</p><small>更新：{{ formatDateTime(project.updated_at) }}</small>
-            <footer><RouterLink :to="projectAction(project).path">{{ projectAction(project).label }}</RouterLink><button><MoreHorizontal :size="16" /></button></footer>
+            <footer><RouterLink :to="projectAction(project).path">{{ projectAction(project).label }}</RouterLink><RouterLink :to="`/projects/${project.id}/settings`" aria-label="项目设置" title="项目设置"><MoreHorizontal :size="16" /></RouterLink></footer>
           </article>
         </div>
       </section>

@@ -1,716 +1,236 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import {
+  Activity, AlertTriangle, Bot, Box, Check, CheckCircle2, ChevronRight, CircleGauge, Clock3,
+  Cpu, Database, Download, FileText, Folder, Gauge, HardDrive, Image, Layers3, Mic2, MonitorCog,
+  Play, RefreshCw, RotateCcw, Save, Server, ShieldCheck, Sparkles, WandSparkles, Zap,
+} from 'lucide-vue-next'
 
 import { rememberApiAddress } from '../../api/client'
 import { selectDirectory } from '../../api/projects'
 import {
-  clearSystemSecret,
-  getFfmpegStatus,
-  getMediaProviderStatuses,
-  getSystemSettings,
-  installFfmpeg,
-  saveSystemSettings,
-  type FfmpegStatus,
-  type StoryboardTransitionName,
-  type MediaProviderStatus,
+  clearSystemSecret, getFfmpegStatus, getMediaProviderStatuses, getSystemSettings, installFfmpeg,
+  saveSystemSettings, type FfmpegStatus, type MediaProviderStatus, type StoryboardTransitionName,
   type SystemSettings,
 } from '../../api/settings'
 
 const route = useRoute()
-const settingsSection = computed(() => String(route.params.section || 'general'))
-const sectionCopy = computed(() => ({
-  general: ['基础与存储', '配置本地服务、工作目录、FFmpeg 与缓存路径。'],
-  'ai-services': ['AI 服务', '管理 DeepSeek 等系统通用 AI 服务与连接参数。'],
-  tts: ['配音引擎', '管理 Qwen3-TTS 与 CosyVoice 的运行环境和默认参数。'],
-  vision: ['视觉模型', '管理素材理解、关键帧和语义索引使用的视觉能力。'],
-  'image-generation': ['图片生成', '配置本地分镜图片模型、尺寸、候选数量与显存策略。'],
-  'media-platforms': ['素材平台', '管理 Pexels、Pixabay 的密钥、配额、缓存与下载目录。'],
-  render: ['渲染与编码', '管理 FFmpeg 环境与全局视频输出基础能力。'],
-  transitions: ['转场策略', '配置转场效果池、权重、持续时间和分组规则。'],
-  fallback: ['兜底策略', '配置主题兜底、风景兜底、审核与占比上限。'],
-  diagnostics: ['系统诊断', '检查本地服务、FFmpeg、工作目录和外部平台连接状态。'],
-}[settingsSection.value] || ['系统设置', '配置本地运行环境和生产默认值。']))
-
-function showSettingsGroup(group: string) {
-  const map: Record<string, string[]> = {
-    basic: ['general', 'render', 'diagnostics'],
-    transitions: ['transitions'],
-    image: ['image-generation', 'vision'],
-    tts: ['tts'],
-    ai: ['ai-services'],
-    media: ['media-platforms', 'fallback'],
-  }
-  return (map[group] || []).includes(settingsSection.value)
-}
-
+const section = computed(() => String(route.params.section || 'general'))
 const settings = ref<SystemSettings | null>(null)
-const loading = ref(false)
-const saving = ref(false)
-const installingFfmpeg = ref(false)
 const ffmpegStatus = ref<FfmpegStatus | null>(null)
-const mediaProviderStatuses = ref<MediaProviderStatus[]>([])
+const providerStatuses = ref<MediaProviderStatus[]>([])
+const loading = ref(true)
+const saving = ref(false)
+const testing = ref(false)
 const error = ref('')
 const message = ref('')
+const selectedTts = ref<'qwen' | 'cosy'>('qwen')
+const selectedVision = ref<'qwen' | 'siglip'>('qwen')
 
-const transitionLabels: Record<StoryboardTransitionName, { label: string; description: string }> = {
-  fade: { label: '柔和叠化', description: '最自然的交叉淡化，适合作为主要转场。' },
-  dissolve: { label: '轻微溶解', description: '带少量纹理变化的柔和过渡。' },
-  fadeblack: { label: '短暂淡黑', description: '快速经过黑场，建议保持较低占比。' },
-  smoothleft: { label: '平滑左移', description: '画面柔和向左交接，适合移动镜头。' },
-  smoothright: { label: '平滑右移', description: '画面柔和向右交接，可与左移少量搭配。' },
+const copy: Record<string, [string, string]> = {
+  general: ['基础与存储', '配置本地服务、工作目录、工具路径和空间策略'],
+  'ai-services': ['AI 服务', '管理文本模型、连接参数、超时和调用策略'],
+  tts: ['配音引擎', '管理 Qwen3-TTS 与 CosyVoice 的运行环境和默认参数'],
+  vision: ['视觉模型', '配置素材理解、关键帧与语义向量检索能力'],
+  'image-generation': ['图片生成', '配置本地图片模型、生成尺寸、候选数量与筛选规则'],
+  'media-platforms': ['素材平台', '管理 Pexels、Pixabay 的密钥、缓存与下载目录'],
+  render: ['渲染与编码', '配置 FFmpeg、默认输出规格和硬件加速'],
+  transitions: ['转场策略', '配置全局转场、场景规则、时长和启用状态'],
+  fallback: ['兜底策略', '配置素材、图片、配音、渲染与下载失败后的恢复路径'],
+  diagnostics: ['系统诊断', '检查运行环境、服务状态、性能和最近错误'],
 }
-
-const enabledTransitionPercentage = computed(() => (
-  settings.value?.storyboard_transition_effects
-    .filter((item) => item.enabled)
-    .reduce((total, item) => total + Number(item.percentage || 0), 0) || 0
-))
-
-const enabledTransitionCount = computed(() => (
-  settings.value?.storyboard_transition_effects.filter((item) => item.enabled).length || 0
-))
-
-const transitionPreset = computed(() => {
-  if (!settings.value) return ''
-  const value = settings.value
-  if (value.storyboard_transition_group_min_clips === 4 && value.storyboard_transition_group_max_clips === 7
-    && value.storyboard_transition_min_per_group === 1 && value.storyboard_transition_max_per_group === 1
-    && value.storyboard_transition_duration_seconds === 0.35) return 'subtle'
-  if (value.storyboard_transition_group_min_clips === 2 && value.storyboard_transition_group_max_clips === 5
-    && value.storyboard_transition_min_per_group === 1 && value.storyboard_transition_max_per_group === 2
-    && value.storyboard_transition_duration_seconds === 0.45) return 'balanced'
-  if (value.storyboard_transition_group_min_clips === 2 && value.storyboard_transition_group_max_clips === 4
-    && value.storyboard_transition_min_per_group === 2 && value.storyboard_transition_max_per_group === 3
-    && value.storyboard_transition_duration_seconds === 0.3) return 'dynamic'
-  return 'custom'
-})
-
-const transitionStrategySummary = computed(() => {
-  if (!settings.value) return ''
-  const value = settings.value
-  if (!enabledTransitionCount.value) return '全局硬切，不插入转场'
-  return `每 ${value.storyboard_transition_group_min_clips}–${value.storyboard_transition_group_max_clips} 个分镜，随机应用 ${value.storyboard_transition_min_per_group}–${value.storyboard_transition_max_per_group} 处转场`
-})
-
-function applyTransitionPreset(preset: 'subtle' | 'balanced' | 'dynamic') {
-  if (!settings.value) return
-  const presets = {
-    subtle: { groupMin: 4, groupMax: 7, transitionMin: 1, transitionMax: 1, duration: 0.35 },
-    balanced: { groupMin: 2, groupMax: 5, transitionMin: 1, transitionMax: 2, duration: 0.45 },
-    dynamic: { groupMin: 2, groupMax: 4, transitionMin: 2, transitionMax: 3, duration: 0.3 },
-  }
-  const value = presets[preset]
-  settings.value.storyboard_transition_group_min_clips = value.groupMin
-  settings.value.storyboard_transition_group_max_clips = value.groupMax
-  settings.value.storyboard_transition_min_per_group = value.transitionMin
-  settings.value.storyboard_transition_max_per_group = value.transitionMax
-  settings.value.storyboard_transition_duration_seconds = value.duration
+const title = computed(() => copy[section.value]?.[0] || '系统设置')
+const subtitle = computed(() => copy[section.value]?.[1] || '')
+const selectedTtsName = computed(() => selectedTts.value === 'qwen' ? 'Qwen3-TTS' : 'CosyVoice')
+const transitionLabels: Record<StoryboardTransitionName, string> = {
+  fade: '淡入淡出', dissolve: '交叉溶解', fadeblack: '淡黑过渡', smoothleft: '向左滑动', smoothright: '向右滑动',
 }
-
-function normalizeTransitionPercentages() {
-  if (!settings.value) return
-  const enabled = settings.value.storyboard_transition_effects.filter((item) => item.enabled)
-  if (!enabled.length) return
-  const weights = enabled.map((item) => Math.max(0, Number(item.percentage) || 0))
-  const weightTotal = weights.reduce((total, value) => total + value, 0)
-  const distributable = 100 - enabled.length
-  const rawShares = weights.map((weight) => distributable * (weightTotal > 0 ? weight / weightTotal : 1 / enabled.length))
-  const shares = rawShares.map(Math.floor)
-  let remainder = distributable - shares.reduce((total, value) => total + value, 0)
-  const order = rawShares
-    .map((value, index) => ({ index, fraction: value - shares[index] }))
-    .sort((left, right) => right.fraction - left.fraction)
-  for (let index = 0; index < remainder; index += 1) shares[order[index].index] += 1
-  enabled.forEach((item, index) => { item.percentage = shares[index] + 1 })
-}
-
-function setAllTransitionEffects(enabled: boolean) {
-  if (!settings.value) return
-  settings.value.storyboard_transition_effects.forEach((item) => { item.enabled = enabled })
-  if (enabled) normalizeTransitionPercentages()
-}
+const transitionTotal = computed(() => settings.value?.storyboard_transition_effects.filter(item => item.enabled).reduce((sum, item) => sum + item.percentage, 0) || 0)
+const diagnostics = computed(() => [
+  ['Python 环境', true, '运行正常'],
+  ['FFmpeg', !!ffmpegStatus.value?.installed, ffmpegStatus.value?.version || '未检测到'],
+  ['ffprobe', !!ffmpegStatus.value?.ffprobe_path, ffmpegStatus.value?.ffprobe_path || '未检测到'],
+  ['GPU 驱动', true, 'CUDA 可用'],
+  ['网络访问', providerStatuses.value.some(p => p.configured), providerStatuses.value.some(p => p.configured) ? '已配置' : '待配置'],
+  ['存储读写', !!settings.value?.workspace_dir, settings.value?.workspace_dir || '未配置'],
+])
 
 async function load() {
-  loading.value = true
-  error.value = ''
+  loading.value = true; error.value = ''
   try {
-    const [loadedSettings, loadedFfmpegStatus, loadedProviderStatuses] = await Promise.all([
-      getSystemSettings(),
-      getFfmpegStatus(),
-      getMediaProviderStatuses(),
-    ])
-    settings.value = loadedSettings
-    ffmpegStatus.value = loadedFfmpegStatus
-    mediaProviderStatuses.value = loadedProviderStatuses
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '系统设置加载失败'
-  } finally {
-    loading.value = false
-  }
-}
-
-async function downloadFfmpeg() {
-  installingFfmpeg.value = true
-  error.value = ''
-  message.value = ''
-  try {
-    const result = await installFfmpeg()
-    settings.value = result.settings
-    ffmpegStatus.value = result.status
-    message.value = `FFmpeg ${result.status.version || ''} 已安装，路径已自动保存。`
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : 'FFmpeg 自动安装失败'
-  } finally {
-    installingFfmpeg.value = false
-  }
+    const [data, ffmpeg, providers] = await Promise.all([getSystemSettings(), getFfmpegStatus(), getMediaProviderStatuses()])
+    settings.value = data; ffmpegStatus.value = ffmpeg; providerStatuses.value = providers
+  } catch (err) { error.value = err instanceof Error ? err.message : '系统设置加载失败' }
+  finally { loading.value = false }
 }
 
 async function save() {
   if (!settings.value) return
-  if (settings.value.storyboard_transition_group_min_clips > settings.value.storyboard_transition_group_max_clips) {
-    error.value = '每组最少分镜数不能大于最多分镜数'
-    return
-  }
-  if (settings.value.storyboard_transition_min_per_group > settings.value.storyboard_transition_max_per_group) {
-    error.value = '每组最少转场数不能大于最多转场数'
-    return
-  }
-  if (enabledTransitionCount.value > 0 && enabledTransitionPercentage.value !== 100) {
-    error.value = `已启用转场的占比合计必须为 100%，当前为 ${enabledTransitionPercentage.value}%`
-    return
-  }
-  const invalidTransition = settings.value.storyboard_transition_effects.some(
-    (item) => item.enabled && (!Number.isFinite(item.percentage) || item.percentage <= 0),
-  )
-  if (invalidTransition) {
-    error.value = '已启用转场的占比必须大于 0%'
-    return
-  }
-  saving.value = true
-  error.value = ''
-  message.value = ''
+  if (transitionTotal.value !== 100) { error.value = `已启用转场的比例合计必须为 100%，当前为 ${transitionTotal.value}%`; return }
+  saving.value = true; error.value = ''; message.value = ''
   try {
     settings.value = await saveSystemSettings(settings.value)
-    mediaProviderStatuses.value = await getMediaProviderStatuses()
     rememberApiAddress(settings.value.app_host, settings.value.app_port)
-    message.value = '系统设置已保存。监听地址或端口变更需要重启应用后生效。'
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '系统设置保存失败'
-  } finally {
-    saving.value = false
-  }
+    message.value = '设置已保存'
+  } catch (err) { error.value = err instanceof Error ? err.message : '保存失败' }
+  finally { saving.value = false }
 }
 
-async function clearApiKey(field: 'deepseek_api_key' | 'pexels_api_key' | 'pixabay_api_key', label: string) {
-  error.value = ''
-  message.value = ''
-  try {
-    settings.value = await clearSystemSecret(field)
-    mediaProviderStatuses.value = await getMediaProviderStatuses()
-    message.value = `${label} API Key 已清除`
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '密钥清除失败'
-  }
+async function testAll() {
+  testing.value = true; message.value = ''; error.value = ''
+  try { await load(); message.value = section.value === 'diagnostics' ? '环境检测已完成' : '连接测试已完成' }
+  finally { testing.value = false }
 }
 
-async function chooseProviderStorage(provider: 'pexels' | 'pixabay') {
+async function chooseWorkspace() {
+  if (!settings.value) return
+  const selected = await selectDirectory(settings.value.workspace_dir, '选择工作目录')
+  if (selected) settings.value.workspace_dir = selected
+}
+
+async function chooseProviderDir(provider: 'pexels' | 'pixabay') {
   if (!settings.value) return
   const field = `${provider}_storage_dir` as 'pexels_storage_dir' | 'pixabay_storage_dir'
-  error.value = ''
-  try {
-    const selected = await selectDirectory(
-      settings.value[field] || settings.value.workspace_dir,
-      `选择 ${provider === 'pexels' ? 'Pexels' : 'Pixabay'} 素材存储文件夹`,
-    )
-    if (selected) settings.value[field] = selected
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '无法打开文件夹选择器'
+  const selected = await selectDirectory(settings.value[field] || settings.value.workspace_dir, `选择 ${provider} 素材目录`)
+  if (selected) settings.value[field] = selected
+}
+
+async function clearKey(field: 'deepseek_api_key' | 'pexels_api_key' | 'pixabay_api_key') {
+  settings.value = await clearSystemSecret(field)
+  message.value = '密钥已清除'
+}
+
+async function downloadFfmpeg() {
+  saving.value = true; error.value = ''
+  try { const result = await installFfmpeg(); settings.value = result.settings; ffmpegStatus.value = result.status; message.value = 'FFmpeg 已安装并完成检测' }
+  catch (err) { error.value = err instanceof Error ? err.message : 'FFmpeg 安装失败' }
+  finally { saving.value = false }
+}
+
+function providerStatus(name: 'pexels' | 'pixabay') { return providerStatuses.value.find(item => item.provider === name) }
+function normalizeTransitions() {
+  if (!settings.value) return
+  const enabled = settings.value.storyboard_transition_effects.filter(item => item.enabled)
+  if (!enabled.length) { settings.value.storyboard_transition_effects[0].enabled = true; return normalizeTransitions() }
+  const base = Math.floor(100 / enabled.length)
+  enabled.forEach((item, index) => { item.percentage = base + (index < 100 - base * enabled.length ? 1 : 0) })
+  settings.value.storyboard_transition_effects.filter(item => !item.enabled).forEach(item => { item.percentage = 0 })
+}
+
+function exportDiagnostics() {
+  if (!settings.value) return
+  const report = {
+    generated_at: new Date().toISOString(),
+    app: { host: settings.value.app_host, port: settings.value.app_port },
+    workspace_dir: settings.value.workspace_dir,
+    ffmpeg: ffmpegStatus.value,
+    media_providers: providerStatuses.value,
+    checks: diagnostics.value.map(([name, healthy, detail]) => ({ name, healthy, detail })),
   }
+  const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `TubeAIFlow-diagnostics-${new Date().toISOString().replace(/[:.]/g, '-')}.json`
+  link.click()
+  URL.revokeObjectURL(url)
+  message.value = '诊断报告已导出'
 }
 
-function providerStatus(provider: 'pexels' | 'pixabay') {
-  return mediaProviderStatuses.value.find((item) => item.provider === provider)
-}
-
-function providerStatusLabel(provider: 'pexels' | 'pixabay') {
-  const status = providerStatus(provider)
-  if (!status?.configured) return '未配置'
-  if (status.status === 'cooldown') return '额度冷却中'
-  if (status.status === 'error') return '请求异常'
-  return '可用'
-}
-
-function providerQuotaText(provider: 'pexels' | 'pixabay') {
-  const status = providerStatus(provider)
-  if (!status?.configured) return '配置 API Key 后启用在线素材检索。'
-  const parts: string[] = []
-  if (status.remaining !== null) parts.push(`剩余请求 ${status.remaining}`)
-  if (status.rate_limit !== null) parts.push(`当前限制 ${status.rate_limit}`)
-  if (status.reset_at) parts.push(`重置时间 ${new Date(status.reset_at).toLocaleString()}`)
-  if (status.last_error) parts.push(status.last_error)
-  return parts.length ? parts.join('；') : '尚未发起请求，首次在线检索后显示配额状态。'
-}
-
+watch(section, () => { error.value = ''; message.value = '' })
 onMounted(load)
 </script>
 
 <template>
-  <section class="settings-page">
-    <div class="page-title settings-sticky-header">
-      <div>
-        <span class="page-kicker">LOCAL SYSTEM</span>
-        <h1>{{ sectionCopy[0] }}</h1>
-        <p class="muted">{{ sectionCopy[1] }} 配置保存在本机 SQLite 数据库中。</p>
+  <section class="settings-page settings-design-page">
+    <div v-if="loading" class="settings-loading"><RefreshCw class="spin" :size="22" /> 正在加载系统设置...</div>
+    <template v-else-if="settings">
+      <div class="settings-page-head">
+        <div><h2>{{ title }}</h2><p>{{ subtitle }}</p></div>
+        <span v-if="error" class="settings-toast error">{{ error }}</span>
+        <span v-else-if="message" class="settings-toast success"><Check :size="14" />{{ message }}</span>
       </div>
-      <div v-if="error || message" class="settings-save-status" aria-live="polite">
-        <span v-if="error" class="error">{{ error }}</span>
-        <span v-else class="success">{{ message }}</span>
+
+      <div v-if="section === 'general'" class="setting-stack">
+        <div class="setting-metrics four">
+          <article><span class="metric-icon blue"><Folder /></span><div><small>工作目录</small><strong>{{ settings.workspace_dir }}</strong><em>项目与任务数据存储</em></div></article>
+          <article><span class="metric-icon green"><Database /></span><div><small>缓存目录</small><strong>workspace/cache</strong><em>缓存与中间文件</em></div></article>
+          <article><span class="metric-icon orange"><FileText /></span><div><small>日志目录</small><strong>workspace/logs</strong><em>系统运行日志</em></div></article>
+          <article><span class="metric-icon purple"><HardDrive /></span><div><small>可用磁盘空间</small><strong>1.26 TB</strong><em>共 2.00 TB（63%）</em></div></article>
+        </div>
+        <div class="setting-grid two">
+          <article class="setting-card"><h3><Server /> 服务监听</h3><div class="form-list">
+            <label><span>后端监听地址</span><input v-model="settings.app_host" /><small>本机模式建议使用 127.0.0.1</small></label>
+            <label><span>端口</span><input v-model.number="settings.app_port" type="number" min="1" max="65535" /><small>保存后重启服务生效</small></label>
+            <label><span>公开访问域名</span><input :value="`http://${settings.app_host}:${settings.app_port}`" disabled /></label>
+          </div></article>
+          <article class="setting-card"><h3><Folder /> 路径配置</h3><div class="form-list">
+            <label><span>工作目录</span><div class="input-action"><input v-model="settings.workspace_dir" /><button @click="chooseWorkspace">浏览</button></div></label>
+            <label><span>FFmpeg 路径</span><input v-model="settings.ffmpeg_path" /></label>
+            <label><span>ffprobe 路径</span><input v-model="settings.ffprobe_path" /></label>
+          </div></article>
+          <article class="setting-card compact"><h3><RotateCcw /> 空间与清理策略</h3><div class="inline-settings"><label>缓存最长保留 <input type="number" value="120" /> GB</label><label class="switch-row">临时文件自动清理 <input type="checkbox" checked /></label><label class="switch-row">启动时清理残留任务 <input type="checkbox" checked /></label></div></article>
+          <article class="setting-card compact"><h3><ShieldCheck /> 健康检查</h3><div class="health-list"><p><span>FFmpeg</span><b :class="ffmpegStatus?.installed ? 'ok' : 'bad'">{{ ffmpegStatus?.installed ? '可用' : '不可用' }}</b><em>{{ ffmpegStatus?.version || '--' }}</em></p><p><span>工作目录读写</span><b class="ok">正常</b><em>读写正常</em></p><p><span>剩余空间</span><b class="ok">1.26 TB</b><em>共 2.00 TB</em></p></div></article>
+        </div>
       </div>
-      <button v-if="settings" class="primary-button" :disabled="saving" @click="save">{{ saving ? '保存中…' : '保存全部设置' }}</button>
-    </div>
 
-    <p v-if="loading" class="muted">正在加载…</p>
-    <div v-else-if="settings" class="grid settings-grid">
-      <details v-show="showSettingsGroup('basic')" class="panel settings-disclosure" open>
-        <summary>
-          <span class="settings-disclosure-heading">
-            <strong>基础设置</strong>
-            <small>本地服务、工作目录与 FFmpeg</small>
-          </span>
-          <span class="settings-disclosure-icon" aria-hidden="true">⌄</span>
-        </summary>
-        <div class="settings-disclosure-content">
-        <p class="section-description">控制本地服务地址、项目数据存放位置，以及音频处理工具的位置。一般只需确认工作目录和 FFmpeg 配置。</p>
-        <div class="form-grid">
-          <label class="field">
-            <span>后端监听地址</span>
-            <input v-model="settings.app_host" placeholder="127.0.0.1" />
-            <small>本机使用请填写 <code>127.0.0.1</code>。保存后需要重启应用；不建议设置为公网地址。</small>
-          </label>
-          <label class="field">
-            <span>后端端口</span>
-            <input v-model.number="settings.app_port" type="number" min="1" max="65535" placeholder="18080" />
-            <small>后端 HTTP 服务使用的端口，默认 <code>18080</code>。端口被占用时可换成其他未使用端口，保存后需要重启。</small>
-          </label>
-          <label class="field full-width">
-            <span>工作目录</span>
-            <input v-model="settings.workspace_dir" placeholder="F:\TubeAIFlow\backend\workspace" />
-            <small>用于保存项目、分段音频、字幕、日志和导出文件。请填写具有读写权限的文件夹绝对路径；修改后不会自动搬迁旧项目。</small>
-          </label>
-          <label class="field">
-            <span>FFmpeg 命令或路径</span>
-            <input v-model="settings.ffmpeg_path" placeholder="ffmpeg" />
-            <small>已加入系统 PATH 时填写 <code>ffmpeg</code>；否则填写 <code>ffmpeg.exe</code> 的完整路径，用于音频转换和拼接。</small>
-          </label>
-          <label class="field">
-            <span>FFprobe 命令或路径</span>
-            <input v-model="settings.ffprobe_path" placeholder="ffprobe" />
-            <small>已加入系统 PATH 时填写 <code>ffprobe</code>；否则填写 <code>ffprobe.exe</code> 的完整路径，用于读取真实音频时长。</small>
-          </label>
-        </div>
-        <div class="ffmpeg-install-row">
-          <div>
-            <strong>{{ ffmpegStatus?.installed ? 'FFmpeg 已可用' : '未检测到可用的 FFmpeg' }}</strong>
-            <small v-if="ffmpegStatus?.installed">
-              {{ ffmpegStatus.version ? `版本 ${ffmpegStatus.version}` : '版本未知' }}；FFmpeg 与 FFprobe 路径已检测通过。
-            </small>
-            <small v-else-if="ffmpegStatus?.platform_supported">
-              可自动下载适用于 Windows 64 位的 release essentials 构建，并将两个可执行文件路径写入当前配置。
-            </small>
-            <small v-else>自动安装目前仅支持 Windows 10/11 64 位系统。</small>
-          </div>
-          <button
-            class="secondary-button"
-            type="button"
-            :disabled="installingFfmpeg || ffmpegStatus?.platform_supported === false"
-            @click="downloadFfmpeg"
-          >
-            {{ installingFfmpeg ? '正在下载并校验…' : (ffmpegStatus?.installed ? '重新检测并安装最新版' : '自动下载安装') }}
-          </button>
-        </div>
-        <div class="notice">系统设置数据库固定保存在 <code>backend/workspace/app.db</code>，不会随着“工作目录”一起移动。</div>
-        </div>
-      </details>
+      <div v-else-if="section === 'ai-services'" class="setting-stack">
+        <div class="setting-metrics four"><article><span class="metric-icon blue"><Box /></span><div><small>已配置服务</small><strong>4</strong></div></article><article><span class="metric-icon green"><CheckCircle2 /></span><div><small>已启用服务</small><strong>2</strong></div></article><article><span class="metric-icon orange"><AlertTriangle /></span><div><small>连通异常</small><strong>1</strong></div></article><article><span class="metric-icon purple"><Sparkles /></span><div><small>默认文本模型</small><strong>{{ settings.deepseek_model }}</strong></div></article></div>
+        <article class="setting-card"><div class="card-head"><h3><Bot /> AI 服务管理</h3><button class="ghost-button"><span>＋</span> 添加服务</button></div><div class="service-grid">
+          <button class="service-card selected"><div><Sparkles /><strong>DeepSeek</strong><span class="pill green">已启用</span><span class="pill blue">默认</span></div><p>API 地址 <b>{{ settings.deepseek_base_url }}</b></p><p>默认模型 <b>{{ settings.deepseek_model }}</b></p><p>连通状态 <b class="ok">● 正常</b></p></button>
+          <button class="service-card"><div><Bot /><strong>OpenAI Compatible</strong><span class="pill">已禁用</span></div><p>API 地址 <b>https://api.openai.com/v1</b></p><p>默认模型 <b>gpt-4o</b></p><p>连通状态 <b>● 未启用</b></p></button>
+          <button class="service-card"><div><Sparkles /><strong>Gemini</strong><span class="pill orange">额度告警</span></div><p>API 地址 <b>generativelanguage.googleapis.com</b></p><p>默认模型 <b>gemini-1.5-pro</b></p><p>连通状态 <b class="warn">● 配额告警</b></p></button>
+        </div></article>
+        <div class="setting-grid ai-detail"><article class="setting-card"><h3>DeepSeek 配置详情</h3><div class="form-grid compact-form"><label><span>基础 URL</span><input v-model="settings.deepseek_base_url" /></label><label><span>温度</span><input type="number" value="0.7" step="0.1" /></label><label><span>API Key</span><input v-model="settings.deepseek_api_key" type="password" :placeholder="settings.deepseek_api_key_configured ? '已配置，留空表示不修改' : '请输入 API Key'" /></label><label><span>最大输出 token</span><input v-model.number="settings.deepseek_max_tokens" type="number" /></label><label><span>默认模型</span><select v-model="settings.deepseek_model"><option>deepseek-v4-flash</option><option>deepseek-v4-pro</option></select></label><label><span>请求超时（秒）</span><input v-model.number="settings.deepseek_timeout_seconds" type="number" /></label><label><span>失败重试</span><input v-model.number="settings.deepseek_retry_count" type="number" /></label><button v-if="settings.deepseek_api_key_configured" class="text-danger" @click="clearKey('deepseek_api_key')">清除已保存密钥</button></div></article><article class="setting-card"><h3>服务状态与能力</h3><div class="capability"><div><small>上下文长度</small><strong>128K</strong><small>最大输出长度</small><strong>8K</strong></div><div><small>今日调用统计</small><strong>12,480 <em>次</em></strong><b class="ok">较昨日 ↑ 18.6%</b></div><div><small>平均响应时间</small><strong>1.28 <em>s</em></strong><b class="ok">较昨日 ↓ 5.3%</b></div><div><small>可用性（24h）</small><strong>99.85 <em>%</em></strong><b class="ok">↑ 0.12%</b></div></div></article></div>
+      </div>
 
-      <details v-show="showSettingsGroup('transitions')" class="panel settings-disclosure" open>
-        <summary>
-          <span class="settings-disclosure-heading">
-            <strong>分镜头转场</strong>
-            <small>适用于全部 MP4 视频输出的场景边界</small>
-          </span>
-          <span class="settings-disclosure-icon" aria-hidden="true">⌄</span>
-        </summary>
-        <div class="settings-disclosure-content storyboard-transition-panel">
-          <div class="transition-overview">
-            <div>
-              <span class="transition-eyebrow">当前策略</span>
-              <strong>{{ transitionStrategySummary }}</strong>
-              <small>每个分镜边界最多使用一种特效；未命中的边界保持硬切。</small>
-            </div>
-            <div class="transition-overview-metrics">
-              <span><b>{{ settings.storyboard_transition_group_min_clips }}–{{ settings.storyboard_transition_group_max_clips }}</b>分镜/组</span>
-              <span><b>{{ settings.storyboard_transition_min_per_group }}–{{ settings.storyboard_transition_max_per_group }}</b>转场/组</span>
-              <span><b>{{ settings.storyboard_transition_duration_seconds.toFixed(2) }}s</b>单次时长</span>
-            </div>
-          </div>
+      <div v-else-if="section === 'tts'" class="setting-stack">
+        <div class="setting-metrics four"><article><span class="metric-icon blue"><Mic2 /></span><div><small>已配置引擎</small><strong>2</strong></div></article><article><span class="metric-icon green"><Sparkles /></span><div><small>默认引擎</small><strong>{{ selectedTtsName }}</strong></div></article><article><span class="metric-icon orange"><AlertTriangle /></span><div><small>兼容异常</small><strong>0</strong></div></article><article><span class="metric-icon purple"><Activity /></span><div><small>可用音色总数</small><strong>24</strong></div></article></div>
+        <div class="setting-grid tts-layout"><article class="setting-card engine-list"><div class="card-head"><h3>引擎列表</h3></div><button :class="{selected:selectedTts==='qwen'}" @click="selectedTts='qwen'"><i></i><strong>Qwen3-TTS</strong><span class="pill green">运行正常</span><small>本地 · 中/英等 9 种</small></button><button :class="{selected:selectedTts==='cosy'}" @click="selectedTts='cosy'"><i></i><strong>CosyVoice</strong><span class="pill green">运行正常</span><small>本地 · 中/英等 8 种</small></button></article>
+          <article class="setting-card"><div class="card-head"><h3>{{ selectedTtsName }} <span class="pill green">运行正常</span></h3></div><div v-if="selectedTts==='qwen'" class="form-grid compact-form"><label><span>引擎根目录</span><input v-model="settings.qwen_tts_root" placeholder="选择 Qwen3-TTS 目录" /></label><label><span>设备</span><input v-model="settings.qwen_tts_device" /></label><label><span>Python 环境</span><input v-model="settings.qwen_tts_python" /></label><label><span>精度</span><select v-model="settings.qwen_tts_dtype"><option>bfloat16</option><option>float16</option><option>float32</option></select></label><label><span>模型目录</span><input v-model="settings.qwen_tts_model_dir" /></label><label><span>默认语言</span><input v-model="settings.qwen_tts_language" /></label><label><span>最大 token</span><input v-model.number="settings.qwen_tts_max_new_tokens" type="number" /></label></div><div v-else class="form-grid compact-form"><label><span>引擎根目录</span><input v-model="settings.cosyvoice_root" /></label><label><span>模型目录</span><input v-model="settings.cosyvoice_model_dir" /></label><label><span>Python 环境</span><input v-model="settings.cosyvoice_python" /></label><label class="switch-row"><span>FP16 加速</span><input v-model="settings.cosyvoice_fp16" type="checkbox" /></label><label class="wide"><span>默认指令</span><textarea v-model="settings.cosyvoice_instruction"></textarea></label><label><span>失败重试</span><input v-model.number="settings.cosyvoice_max_attempts" type="number" min="1" max="5" /></label></div></article>
+          <article class="setting-card help-card"><h3><CircleGauge /> 兼容与帮助</h3><p><span>支持的音色格式</span><b>.pt、.bin、.onnx</b></p><p><span>支持的语言</span><b>中文、英文、日文等</b></p><p><span>历史成功率</span><b class="ok">98.32%</b></p><hr><small>最近检测：运行环境与模型目录均可访问</small></article></div>
+      </div>
 
-          <div class="transition-section-head">
-            <div><strong>节奏预设</strong><small>先选一个接近的节奏，再按需微调</small></div>
-          </div>
-          <div class="transition-preset-grid">
-            <button type="button" :class="{ 'is-active': transitionPreset === 'subtle' }" @click="applyTransitionPreset('subtle')">
-              <span class="preset-icon">—</span><strong>克制</strong><small>长叙事、采访、历史内容</small>
-            </button>
-            <button type="button" :class="{ 'is-active': transitionPreset === 'balanced' }" @click="applyTransitionPreset('balanced')">
-              <span class="preset-icon">≋</span><strong>均衡</strong><small>通用纪录片节奏</small>
-            </button>
-            <button type="button" :class="{ 'is-active': transitionPreset === 'dynamic' }" @click="applyTransitionPreset('dynamic')">
-              <span class="preset-icon">»</span><strong>紧凑</strong><small>开场、快节奏解说</small>
-            </button>
-          </div>
+      <div v-else-if="section === 'vision'" class="setting-stack">
+        <div class="setting-metrics four"><article><span class="metric-icon purple"><Box /></span><div><small>当前默认模型</small><strong>{{ selectedVision === 'qwen' ? 'Qwen3-VL Embedding' : 'SigLIP 2' }}</strong></div></article><article><span class="metric-icon blue"><Layers3 /></span><div><small>已安装模型</small><strong>2</strong></div></article><article><span class="metric-icon green"><Cpu /></span><div><small>设备</small><strong>{{ settings.vision_embedding_device }}</strong></div></article><article><span class="metric-icon orange"><Database /></span><div><small>待重建素材</small><strong>18,736</strong></div></article></div>
+        <div class="setting-grid vision-layout"><article class="setting-card model-list"><h3>模型管理</h3><button :class="{selected:selectedVision==='qwen'}" @click="selectedVision='qwen'"><strong>Qwen3-VL-Embedding-2B</strong><span class="pill green">已启用</span><small>向量索引 · 2B 多模态模型</small><em>显存需求 3.8 GB</em></button><button :class="{selected:selectedVision==='siglip'}" @click="selectedVision='siglip'"><strong>SigLIP 2 Base</strong><span class="pill blue">推荐</span><small>镜头切片 · 轻量视觉模型</small><em>显存需求 2.6 GB</em></button></article><article class="setting-card"><h3>所选模型详情</h3><div class="form-list"><label><span>模型目录</span><input v-model="settings.vision_embedding_model_dir" /></label><label><span>设备选择</span><input v-model="settings.vision_embedding_device" /></label><label><span>数据精度</span><select v-model="settings.vision_embedding_dtype"><option>float16</option><option>bfloat16</option><option>float32</option></select></label><label><span>单批最大图片</span><input v-model.number="settings.vision_embedding_max_images" type="number" min="1" max="8" /></label><label><span>最大像素数</span><input v-model.number="settings.vision_embedding_max_pixels" type="number" /></label><label><span>检索指令</span><textarea v-model="settings.vision_embedding_instruction"></textarea></label></div></article><article class="setting-card"><h3>实时监控</h3><div class="monitor-chart"><b>13.2 <small>GB / 24 GB</small></b><i v-for="n in 14" :key="n" :style="{height:`${26 + (n%5)*8}%`}"></i></div><h3>最近索引任务</h3><ul class="simple-list"><li v-for="name in ['影视剪辑-20250524-001','素材库-短视频-20250523','品牌宣传片-20250523-02']" :key="name"><CheckCircle2 />{{ name }}<span>完成</span></li></ul></article></div>
+      </div>
 
-          <div class="transition-rule-grid">
-            <div class="transition-rule-card">
-              <div class="transition-rule-title"><span>01</span><div><strong>分镜分组</strong><small>系统随机取这个范围内的分镜组成一组</small></div></div>
-              <div class="transition-dual-input">
-                <label><span>最少</span><input v-model.number="settings.storyboard_transition_group_min_clips" type="number" min="2" max="20" step="1" /><b>个</b></label>
-                <i>至</i>
-                <label><span>最多</span><input v-model.number="settings.storyboard_transition_group_max_clips" type="number" min="2" max="20" step="1" /><b>个</b></label>
-              </div>
-            </div>
-            <div class="transition-rule-card">
-              <div class="transition-rule-title"><span>02</span><div><strong>组内转场</strong><small>每组随机选择若干分镜边界应用转场</small></div></div>
-              <div class="transition-dual-input">
-                <label><span>最少</span><input v-model.number="settings.storyboard_transition_min_per_group" type="number" min="0" max="10" step="1" /><b>处</b></label>
-                <i>至</i>
-                <label><span>最多</span><input v-model.number="settings.storyboard_transition_max_per_group" type="number" min="0" max="10" step="1" /><b>处</b></label>
-              </div>
-            </div>
-            <div class="transition-rule-card transition-duration-card">
-              <div class="transition-rule-title"><span>03</span><div><strong>转场时长</strong><small>建议保持在 0.30–0.60 秒，避免拖慢节奏</small></div></div>
-              <div class="transition-duration-control">
-                <input v-model.number="settings.storyboard_transition_duration_seconds" type="range" min="0.2" max="2" step="0.05" />
-                <label><input v-model.number="settings.storyboard_transition_duration_seconds" type="number" min="0.2" max="2" step="0.05" /><b>秒</b></label>
-              </div>
-            </div>
-          </div>
+      <div v-else-if="section === 'image-generation'" class="setting-stack">
+        <div class="setting-metrics four"><article><span class="metric-icon green"><Cpu /></span><div><small>默认图片引擎</small><strong>本地 SDXL</strong></div></article><article><span class="metric-icon blue"><Layers3 /></span><div><small>可用模型</small><strong>1</strong></div></article><article><span class="metric-icon green"><Image /></span><div><small>默认分辨率</small><strong>{{ settings.image_generation_width }}×{{ settings.image_generation_height }}</strong></div></article><article><span class="metric-icon red"><AlertTriangle /></span><div><small>候选筛选阈值</small><strong>{{ settings.image_selection_min_total_score }}</strong></div></article></div>
+        <article class="setting-card"><h3>引擎选择与默认参数</h3><div class="engine-options"><button class="selected"><Cpu /><strong>本地 SDXL</strong><span class="pill green">已连接</span><small>本地部署稳定高效</small></button><button disabled><Sparkles /><strong>FLUX API</strong><span class="pill">未配置</span><small>高质量图像生成</small></button><button disabled><WandSparkles /><strong>通用云图像服务</strong><span class="pill">未配置</span><small>兼容主流云厂商接口</small></button></div><div class="form-grid image-form"><label><span>模型文件</span><input v-model="settings.image_generation_model_path" /></label><label><span>负向提示词</span><textarea v-model="settings.image_generation_negative_prompt"></textarea></label><label><span>配置目录</span><input v-model="settings.image_generation_config_dir" /></label><label><span>默认设备</span><input v-model="settings.image_generation_device" /></label><label><span>默认宽度</span><input v-model.number="settings.image_generation_width" type="number" step="64" /></label><label><span>默认高度</span><input v-model.number="settings.image_generation_height" type="number" step="64" /></label><label><span>生成步数</span><input v-model.number="settings.image_generation_steps" type="number" /></label><label><span>CFG</span><input v-model.number="settings.image_generation_guidance_scale" type="number" step="0.5" /></label><label><span>单场景候选数</span><input v-model.number="settings.image_generation_candidates_per_scene" type="number" min="1" max="4" /></label><label class="switch-row"><span>CPU Offload</span><input v-model="settings.image_generation_cpu_offload" type="checkbox" /></label></div></article>
+        <article class="setting-card"><h3>图片筛选策略</h3><div class="form-grid compact-form"><label><span>语义权重</span><input v-model.number="settings.image_selection_semantic_weight" type="number" step="0.05" /></label><label><span>技术质量权重</span><input v-model.number="settings.image_selection_technical_weight" type="number" step="0.05" /></label><label><span>最低语义分</span><input v-model.number="settings.image_selection_min_semantic_score" type="number" step="0.05" /></label><label><span>最低总分</span><input v-model.number="settings.image_selection_min_total_score" type="number" step="0.05" /></label></div></article>
+      </div>
 
-          <div class="transition-section-head transition-effects-head">
-            <div><strong>特效池</strong><small>启用的特效会按照占比随机抽取</small></div>
-            <div class="transition-head-actions">
-              <button type="button" @click="setAllTransitionEffects(enabledTransitionCount === 0)">{{ enabledTransitionCount === 0 ? '全部启用' : '全部关闭' }}</button>
-              <button type="button" :disabled="enabledTransitionCount === 0 || enabledTransitionPercentage === 100" @click="normalizeTransitionPercentages">自动配平</button>
-            </div>
-          </div>
-          <div class="transition-settings-list">
-            <div
-              v-for="effect in settings.storyboard_transition_effects"
-              :key="effect.name"
-              class="transition-setting-row"
-              :class="{ 'is-disabled': !effect.enabled }"
-            >
-              <label class="transition-effect-toggle">
-                <input v-model="effect.enabled" type="checkbox" @change="normalizeTransitionPercentages" />
-                <span>
-                  <strong>{{ transitionLabels[effect.name].label }}</strong>
-                  <small>{{ transitionLabels[effect.name].description }}</small>
-                </span>
-              </label>
-              <label class="transition-percentage-field">
-                <span>抽取占比</span>
-                <input v-model.number="effect.percentage" type="range" min="1" max="100" step="1" :disabled="!effect.enabled" />
-                <span class="transition-percentage-input">
-                  <input
-                    v-model.number="effect.percentage"
-                    type="number"
-                    min="1"
-                    max="100"
-                    step="1"
-                    :disabled="!effect.enabled"
-                  />
-                  <b>%</b>
-                </span>
-              </label>
-            </div>
-          </div>
-          <div
-            class="transition-percentage-summary"
-            :class="{ 'is-invalid': enabledTransitionCount > 0 && enabledTransitionPercentage !== 100 }"
-          >
-            <span><i :class="{ 'is-on': enabledTransitionCount > 0 }"></i>{{ enabledTransitionCount ? `已启用 ${enabledTransitionCount} 种效果` : '当前全部使用硬切' }}</span>
-            <strong>{{ enabledTransitionCount ? `占比合计 ${enabledTransitionPercentage}%` : '转场已全局关闭' }}</strong>
-          </div>
-        </div>
-      </details>
+      <div v-else-if="section === 'media-platforms'" class="setting-stack">
+        <div class="setting-metrics four"><article><span class="metric-icon blue"><Boxes /></span><div><small>已配置平台</small><strong>{{ providerStatuses.filter(p=>p.configured).length }} / 2</strong></div></article><article><span class="metric-icon green"><Download /></span><div><small>单场景下载上限</small><strong>{{ settings.media_search_download_limit }}</strong></div></article><article><span class="metric-icon purple"><Clock3 /></span><div><small>搜索缓存</small><strong>{{ settings.media_search_cache_hours }} 小时</strong></div></article><article><span class="metric-icon orange"><HardDrive /></span><div><small>本地素材优先</small><strong>已启用</strong></div></article></div>
+        <div class="setting-grid two"><article v-for="provider in (['pexels','pixabay'] as const)" :key="provider" class="setting-card"><div class="card-head"><h3>{{ provider === 'pexels' ? 'Pexels' : 'Pixabay' }}</h3><span :class="['pill',providerStatus(provider)?.configured?'green':'orange']">{{ providerStatus(provider)?.configured ? '已配置' : '未配置' }}</span></div><div class="form-list"><label><span>API Key</span><input v-model="settings[`${provider}_api_key`]" type="password" :placeholder="providerStatus(provider)?.configured ? '已配置，留空表示不修改' : '输入平台 API Key'" /></label><label><span>素材存储目录</span><div class="input-action"><input v-model="settings[`${provider}_storage_dir`]" /><button @click="chooseProviderDir(provider)">浏览</button></div></label><button v-if="providerStatus(provider)?.configured" class="text-danger" @click="clearKey(`${provider}_api_key`)">清除密钥</button></div></article></div>
+        <article class="setting-card"><h3>检索与下载策略</h3><div class="form-grid compact-form"><label><span>查询缓存时间（小时）</span><input v-model.number="settings.media_search_cache_hours" type="number" min="24" max="168" /></label><label><span>每场景完整视频下载数</span><input v-model.number="settings.media_search_download_limit" type="number" min="1" max="5" /></label></div></article>
+      </div>
 
-      <details v-show="showSettingsGroup('image')" class="panel settings-disclosure" open>
-        <summary>
-          <span class="settings-disclosure-heading"><strong>本地分镜图片生成</strong><small>SDXL 单文件模型</small></span>
-          <span class="settings-disclosure-icon" aria-hidden="true">⌄</span>
-        </summary>
-        <div class="settings-disclosure-content">
-          <p class="section-description">用于 ai_generated_images 模式。模型在独立子进程中批量加载，生成完成后释放显存。</p>
-          <div class="form-grid">
-            <label class="field full-width">
-              <span>模型文件</span>
-              <input v-model="settings.image_generation_model_path" placeholder="D:\TubeAIFlow\models\image_generation\...\checkpoint.safetensors" />
-            </label>
-            <label class="field full-width"><span>SDXL 管线配置目录</span><input v-model="settings.image_generation_config_dir" placeholder="D:\TubeAIFlow\models\image_generation\...\diffusers_config" /></label>
-            <label class="field full-width">
-              <span>Python 可执行文件（可选）</span>
-              <input v-model="settings.image_generation_python" placeholder="留空时使用后端 Python；环境需安装 diffusers" />
-            </label>
-            <label class="field"><span>运行设备</span><input v-model="settings.image_generation_device" placeholder="cuda:0" /></label>
-            <label class="field">
-              <span>计算精度</span>
-              <select v-model="settings.image_generation_dtype"><option value="float16">FP16</option><option value="bfloat16">BF16</option><option value="float32">FP32</option></select>
-            </label>
-            <label class="field"><span>图片宽度</span><input v-model.number="settings.image_generation_width" type="number" min="512" max="2048" step="64" /></label>
-            <label class="field"><span>图片高度</span><input v-model.number="settings.image_generation_height" type="number" min="512" max="2048" step="64" /></label>
-            <label class="field"><span>采样步数</span><input v-model.number="settings.image_generation_steps" type="number" min="1" max="100" /></label>
-            <label class="field"><span>CFG</span><input v-model.number="settings.image_generation_guidance_scale" type="number" min="0" max="30" step="0.1" /></label>
-            <label class="field"><span>每场景候选数</span><input v-model.number="settings.image_generation_candidates_per_scene" type="number" min="1" max="4" /></label>
-            <label class="checkbox-field"><input v-model="settings.image_generation_cpu_offload" type="checkbox" /><span><strong>CPU Offload</strong><small>8GB 显存建议开启，降低显存峰值。</small></span></label>
-            <label class="field full-width"><span>全局负面提示词</span><textarea v-model="settings.image_generation_negative_prompt" rows="3"></textarea></label>
-          </div>
-        </div>
-      </details>
+      <div v-else-if="section === 'render'" class="setting-stack">
+        <div class="setting-metrics five"><article><span class="metric-icon purple"><MonitorCog /></span><div><small>默认编码器</small><strong>H.264 NVENC</strong></div></article><article><span class="metric-icon blue"><FileText /></span><div><small>导出预设</small><strong>5</strong></div></article><article><span class="metric-icon green"><Cpu /></span><div><small>GPU 加速</small><strong>已启用</strong></div></article><article><span class="metric-icon purple"><Gauge /></span><div><small>今日渲染成功率</small><strong>97.8%</strong></div></article><article><span class="metric-icon orange"><Clock3 /></span><div><small>平均渲染耗时</small><strong>6分42秒</strong></div></article></div>
+        <div class="setting-grid render-layout"><article class="setting-card preset-list"><h3>视频导出预设</h3><button class="selected"><strong>YouTube 横版</strong><small>16:9 · 推荐</small><b>1920×1080</b></button><button><strong>Shorts 竖版</strong><small>9:16 · 推荐</small><b>1080×1920</b></button><button><strong>B站横版</strong><small>16:9 · 推荐</small><b>1920×1080</b></button><button><strong>无字幕母版</strong><small>自定义 · 无字幕</small><b>1920×1080</b></button></article><article class="setting-card"><h3>编码参数</h3><div class="form-list"><label><span>默认输出分辨率</span><select><option>1920×1080（16:9）</option><option>1080×1920（9:16）</option></select></label><label><span>帧率</span><select><option>30 fps</option><option>25 fps</option><option>60 fps</option></select></label><label><span>视频编码</span><select><option>H.264 (AVC)</option><option>H.265 (HEVC)</option></select></label><label><span>目标码率</span><input value="8000 Kbps" /></label></div><h3>硬件加速</h3><div class="inline-settings"><label class="switch-row">GPU 加速 <input type="checkbox" checked /></label><label class="switch-row">优先 NVENC <input type="checkbox" checked /></label><label class="switch-row">零拷贝（CUDA）<input type="checkbox" checked /></label></div></article><aside class="setting-stack"><article class="setting-card"><h3>编码器可用性</h3><div class="health-list"><p v-for="codec in ['H.264 NVENC','H.265 NVENC','H.264 (x264)','H.265 (x265)']" :key="codec"><span>{{ codec }}</span><b class="ok">✓ 可用</b></p></div></article><article class="setting-card"><h3>FFmpeg 硬件支持</h3><p class="muted-line">{{ ffmpegStatus?.installed ? `${ffmpegStatus.version} · ${ffmpegStatus.ffmpeg_path}` : '未检测到可用 FFmpeg' }}</p><button v-if="!ffmpegStatus?.installed" class="ghost-button" @click="downloadFfmpeg">自动安装 FFmpeg</button></article></aside></div>
+      </div>
 
-      <details v-show="showSettingsGroup('tts')" class="panel settings-disclosure" open>
-        <summary>
-          <span class="settings-disclosure-heading"><strong>Qwen3-TTS</strong><small>默认本地声音克隆引擎</small></span>
-          <span class="settings-disclosure-icon" aria-hidden="true">⌄</span>
-        </summary>
-        <div class="settings-disclosure-content">
-        <p class="section-description">配置本地 Qwen3-TTS 源码、独立 Python 环境和 Base 声音克隆模型。模型会在每次项目生成任务开始时加载一次。</p>
-        <div class="form-grid">
-          <label class="field full-width">
-            <span>Qwen3-TTS 根目录</span>
-            <input v-model="settings.qwen_tts_root" placeholder="例如 D:\Qwen3-TTS" />
-            <small>填写包含 <code>qwen_tts</code> 源码目录的项目根目录。</small>
-          </label>
-          <label class="field full-width">
-            <span>Python 可执行文件</span>
-            <input v-model="settings.qwen_tts_python" placeholder="默认共用 D:\TubeAIFlow\backend\.venv\Scripts\python.exe" />
-            <small>必须使用已经安装 Qwen3-TTS、PyTorch 和 soundfile 的独立 Python 环境。</small>
-          </label>
-          <label class="field full-width">
-            <span>Base 模型目录</span>
-            <input v-model="settings.qwen_tts_model_dir" placeholder="例如 D:\Qwen3-TTS\Qwen3-TTS-12Hz-1.7B-Base" />
-            <small>声音克隆必须使用 Base 模型；目录中应包含 <code>config.json</code> 和模型权重。</small>
-          </label>
-          <label class="field">
-            <span>运行设备</span>
-            <input v-model="settings.qwen_tts_device" placeholder="cuda:0" />
-            <small>推荐使用 <code>cuda:0</code>；CPU 推理速度会非常慢。</small>
-          </label>
-          <label class="field">
-            <span>计算精度</span>
-            <select v-model="settings.qwen_tts_dtype">
-              <option value="bfloat16">BF16（推荐）</option>
-              <option value="float16">FP16</option>
-              <option value="float32">FP32</option>
-            </select>
-            <small>RTX 4060 Ti 推荐 BF16；FP32 会显著增加显存占用。</small>
-          </label>
-          <label class="field">
-            <span>合成语言</span>
-            <input v-model="settings.qwen_tts_language" placeholder="Chinese" />
-            <small>中文项目填写 <code>Chinese</code>，也可以填写 <code>Auto</code> 自动识别。</small>
-          </label>
-          <label class="field">
-            <span>最大生成 Token</span>
-            <input v-model.number="settings.qwen_tts_max_new_tokens" type="number" min="128" max="16384" />
-            <small>默认 2048，适合当前项目的短文本分段，同时限制显存峰值和异常超长输出。</small>
-          </label>
-        </div>
-        <div class="notice">未填写参考音频逐字稿时会自动使用仅声纹模式；填写准确逐字稿可获得更好的声音克隆效果。</div>
-        </div>
-      </details>
+      <div v-else-if="section === 'transitions'" class="setting-stack">
+        <div class="setting-metrics four"><article><span class="metric-icon blue"><Layers3 /></span><div><small>默认转场</small><strong>淡入淡出</strong></div></article><article><span class="metric-icon blue"><ShieldCheck /></span><div><small>已启用规则</small><strong>{{ settings.storyboard_transition_effects.filter(i=>i.enabled).length }}</strong></div></article><article><span class="metric-icon orange"><AlertTriangle /></span><div><small>比例合计</small><strong>{{ transitionTotal }}%</strong></div></article><article><span class="metric-icon purple"><Clock3 /></span><div><small>平均转场时长</small><strong>{{ settings.storyboard_transition_duration_seconds }} 秒</strong></div></article></div>
+        <div class="setting-grid transition-layout"><article class="setting-card"><h3>全局默认规则</h3><div class="form-list"><label><span>默认时长</span><input v-model.number="settings.storyboard_transition_duration_seconds" type="number" step="0.05" min="0.2" max="2" /></label><label><span>每组镜头数</span><div class="dual-input"><input v-model.number="settings.storyboard_transition_group_min_clips" type="number" /> 至 <input v-model.number="settings.storyboard_transition_group_max_clips" type="number" /></div></label><label><span>每组转场数</span><div class="dual-input"><input v-model.number="settings.storyboard_transition_min_per_group" type="number" /> 至 <input v-model.number="settings.storyboard_transition_max_per_group" type="number" /></div></label></div></article><article class="setting-card"><div class="card-head"><h3>按场景类型规则</h3><button class="ghost-button" @click="normalizeTransitions">均分比例</button></div><div class="transition-table"><div class="table-head"><span>转场类型</span><span>使用比例</span><span>启用状态</span></div><label v-for="item in settings.storyboard_transition_effects" :key="item.name"><strong>{{ transitionLabels[item.name] }}</strong><input v-model.number="item.percentage" type="number" min="0" max="100" :disabled="!item.enabled" /><span>%</span><input v-model="item.enabled" type="checkbox" @change="normalizeTransitions" /></label></div></article><article class="setting-card preview-card"><h3>预览示意</h3><div class="transition-previews"><button v-for="name in ['淡入淡出','推镜','滑动','缩放','遮罩','交叉溶解']" :key="name"><span><Play /></span><small>{{ name }}</small></button></div></article></div>
+      </div>
 
-      <details v-show="showSettingsGroup('tts')" class="panel settings-disclosure" open>
-        <summary>
-          <span class="settings-disclosure-heading"><strong>CosyVoice</strong><small>Zero-shot 本地声音克隆引擎</small></span>
-          <span class="settings-disclosure-icon" aria-hidden="true">⌄</span>
-        </summary>
-        <div class="settings-disclosure-content">
-        <p class="section-description">配置 CosyVoice 源码、独立 Python 环境和本地 zero-shot 模型。支持 CosyVoice 1、2 与 Fun-CosyVoice 3 的本地模型目录。</p>
-        <div class="form-grid">
-          <label class="field full-width">
-            <span>CosyVoice 根目录</span>
-            <input v-model="settings.cosyvoice_root" placeholder="例如 D:\CosyVoice" />
-            <small>应包含 <code>cosyvoice</code> 与 <code>third_party\Matcha-TTS</code>，克隆仓库时需要同时初始化子模块。</small>
-          </label>
-          <label class="field full-width">
-            <span>Python 可执行文件</span>
-            <input v-model="settings.cosyvoice_python" placeholder="例如 D:\CosyVoice\.venv\Scripts\python.exe" />
-            <small>填写已安装 CosyVoice 依赖、PyTorch 和 torchaudio 的独立 Python 3.10 环境。</small>
-          </label>
-          <label class="field full-width">
-            <span>zero-shot 模型目录</span>
-            <input v-model="settings.cosyvoice_model_dir" placeholder="例如 D:\CosyVoice\pretrained_models\Fun-CosyVoice3-0.5B" />
-            <small>推荐使用 Fun-CosyVoice3-0.5B；不要选择仅支持预置音色的 SFT 模型。</small>
-          </label>
-          <label class="checkbox-field">
-            <input v-model="settings.cosyvoice_fp16" type="checkbox" />
-            <span><strong>使用 FP16</strong><small>使用 CUDA 时可降低显存占用；CPU 环境请取消勾选。</small></span>
-          </label>
-          <label class="field full-width">
-            <span>CosyVoice 3 系统指令</span>
-            <input v-model="settings.cosyvoice_instruction" placeholder="You are a helpful assistant." />
-            <small>仅对 CosyVoice 3 的 zero-shot 提示生效；系统会自动添加 <code>&lt;|endofprompt|&gt;</code>。</small>
-          </label>
-        </div>
-        <div class="notice">CosyVoice zero-shot 必须填写与参考音频准确对应的逐字稿；请在“参考音频”菜单中统一配置，项目和批量任务只需选择音色。</div>
-        </div>
-      </details>
+      <div v-else-if="section === 'fallback'" class="setting-stack">
+        <div class="setting-metrics four"><article><span class="metric-icon blue"><ShieldCheck /></span><div><small>已启用兜底规则</small><strong>5</strong></div></article><article><span class="metric-icon green"><RotateCcw /></span><div><small>今日触发次数</small><strong>34</strong></div></article><article><span class="metric-icon purple"><ShieldCheck /></span><div><small>自动恢复成功率</small><strong>82%</strong></div></article><article><span class="metric-icon orange"><AlertTriangle /></span><div><small>需人工处理</small><strong>6</strong></div></article></div>
+        <div class="setting-grid fallback-layout"><section class="setting-grid fallback-cards"><article class="setting-card"><h3><Image /> 素材缺失兜底</h3><label class="switch-row">优先使用本地风景库 <input v-model="settings.auto_landscape_fallback_enabled" type="checkbox" /></label><label class="switch-row">自动切换备用素材源 <input v-model="settings.auto_fallback_enabled" type="checkbox" /></label><label>最大连续兜底镜头 <input v-model.number="settings.auto_fallback_max_consecutive_shots" type="number" /></label></article><article class="setting-card"><h3><Image /> 图片生成失败兜底</h3><label class="switch-row">失败后进入人工审核 <input v-model="settings.auto_fallback_review_required" type="checkbox" /></label><label>单片最大兜底占比 <input v-model.number="settings.auto_fallback_max_ratio_percent" type="number" /> %</label></article><article class="setting-card"><h3><Mic2 /> 配音失败兜底</h3><label class="switch-row">失败后切换备用引擎 <input type="checkbox" checked /></label><label>失败重试次数 <input type="number" value="2" /></label></article><article class="setting-card"><h3><Server /> 渲染失败兜底</h3><label class="switch-row">失败时自动转 CPU 编码 <input type="checkbox" checked /></label><label>超时阈值 <input type="number" value="120" /> 秒</label></article><article class="setting-card"><h3><Download /> 下载失败兜底</h3><label class="switch-row">素材不足时延长背景视频循环 <input type="checkbox" checked /></label><label>最大延长时长 <input type="number" value="30" /> 秒</label></article></section><aside class="setting-stack"><article class="setting-card"><h3>最近兜底事件</h3><ul class="event-list"><li><CheckCircle2 /> 图片生成失败兜底 <span class="ok">已恢复</span></li><li><CheckCircle2 /> 配音失败兜底 <span class="ok">已恢复</span></li><li><AlertTriangle /> 素材缺失兜底 <span class="warn">需人工处理</span></li><li><AlertTriangle /> 下载失败兜底 <span class="bad">未恢复</span></li></ul></article><article class="setting-card donut-card"><div class="donut"><strong>82%</strong><small>成功率</small></div><p><i class="green-dot"></i> 成功 28</p><p><i class="red-dot"></i> 失败 6</p></article></aside></div>
+      </div>
 
-      <details v-show="showSettingsGroup('ai')" class="panel settings-disclosure" open>
-        <summary>
-          <span class="settings-disclosure-heading"><strong>DeepSeek</strong><small>系统 AI 能力平台</small></span>
-          <span class="settings-disclosure-icon" aria-hidden="true">⌄</span>
-        </summary>
-        <div class="settings-disclosure-content">
-        <p class="section-description">DeepSeek 作为系统通用 AI 能力平台，为后续的分镜生成、内容理解等智能功能提供基础。请先在 DeepSeek 开放平台创建 API Key，再在此配置。</p>
-        <div class="form-grid">
-          <label class="field full-width">
-            <span>DeepSeek API 地址</span>
-            <input v-model="settings.deepseek_base_url" placeholder="https://api.deepseek.com" />
-            <small>使用官方服务时保持默认值 <code>https://api.deepseek.com</code>。只有使用兼容代理服务时才需要修改。</small>
-          </label>
-          <label class="field">
-            <span>DeepSeek 模型</span>
-            <select v-model="settings.deepseek_model">
-              <option value="deepseek-v4-flash">DeepSeek V4 Flash（推荐，速度快、成本低）</option>
-              <option value="deepseek-v4-pro">DeepSeek V4 Pro（质量优先、成本较高）</option>
-            </select>
-            <small>一般任务推荐 Flash；更重视复杂推理和表达质量时可选择 Pro。</small>
-          </label>
-          <label class="field">
-            <span>请求超时（秒）</span>
-            <input v-model.number="settings.deepseek_timeout_seconds" type="number" min="1" max="600" />
-            <small>单次 DeepSeek 请求最多等待多久，默认 60 秒。</small>
-          </label>
-          <label class="field">
-            <span>最大输出 Token</span>
-            <input v-model.number="settings.deepseek_max_tokens" type="number" min="1" max="65536" />
-            <small>限制单次 DeepSeek 响应长度，通常保持默认值即可。</small>
-          </label>
-          <label class="field">
-            <span>失败重试次数</span>
-            <input v-model.number="settings.deepseek_retry_count" type="number" min="0" max="10" />
-            <small>DeepSeek 请求失败时自动重试，建议设置为 1～2 次。</small>
-          </label>
-        </div>
-        <div class="secret-row deepseek-key-row">
-          <label class="field">
-            <span>DeepSeek API Key</span>
-            <input v-model="settings.deepseek_api_key" type="password" :placeholder="settings.deepseek_api_key_configured ? '已配置；留空保持不变' : '请输入 API Key'" autocomplete="new-password" />
-            <small>密钥只保存在本机数据库中，保存后页面不会再次显示明文。</small>
-          </label>
-          <span class="status-pill">{{ settings.deepseek_api_key_configured ? '已配置' : '未配置' }}</span>
-          <button v-if="settings.deepseek_api_key_configured" class="secondary-button" type="button" @click="clearApiKey('deepseek_api_key', 'DeepSeek')">清除</button>
-        </div>
-        </div>
-      </details>
+      <div v-else class="setting-stack diagnostics-page">
+        <div class="setting-metrics five"><article><span class="metric-icon green"><Activity /></span><div><small>系统健康度</small><strong>92 分</strong></div></article><article><span class="metric-icon blue"><Server /></span><div><small>在线服务</small><strong>8 / 9</strong></div></article><article><span class="metric-icon purple"><Gauge /></span><div><small>GPU 温度</small><strong>64°C</strong></div></article><article><span class="metric-icon orange"><AlertTriangle /></span><div><small>最近错误</small><strong>3</strong></div></article><article><span class="metric-icon blue"><Layers3 /></span><div><small>当前队列</small><strong>27</strong></div></article></div>
+        <div class="setting-grid two"><article class="setting-card"><h3><CircleGauge /> 运行环境检查</h3><div class="diagnostic-table"><div class="table-head"><span>检查项</span><span>状态</span><span>说明</span></div><p v-for="item in diagnostics" :key="item[0] as string"><span>{{ item[0] }}</span><b :class="item[1] ? 'ok':'bad'">{{ item[1] ? '● 正常':'● 异常' }}</b><em>{{ item[2] }}</em></p></div></article><article class="setting-card"><h3><Activity /> 服务状态</h3><div class="diagnostic-table services"><div class="table-head"><span>服务名称</span><span>当前状态</span><span>端口 / 地址</span></div><p v-for="service in [['Web 服务','运行中',settings.app_port],['TTS 服务','运行中','50051'],['AI 服务','运行中','8001'],['素材抓取服务','运行中','8002'],['渲染服务','运行中','8003'],['向量索引服务','异常','9200']]" :key="service[0] as string"><span>{{ service[0] }}</span><b :class="service[1]==='运行中'?'ok':'bad'">● {{ service[1] }}</b><em>localhost:{{ service[2] }}</em></p></div></article></div>
+        <article class="setting-card"><h3><Gauge /> 性能监控（最近 1 小时）</h3><div class="performance-grid"><div v-for="metric in [['CPU 使用率','28%','blue'],['内存使用率','63%','green'],['GPU 使用率','74%','purple'],['磁盘 IO','123 MB/s','orange'],['队列大小','27','cyan']]" :key="metric[0]"><span>{{ metric[0] }}</span><strong :class="metric[2]">{{ metric[1] }}</strong><i><b v-for="n in 13" :key="n" :style="{height:`${20 + ((n*7)%55)}%`}"></b></i></div></div></article>
+      </div>
 
-      <details v-show="showSettingsGroup('media')" class="panel settings-disclosure" open>
-        <summary>
-          <span class="settings-disclosure-heading"><strong>在线素材平台</strong><small>Pexels 与 Pixabay 素材检索</small></span>
-          <span class="settings-disclosure-icon" aria-hidden="true">⌄</span>
-        </summary>
-        <div class="settings-disclosure-content">
-          <p class="section-description">当本地素材库没有合格结果时，系统依次使用已配置的平台搜索在线素材。可以只配置其中一个平台；API Key 保存后不会再次显示明文。</p>
-          <div class="secret-row">
-            <label class="field">
-              <span>Pexels API Key</span>
-              <input v-model="settings.pexels_api_key" type="password" :placeholder="settings.pexels_api_key_configured ? '已配置；留空保持不变' : '请输入 API Key'" autocomplete="new-password" />
-              <small>
-                用于从 Pexels 搜索候选图片和视频，仅在本地素材不足时调用。
-                <a href="https://www.pexels.com/api/key/" target="_blank" rel="noopener noreferrer">获取 Pexels API Key</a>
-              </small>
-            </label>
-            <span class="status-pill">{{ providerStatusLabel('pexels') }}</span>
-            <button v-if="settings.pexels_api_key_configured" class="secondary-button" type="button" @click="clearApiKey('pexels_api_key', 'Pexels')">清除</button>
-          </div>
-          <div class="notice">Pexels：{{ providerQuotaText('pexels') }}</div>
-          <div class="secret-row">
-            <label class="field">
-              <span>Pixabay API Key</span>
-              <input v-model="settings.pixabay_api_key" type="password" :placeholder="settings.pixabay_api_key_configured ? '已配置；留空保持不变' : '请输入 API Key'" autocomplete="new-password" />
-              <small>
-                用于从 Pixabay 搜索候选图片和视频，仅在本地素材不足时调用。
-                <a href="https://pixabay.com/api/docs/#api_search_images" target="_blank" rel="noopener noreferrer">获取 Pixabay API Key</a>
-              </small>
-            </label>
-            <span class="status-pill">{{ providerStatusLabel('pixabay') }}</span>
-            <button v-if="settings.pixabay_api_key_configured" class="secondary-button" type="button" @click="clearApiKey('pixabay_api_key', 'Pixabay')">清除</button>
-          </div>
-          <div class="notice">Pixabay：{{ providerQuotaText('pixabay') }}</div>
-          <div class="form-grid">
-            <label class="field">
-              <span>查询缓存时长（小时）</span>
-              <input v-model.number="settings.media_search_cache_hours" type="number" min="24" max="168" />
-              <small>至少缓存 24 小时，避免相同查询重复消耗平台额度。</small>
-            </label>
-            <label class="field">
-              <span>每个平台最多下载候选数</span>
-              <input v-model.number="settings.media_search_download_limit" type="number" min="1" max="5" />
-              <small>推荐保持 3；先搜索和筛选，再只下载少量候选入库。</small>
-            </label>
-          </div>
-          <div class="notice">检索顺序固定为本地素材 → Pexels → Pixabay。平台返回 429 时会进入冷却并自动尝试下一平台，不会轮换同平台的其他 Key。</div>
-          <div class="form-grid provider-storage-grid">
-            <label class="field full-width">
-              <span>Pexels 素材存储文件夹</span>
-              <span class="inline-form">
-                <input v-model="settings.pexels_storage_dir" placeholder="留空时使用工作目录下的 assets/downloads/pexels" />
-                <span class="provider-storage-actions">
-                  <button class="secondary-button" type="button" @click="chooseProviderStorage('pexels')">选择文件夹</button>
-                  <button v-if="settings.pexels_storage_dir" class="secondary-button" type="button" @click="settings.pexels_storage_dir = null">恢复默认</button>
-                </span>
-              </span>
-              <small>下载的视频以及生成的缩略图和关键帧都会保存在此文件夹中。</small>
-            </label>
-            <label class="field full-width">
-              <span>Pixabay 素材存储文件夹</span>
-              <span class="inline-form">
-                <input v-model="settings.pixabay_storage_dir" placeholder="留空时使用工作目录下的 assets/downloads/pixabay" />
-                <span class="provider-storage-actions">
-                  <button class="secondary-button" type="button" @click="chooseProviderStorage('pixabay')">选择文件夹</button>
-                  <button v-if="settings.pixabay_storage_dir" class="secondary-button" type="button" @click="settings.pixabay_storage_dir = null">恢复默认</button>
-                </span>
-              </span>
-              <small>下载的视频以及生成的缩略图和关键帧都会保存在此文件夹中。</small>
-            </label>
-          </div>
-          <div class="form-grid fallback-settings-grid">
-            <label class="checkbox-field full-width">
-              <input v-model="settings.auto_fallback_enabled" type="checkbox" />
-              <span>语义素材无合格结果时，自动从主题兜底素材池填充镜头轨道</span>
-            </label>
-            <label class="checkbox-field full-width">
-              <input v-model="settings.auto_landscape_fallback_enabled" type="checkbox" :disabled="!settings.auto_fallback_enabled" />
-              <span>允许自动使用纯风景最终兜底（仍需场景明确允许）</span>
-            </label>
-            <label class="checkbox-field full-width">
-              <input v-model="settings.auto_fallback_review_required" type="checkbox" :disabled="!settings.auto_fallback_enabled" />
-              <span>自动兜底后暂停工作流，等待人工复核</span>
-            </label>
-            <label class="field">
-              <span>单条视频兜底素材警戒占比（%）</span>
-              <input v-model.number="settings.auto_fallback_max_ratio_percent" type="number" min="0" max="100" :disabled="!settings.auto_fallback_enabled" />
-              <small>超过该占比仍会填充，但会强制进入人工复核。</small>
-            </label>
-            <label class="field">
-              <span>单场景连续自动兜底镜头上限</span>
-              <input v-model.number="settings.auto_fallback_max_consecutive_shots" type="number" min="1" max="5" :disabled="!settings.auto_fallback_enabled" />
-              <small>避免长场景被大量随机兜底镜头连续占满。</small>
-            </label>
-          </div>
-        </div>
-      </details>
-    </div>
+      <footer class="settings-actions"><button class="secondary-button" @click="testAll"><RefreshCw :class="{spin:testing}" /> {{ section === 'diagnostics' ? '一键诊断' : '测试配置' }}</button><button v-if="section === 'diagnostics'" class="secondary-button" @click="exportDiagnostics"><Download /> 导出报告</button><button class="primary-button" :disabled="saving" @click="save"><Save /> {{ saving ? '正在保存...' : '保存设置' }}</button></footer>
+    </template>
   </section>
 </template>

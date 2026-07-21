@@ -1,26 +1,26 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
-import AssetLibrary from './pages/assets/AssetLibrary.vue'
-import AssetSection from './pages/assets/AssetSection.vue'
-import BatchCreate from './pages/batches/BatchCreate.vue'
-import BatchDetail from './pages/batches/BatchDetail.vue'
-import BatchList from './pages/batches/BatchList.vue'
-import Dashboard from './pages/Dashboard.vue'
-import ProjectConfig from './pages/projects/ProjectConfig.vue'
-import ProjectCreate from './pages/projects/ProjectCreate.vue'
-import ProjectDelivery from './pages/projects/ProjectDelivery.vue'
-import ProjectList from './pages/projects/ProjectList.vue'
-import ProjectMedia from './pages/projects/ProjectMedia.vue'
-import ProjectOverview from './pages/projects/ProjectOverview.vue'
-import ProjectRender from './pages/projects/ProjectRender.vue'
-import ProjectShell from './pages/projects/ProjectShell.vue'
-import ProjectStoryboardWorkspace from './pages/projects/ProjectStoryboardWorkspace.vue'
-import ProjectSubtitles from './pages/projects/ProjectSubtitles.vue'
-import ProjectWorkspace from './pages/projects/ProjectWorkspace.vue'
-import SettingsLayout from './pages/settings/SettingsLayout.vue'
-import SystemSettings from './pages/settings/SystemSettings.vue'
-import VoiceProfiles from './pages/settings/VoiceProfiles.vue'
-import TaskCenter from './pages/TaskCenter.vue'
+const AssetLibrary = () => import('./pages/assets/AssetLibrary.vue')
+const AssetSection = () => import('./pages/assets/AssetSection.vue')
+const BatchCreate = () => import('./pages/batches/BatchCreate.vue')
+const BatchDetail = () => import('./pages/batches/BatchDetail.vue')
+const BatchList = () => import('./pages/batches/BatchList.vue')
+const Dashboard = () => import('./pages/Dashboard.vue')
+const ProjectConfig = () => import('./pages/projects/ProjectConfig.vue')
+const ProjectCreate = () => import('./pages/projects/ProjectCreate.vue')
+const ProjectDelivery = () => import('./pages/projects/ProjectDelivery.vue')
+const ProjectList = () => import('./pages/projects/ProjectList.vue')
+const ProjectMedia = () => import('./pages/projects/ProjectMedia.vue')
+const ProjectOverview = () => import('./pages/projects/ProjectOverview.vue')
+const ProjectRender = () => import('./pages/projects/ProjectRender.vue')
+const ProjectShell = () => import('./pages/projects/ProjectShell.vue')
+const ProjectStoryboardWorkspace = () => import('./pages/projects/ProjectStoryboardWorkspace.vue')
+const ProjectSubtitles = () => import('./pages/projects/ProjectSubtitles.vue')
+const ProjectWorkspace = () => import('./pages/projects/ProjectWorkspace.vue')
+const SettingsLayout = () => import('./pages/settings/SettingsLayout.vue')
+const SystemSettings = () => import('./pages/settings/SystemSettings.vue')
+const VoiceProfiles = () => import('./pages/settings/VoiceProfiles.vue')
+const TaskCenter = () => import('./pages/TaskCenter.vue')
 
 const router = createRouter({
   history: createWebHistory(),

@@ -183,6 +183,41 @@ class VoiceProfileTests(unittest.TestCase):
                     original_filename="voice.wav",
                 )
 
+    def test_duplicate_profile_copies_audio_and_reports_project_usage(self) -> None:
+        with Session(self.engine) as session:
+            voice = voice_profile_service.create_profile(
+                session,
+                name="纪录片旁白",
+                tts_engine="qwen3_tts",
+                reference_audio_text="参考文字",
+                tags=["旁白", "温和"],
+                source=io.BytesIO(b"reference-audio"),
+                original_filename="voice.wav",
+            )
+            project = project_service.create_project(session, "人物项目")
+            project_service.update_project_settings(
+                session,
+                project,
+                "人物项目",
+                str(self.root / "output"),
+                "story",
+                "",
+                voice_profile_id=voice.id,
+            )
+            project.status = "narration_in_progress"
+            session.add(project)
+            session.commit()
+
+            duplicate = voice_profile_service.duplicate_profile(session, voice)
+            profiles = {item["id"]: item for item in voice_profile_service.list_profiles(session)}
+
+            self.assertEqual(Path(duplicate.reference_audio_path).read_bytes(), b"reference-audio")
+            self.assertNotEqual(duplicate.reference_audio_path, voice.reference_audio_path)
+            self.assertEqual(voice_profile_service.serialize_profile(duplicate)["tags"], ["旁白", "温和"])
+            self.assertEqual(profiles[voice.id]["usage_count"], 1)
+            self.assertEqual(profiles[voice.id]["running_project_count"], 1)
+            self.assertEqual(profiles[duplicate.id]["usage_count"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -31,6 +31,7 @@ import { API_BASE_URL } from '../../api/client'
 import {
   createVoice,
   deleteVoice,
+  duplicateVoice as duplicateVoiceProfile,
   listVoices,
   updateVoice,
   type VoiceProfile,
@@ -60,6 +61,9 @@ const textFilter = ref('')
 const page = ref(1)
 const pageSize = ref(10)
 const onlyExceptions = ref(false)
+const recentOnly = ref(false)
+const tags = ref<string[]>([])
+const newTag = ref('')
 
 const selectedVoice = computed(() => voices.value.find((item) => item.id === selectedVoiceId.value) || null)
 const filteredVoices = computed(() => {
@@ -71,7 +75,8 @@ const filteredVoices = computed(() => {
     const hasText = Boolean(voice.reference_audio_text.trim())
     const matchesText = !textFilter.value || (textFilter.value === 'ready' ? hasText : !hasText)
     const matchesException = !onlyExceptions.value || !hasText
-    return matchesKeyword && matchesEngine && matchesText && matchesException
+    const matchesRecent = !recentOnly.value || new Date(voice.created_at).getTime() >= Date.now() - 7 * 24 * 60 * 60 * 1000
+    return matchesKeyword && matchesEngine && matchesText && matchesException && matchesRecent
   })
 })
 const totalPages = computed(() => Math.max(1, Math.ceil(filteredVoices.value.length / pageSize.value)))
@@ -129,6 +134,8 @@ function openEditor(voice: VoiceProfile) {
   ttsEngine.value = voice.tts_engine
   referenceAudioText.value = voice.reference_audio_text
   cosyvoiceSpeed.value = voice.cosyvoice_speed
+  tags.value = [...(voice.tags || [])]
+  newTag.value = ''
   audioFile.value = null
   error.value = ''
   message.value = ''
@@ -141,6 +148,8 @@ function openCreate() {
   ttsEngine.value = 'qwen3_tts'
   referenceAudioText.value = ''
   cosyvoiceSpeed.value = 1
+  tags.value = []
+  newTag.value = ''
   audioFile.value = null
   error.value = ''
   message.value = ''
@@ -173,6 +182,7 @@ async function save() {
       tts_engine: ttsEngine.value,
       reference_audio_text: referenceAudioText.value.trim(),
       cosyvoice_speed: cosyvoiceSpeed.value,
+      tags: tags.value,
       file: audioFile.value,
     }
     const saved = selectedVoiceId.value
@@ -191,10 +201,31 @@ async function save() {
 
 async function duplicateVoice() {
   if (!selectedVoice.value) return
-  selectedVoiceId.value = ''
-  name.value = `${name.value} - 副本`
-  audioFile.value = null
-  error.value = '复制音色需要重新选择参考音频文件'
+  saving.value = true
+  error.value = ''
+  try {
+    const duplicated = await duplicateVoiceProfile(selectedVoice.value.id)
+    await load()
+    openEditor(voices.value.find((voice) => voice.id === duplicated.id) || duplicated)
+    showToast({ title: '音色已复制', description: `已创建“${duplicated.name}”。`, tone: 'success' })
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '复制音色失败'
+  } finally {
+    saving.value = false
+  }
+}
+
+function showCompatibility() {
+  showToast({
+    title: '引擎兼容说明',
+    description: 'Qwen3-TTS 支持无参考文本克隆；CosyVoice 必须填写参考音频逐字稿。两种引擎均建议使用清晰、无背景音乐的 WAV、MP3、FLAC 或 M4A 音频。',
+    tone: 'info',
+  })
+}
+
+function showRecent() {
+  recentOnly.value = true
+  page.value = 1
 }
 
 async function remove(voice: VoiceProfile) {
@@ -230,6 +261,7 @@ async function batchImport(event: Event) {
         tts_engine: 'qwen3_tts',
         reference_audio_text: '',
         cosyvoice_speed: 1,
+        tags: [],
         file,
       })
       completed += 1
@@ -249,7 +281,18 @@ function resetFilters() {
   engineFilter.value = ''
   textFilter.value = ''
   onlyExceptions.value = false
+  recentOnly.value = false
   page.value = 1
+}
+
+function addTag() {
+  const value = newTag.value.trim().slice(0, 20)
+  if (value && !tags.value.includes(value) && tags.value.length < 8) tags.value.push(value)
+  newTag.value = ''
+}
+
+function removeTag(tag: string) {
+  tags.value = tags.value.filter((item) => item !== tag)
 }
 
 onMounted(() => load(true))
@@ -269,7 +312,7 @@ onBeforeUnmount(() => { if (previewUrl.value.startsWith('blob:')) URL.revokeObje
           <Upload :size="17" /> {{ importing ? '导入中…' : '批量导入' }}
         </button>
         <input ref="batchInput" hidden multiple type="file" accept="audio/wav,audio/mpeg,audio/flac,audio/mp4,.wav,.mp3,.flac,.m4a" @change="batchImport" />
-        <button class="voice-help" type="button"><CircleHelp :size="17" /> 引擎兼容说明</button>
+        <button class="voice-help" type="button" @click="showCompatibility"><CircleHelp :size="17" /> 引擎兼容说明</button>
       </div>
     </header>
 
@@ -304,7 +347,7 @@ onBeforeUnmount(() => { if (previewUrl.value.startsWith('blob:')) URL.revokeObje
         <span class="voice-file"><strong>{{ voice.original_filename }}</strong><small>音频文件</small></span>
         <span><b class="voice-badge" :class="voice.reference_audio_text.trim() ? 'green' : 'orange'">{{ voice.reference_audio_text.trim() ? '已上传参考文本' : '缺少参考文本' }}</b></span>
         <span><b class="voice-badge green">可用</b></span>
-        <span>—</span>
+        <span>{{ voice.usage_count || 0 }}</span>
         <span class="table-audio" @click.stop><AudioPlayer :src="audioUrl(voice)" /></span>
         <span class="voice-date">{{ formatDate(voice.updated_at) }}</span>
         <span class="voice-row-actions" @click.stop><button type="button" @click="openEditor(voice)">编辑</button><button type="button" @click="openEditor(voice)">更多 <ChevronDown :size="12" /></button></span>
@@ -319,7 +362,7 @@ onBeforeUnmount(() => { if (previewUrl.value.startsWith('blob:')) URL.revokeObje
     <div class="voice-bottom-cards">
       <article><span class="red"><AlertTriangle /></span><div><small>缺少参考文本</small><strong>{{ exceptionCount }}</strong><button type="button" @click="onlyExceptions = true">查看详情 <ChevronRight :size="13" /></button></div></article>
       <article><span class="orange"><FileText /></span><div><small>文本已就绪</small><strong>{{ textReadyCount }}</strong><button type="button" @click="textFilter = 'ready'">查看详情 <ChevronRight :size="13" /></button></div></article>
-      <article><span class="blue"><Clock3 /></span><div><small>最近新增</small><strong>{{ recentCount }}</strong><button type="button">查看详情 <ChevronRight :size="13" /></button></div></article>
+      <article><span class="blue"><Clock3 /></span><div><small>最近新增</small><strong>{{ recentCount }}</strong><button type="button" @click="showRecent">查看详情 <ChevronRight :size="13" /></button></div></article>
     </div>
 
     <Transition name="drawer">
@@ -329,7 +372,7 @@ onBeforeUnmount(() => { if (previewUrl.value.startsWith('blob:')) URL.revokeObje
           <section class="drawer-section"><h2><i>1</i>基本信息</h2>
             <label class="drawer-field wide"><span>音色名称</span><input v-model="name" maxlength="120" placeholder="例如：纪录片女声" /></label>
             <div class="drawer-field-row"><label class="drawer-field"><span>配音引擎</span><select v-model="ttsEngine"><option value="qwen3_tts">Qwen3-TTS</option><option value="cosyvoice">CosyVoice</option></select></label><label class="drawer-field"><span>语言</span><select><option>普通话</option></select></label></div>
-            <div class="tag-row"><span>标签</span><div><b>知性 <X :size="10" /></b><b>旁白 <X :size="10" /></b><b>温和 <X :size="10" /></b><button type="button"><Plus :size="12" /></button></div></div>
+            <div class="tag-row"><span>标签</span><div><b v-for="tag in tags" :key="tag">{{ tag }} <button type="button" :aria-label="`删除标签 ${tag}`" @click="removeTag(tag)"><X :size="10" /></button></b><input v-model="newTag" maxlength="20" placeholder="添加标签" @keyup.enter="addTag" /><button type="button" aria-label="添加标签" :disabled="!newTag.trim() || tags.length >= 8" @click="addTag"><Plus :size="12" /></button></div></div>
           </section>
 
           <section class="drawer-section"><h2><i>2</i>参考音频</h2>
@@ -352,7 +395,7 @@ onBeforeUnmount(() => { if (previewUrl.value.startsWith('blob:')) URL.revokeObje
 
           <section v-if="ttsEngine === 'cosyvoice'" class="drawer-section"><h2><i>5</i>引擎参数</h2><label class="speed-control"><span>语速</span><input v-model.number="cosyvoiceSpeed" type="range" min="0.5" max="2" step="0.05" /><b>{{ cosyvoiceSpeed.toFixed(2) }}×</b></label></section>
           <section class="drawer-section"><h2><i>{{ ttsEngine === 'cosyvoice' ? 6 : 5 }}</i>引擎兼容提示</h2><div class="compatibility"><p><span></span>当前引擎兼容：<strong>{{ engineLabel(ttsEngine) }}</strong></p><p><em></em>建议保留清晰、无背景音乐的参考音频。</p></div></section>
-          <section v-if="selectedVoice" class="drawer-section"><h2><i>{{ ttsEngine === 'cosyvoice' ? 7 : 6 }}</i>关联项目</h2><div class="project-relation"><span>当前绑定项目：<strong>暂未提供统计</strong></span><span>运行中项目：<strong>—</strong></span></div></section>
+          <section v-if="selectedVoice" class="drawer-section"><h2><i>{{ ttsEngine === 'cosyvoice' ? 7 : 6 }}</i>关联项目</h2><div class="project-relation"><span>当前绑定项目：<strong>{{ selectedVoice.usage_count || 0 }}</strong></span><span>运行中项目：<strong>{{ selectedVoice.running_project_count || 0 }}</strong></span></div></section>
         </div>
         <p v-if="error" class="drawer-error">{{ error }}</p><p v-if="message" class="drawer-success">{{ message }}</p>
         <footer><button v-if="selectedVoice" class="delete" type="button" @click="remove(selectedVoice)"><Trash2 :size="15" /> 删除音色</button><span></span><button v-if="selectedVoice" class="copy" type="button" @click="duplicateVoice"><Copy :size="15" /> 复制音色</button><button class="save" type="button" :disabled="saving" @click="save">{{ saving ? '保存中…' : '保存' }}</button></footer>

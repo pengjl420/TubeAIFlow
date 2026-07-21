@@ -39,6 +39,8 @@ const projectId = String(route.params.id)
 const project = ref<Project | null>(null)
 const outputs = ref<ProjectOutputs | null>(null)
 const segments = ref<Segment[]>([])
+const segmentFilter = ref<'all' | 'pending' | 'completed' | 'failed'>('all')
+const segmentQuery = ref('')
 const editedText = reactive<Record<string, string>>({})
 const busySegments = reactive<Record<string, boolean>>({})
 const scriptText = ref('')
@@ -71,6 +73,17 @@ const oneClickFinishedAt = ref(0)
 const timerNow = ref(Date.now())
 
 const ttsStatus = ref<TtsStatus>({ total: 0, completed: 0, failed: 0, pending: 0 })
+const filteredSegments = computed(() => {
+  const keyword = segmentQuery.value.trim().toLocaleLowerCase()
+  return segments.value.filter((segment) => {
+    const statusMatches = segmentFilter.value === 'all'
+      || (segmentFilter.value === 'pending' && !['completed', 'failed'].includes(segment.status))
+      || segment.status === segmentFilter.value
+    return statusMatches && (!keyword
+      || segment.text.toLocaleLowerCase().includes(keyword)
+      || segment.segment_id.toLocaleLowerCase().includes(keyword))
+  })
+})
 const videoProgress = ref<VideoProgress | null>(null)
 const projectTask = ref<ProjectTaskStatus | null>(null)
 const hasRunningGeneration = computed(() => (
@@ -138,6 +151,13 @@ function stopOneClickTimer() {
   if (oneClickTimer !== undefined) {
     window.clearInterval(oneClickTimer)
     oneClickTimer = undefined
+  }
+}
+
+function handleEditorShortcut(event: KeyboardEvent) {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+    event.preventDefault()
+    if (!oneClickGenerating.value && !readingScriptFile.value) void submitScript()
   }
 }
 
@@ -803,17 +823,103 @@ async function regenerateSegment(segment: Segment) {
   }
 }
 
-onMounted(load)
+onMounted(() => {
+  void load()
+  window.addEventListener('keydown', handleEditorShortcut)
+})
 onBeforeUnmount(() => {
   stopPolling()
   stopVideoPolling()
   stopOneClickTimer()
   stopTaskPolling()
+  window.removeEventListener('keydown', handleEditorShortcut)
 })
 </script>
 
 <template>
-  <section v-if="project">
+  <section v-if="project" class="taf-narration-page">
+    <div class="narration-design">
+      <header class="production-page-head">
+        <div>
+          <h1>逐字稿与配音</h1>
+          <p>脚本输入、切段预览与分段配音生成</p>
+        </div>
+        <div class="production-head-actions">
+          <button class="secondary-button" type="button" @click="submitScript">保存脚本</button>
+          <button class="primary-button" type="button" :disabled="oneClickGenerating || readingScriptFile" @click="oneClickGenerate">
+            {{ oneClickGenerating ? '生成中…' : '开始生成配音' }}
+          </button>
+        </div>
+      </header>
+
+      <section class="narration-status-strip">
+        <div><span class="status-orb purple">●</span><small>当前音色</small><strong>{{ projectConfig.voice_profile_name || referenceAudioName || '未配置音色' }}</strong></div>
+        <i></i>
+        <div><span class="status-orb blue">≡</span><small>切段方式</small><strong>按语义与标点切段</strong></div>
+        <i></i>
+        <div><span class="status-orb green">✓</span><small>脚本保存状态</small><strong>{{ scriptText.trim() ? '已保存' : '待输入' }}</strong></div>
+        <i></i>
+        <div><span class="status-orb orange">◷</span><small>配音任务状态</small><strong>{{ ttsRunning ? '正在生成' : `${ttsStatus.completed} / ${ttsStatus.total || segments.length} 段` }}</strong></div>
+      </section>
+
+      <div v-if="error" class="alert alert-danger"><strong>操作未完成</strong><span>{{ error }}</span></div>
+      <div v-if="message" class="alert alert-success"><strong>当前状态</strong><span>{{ message }}</span></div>
+
+      <div class="narration-editor-grid">
+        <section class="taf-card narration-script-card">
+          <header><div><h2>逐字稿工作区</h2></div><div><button class="mini-button" type="button" @click="submitScript">保存</button><span>{{ scriptCharacterCount }} 字</span></div></header>
+          <textarea
+            v-model="scriptText"
+            :class="{ 'drag-active': scriptDragActive }"
+            placeholder="粘贴原始逐字稿文本，或拖入 TXT / Markdown 文件"
+            @dragenter.prevent="scriptDragActive = true"
+            @dragover.prevent="scriptDragActive = true"
+            @dragleave.prevent="scriptDragActive = false"
+            @drop.prevent="handleScriptDrop"
+          ></textarea>
+          <footer><span>支持 Ctrl + S 保存</span><span class="saved-dot">● 修改后请保存</span></footer>
+        </section>
+
+        <section class="taf-card segment-preview-card">
+          <header><h2>切段预览区</h2><div><span>分段数量 <strong>{{ segments.length }}</strong></span><span>平均字数 <strong>{{ segments.length ? Math.round(scriptCharacterCount / segments.length) : 0 }}</strong></span><button class="secondary-button" @click="splitSegments">重新切段</button></div></header>
+          <div class="segment-preview-head"><span>#</span><span>分段文本（预览）</span><span>字数</span><span>预计时长</span></div>
+          <div class="segment-preview-list">
+            <div v-for="segment in segments.slice(0, 12)" :key="segment.id" class="segment-preview-row">
+              <span>{{ segment.segment_id }}</span><strong>{{ segment.text }}</strong><span>{{ segment.text.length }}</span><span>{{ formatDuration(segment.duration || 0) }}</span>
+            </div>
+            <div v-if="!segments.length" class="compact-empty">保存脚本后点击“重新切段”生成预览。</div>
+          </div>
+          <footer><button class="secondary-button" @click="splitSegments">重新切段</button><button class="primary-button" @click="runTts">确认切段</button></footer>
+        </section>
+      </div>
+
+      <div class="narration-impact-note">⚠ 修改逐字稿后会影响配音、字幕、分镜、素材与渲染等下游环节，请确认无误后再生成。</div>
+
+      <section class="taf-card narration-segments-card">
+        <header>
+          <div><h2>配音分段区</h2><nav><button :class="{ active: segmentFilter === 'all' }" @click="segmentFilter = 'all'">全部 {{ segments.length }}</button><button :class="{ active: segmentFilter === 'pending' }" @click="segmentFilter = 'pending'">待生成 {{ ttsStatus.pending }}</button><button :class="{ active: segmentFilter === 'completed' }" @click="segmentFilter = 'completed'">已完成 {{ ttsStatus.completed }}</button><button :class="{ active: segmentFilter === 'failed' }" @click="segmentFilter = 'failed'">失败 {{ ttsStatus.failed }}</button></nav></div>
+          <div><input v-model="segmentQuery" type="search" placeholder="搜索分段文本或编号" /><button class="secondary-button" @click="refreshAfterChange">刷新</button></div>
+        </header>
+        <div class="narration-table-head"><span>#</span><span>分段文本</span><span>试听</span><span>实际时长</span><span>状态</span><span>错误信息</span><span>操作</span></div>
+        <div class="narration-table-body">
+          <div v-for="segment in filteredSegments" :key="segment.id" class="narration-table-row">
+            <span>{{ segment.segment_id }}</span><strong>{{ segment.text }}</strong>
+            <AudioPlayer v-if="segmentAudioUrl(segment)" :src="segmentAudioUrl(segment)" />
+            <span v-else>—</span><span>{{ formatDuration(segment.duration || 0) }}</span>
+            <span class="status-pill" :class="segmentStatusTone(segment.status)">{{ segmentStatusLabel(segment.status) }}</span>
+            <span class="row-error">{{ segment.error_message || '—' }}</span>
+            <span class="row-actions"><button @click="saveSegmentText(segment)">编辑</button><button @click="regenerateSegment(segment)">重生成</button></span>
+          </div>
+          <div v-if="!filteredSegments.length" class="compact-empty">没有匹配的配音分段。</div>
+        </div>
+      </section>
+
+      <section class="taf-card narration-audio-dock">
+        <div><strong>完整音频区</strong><span>总时长 {{ formatDuration(audioDurationSeconds || 0) }}</span></div>
+        <AudioPlayer v-if="finalAudioPath" :src="`${API_BASE_URL}/projects/${projectId}/outputs/file?path=${encodeURIComponent(finalAudioPath)}`" />
+        <div class="audio-dock-actions"><button class="secondary-button" :disabled="mergingAudio" @click="mergeAudio">重新合并</button><RouterLink class="primary-link" :to="`/projects/${projectId}/subtitles`">进入字幕校对 →</RouterLink></div>
+      </section>
+    </div>
     <div class="project-hero">
       <div>
         <span class="section-eyebrow">SCRIPT & NARRATION</span>

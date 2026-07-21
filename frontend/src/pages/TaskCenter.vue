@@ -31,6 +31,7 @@ const error = ref('')
 const page = ref(1)
 const pageSize = ref(10)
 const acting = ref(false)
+const showAllErrors = ref(false)
 let refreshTimer: number | undefined
 
 const stageLabels: Record<string, string> = {
@@ -76,6 +77,9 @@ const selectedStageIndex = computed(() => {
   return selectedStages.value.indexOf(selected.value.task.stage || '')
 })
 const selectedEvents = computed(() => parseEvents(selected.value?.task.checkpoint_json).slice(-3).reverse())
+const selectedErrorEvents = computed(() => parseEvents(selected.value?.task.checkpoint_json)
+  .filter((event) => event.event === 'failed' || event.error)
+  .reverse())
 
 watch([query, status, type, onlyAbnormal, pageSize], () => { page.value = 1 })
 watch(pageCount, (count) => { if (page.value > count) page.value = count })
@@ -158,8 +162,61 @@ async function restart(item: TaskItem) {
   } catch (err) { showToast({ title: '无法重新执行', description: err instanceof Error ? err.message : '请检查项目配置', tone: 'danger' }) }
   finally { acting.value = false }
 }
+async function retryFailedTasks() {
+  if (!selected.value) return
+  const batchId = selected.value.task.batch_id
+  const candidates = tasks.value.filter((item) => ['failed', 'cancelled'].includes(item.task.status)
+    && (batchId ? item.task.batch_id === batchId : item.project.id === selected.value?.project.id))
+  if (!candidates.length) {
+    showToast({ title: '没有可重试的任务', description: '当前项目或批次中没有失败、已取消的任务。', tone: 'info' })
+    return
+  }
+  if (!await confirmAction({ eyebrow: '批量重试', title: `重新执行 ${candidates.length} 个任务？`, description: '任务会从可用检查点重新进入本地队列。', confirmText: '开始重试', tone: 'warning' })) return
+  acting.value = true
+  let completed = 0
+  const failures: string[] = []
+  for (const item of candidates) {
+    try {
+      if (item.task.workflow === 'video_synthesis') await startVideoWorkflow(item.project.id)
+      else await startProjectWorkflow(item.project.id)
+      completed += 1
+    } catch (err) {
+      failures.push(`${item.project.name}: ${err instanceof Error ? err.message : '重试失败'}`)
+    }
+  }
+  await load()
+  acting.value = false
+  showToast({
+    title: `已提交 ${completed} 个重试任务`,
+    description: failures.length ? `${failures.length} 个任务未能提交：${failures[0]}` : '系统将从可用检查点继续处理。',
+    tone: failures.length ? 'warning' : 'success',
+  })
+}
+function exportTaskReport() {
+  if (!selected.value) return
+  const report = {
+    generated_at: new Date().toISOString(),
+    project: selected.value.project,
+    task: selected.value.task,
+    progress_percent: taskProgress(selected.value),
+    stage_history: parseEvents(selected.value.task.checkpoint_json),
+  }
+  const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json;charset=utf-8' })
+  const link = document.createElement('a')
+  link.href = URL.createObjectURL(blob)
+  link.download = `task-${selected.value.task.id || selected.value.project.id}.json`
+  link.click()
+  URL.revokeObjectURL(link.href)
+  showToast({ title: '任务报告已导出', tone: 'success' })
+}
+function resetFilters() {
+  query.value = ''
+  status.value = 'all'
+  type.value = 'all'
+  onlyAbnormal.value = false
+  page.value = 1
+}
 function selectStatus(value: string) { status.value = status.value === value ? 'all' : value }
-function showComingSoon(label: string) { showToast({ title: `${label}暂未开放`, description: '当前版本尚未提供对应导出接口。', tone: 'info' }) }
 
 onMounted(() => { void load(); refreshTimer = window.setInterval(load, 10000) })
 onBeforeUnmount(() => { if (refreshTimer !== undefined) window.clearInterval(refreshTimer) })
@@ -170,8 +227,8 @@ onBeforeUnmount(() => { if (refreshTimer !== undefined) window.clearInterval(ref
     <header class="task-heading">
       <div><h1>任务中心</h1><p>{{ selected ? '查看任务阶段、错误记录、恢复点与关联产物' : '统一查看系统所有后台任务、异常状态与处理进度' }}</p></div>
       <div class="heading-actions">
-        <button v-if="selected" class="outline-button" @click="showComingSoon('批量重试')">批量重试</button>
-        <button v-if="selected" class="primary-action" @click="showComingSoon('任务报告')">导出任务报告</button>
+        <button v-if="selected" class="outline-button" :disabled="acting" @click="retryFailedTasks">批量重试</button>
+        <button v-if="selected" class="primary-action" @click="exportTaskReport">导出任务报告</button>
         <RouterLink v-if="!selected" class="primary-action" to="/projects">创建任务</RouterLink>
         <RouterLink v-if="!selected" class="outline-button" to="/batches/new">任务模板</RouterLink>
       </div>
@@ -194,7 +251,7 @@ onBeforeUnmount(() => { if (refreshTimer !== undefined) window.clearInterval(ref
           <label><span>状态</span><select v-model="status"><option value="all">全部</option><option value="queued">排队中</option><option value="running">运行中</option><option value="review">等待审核</option><option value="failed">失败</option><option value="completed">已完成</option></select></label>
           <label class="abnormal"><input v-model="onlyAbnormal" type="checkbox" />只看异常</label>
           <label class="task-search"><Search :size="16" /><input v-model="query" type="search" placeholder="搜索任务名称或 ID" /></label>
-          <button class="square-button" aria-label="筛选设置"><SlidersHorizontal :size="17" /></button>
+          <button class="square-button" aria-label="重置筛选" title="重置筛选" @click="resetFilters"><SlidersHorizontal :size="17" /></button>
           <button class="square-button" :disabled="loading" aria-label="刷新任务" @click="load"><RefreshCw :size="17" :class="{ spinning: loading }" /></button>
         </div>
 
@@ -224,7 +281,7 @@ onBeforeUnmount(() => { if (refreshTimer !== undefined) window.clearInterval(ref
         <section class="detail-section detail-progress"><h3>运行进度</h3><p><strong>总进度　{{ taskProgress(selected) }}%</strong><small>{{ stageLabels[selected.task.stage || ''] || '准备中' }}</small></p><i><b :style="{ width: `${taskProgress(selected)}%` }"></b></i></section>
 
         <div class="detail-mini-grid">
-          <section><header><h3>错误记录</h3><button>查看全部</button></header><div v-if="selected.task.error_message" class="error-record"><b>ERROR</b><span>{{ selected.task.error_message }}</span></div><div v-else class="quiet-record">当前没有错误记录</div></section>
+          <section><header><h3>错误记录</h3><button v-if="selectedErrorEvents.length" @click="showAllErrors = !showAllErrors">{{ showAllErrors ? '收起' : '查看全部' }}</button></header><div v-if="selected.task.error_message" class="error-record"><b>ERROR</b><span>{{ selected.task.error_message }}</span></div><template v-if="showAllErrors"><div v-for="event in selectedErrorEvents" :key="`${event.at}-${event.stage}`" class="error-record"><b>{{ event.stage || 'ERROR' }}</b><span>{{ event.error || eventLabel(event) }}</span></div></template><div v-else-if="!selected.task.error_message" class="quiet-record">当前没有错误记录</div></section>
           <section><header><h3>恢复点与重试信息</h3></header><dl><div><dt>最近恢复点</dt><dd>{{ stageLabels[selected.task.stage || ''] || '任务开始' }}</dd></div><div><dt>自动重试次数</dt><dd>{{ selected.task.attempt_count || 0 }} 次</dd></div><div><dt>恢复策略</dt><dd>从最近检查点继续</dd></div></dl></section>
           <section><header><h3>关联产物</h3></header><div class="artifact-row"><RouterLink :to="`/projects/${selected.project.id}/delivery`"><FileText :size="17" />项目产物</RouterLink><RouterLink :to="`/projects/${selected.project.id}/overview`"><FolderOpen :size="17" />项目详情</RouterLink><RouterLink :to="`/projects/${selected.project.id}/render`"><FileArchive :size="17" />渲染记录</RouterLink></div></section>
         </div>

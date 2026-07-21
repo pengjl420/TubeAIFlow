@@ -2347,6 +2347,13 @@ body {
 .taf-system-state b i { background: #0ab77c; border-radius: 50%; display: inline-block; height: 8px; width: 8px; }
 .taf-system-state b { align-items: center; background: #eafaf5; border-radius: 10px; color: #0a9c6c; display: inline-flex; font-weight: 600; gap: 5px; margin-left: auto; padding: 3px 9px; }
 .taf-sidebar-collapse { align-self: flex-end; background: #fff; border: 1px solid #e3e8f0; border-radius: 8px; color: #657188; font-size: 15px; height: 28px; margin: 10px 0 0; padding: 0; width: 28px; }
+.sidebar-is-collapsed .taf-sidebar { width: 76px; }
+.sidebar-is-collapsed .taf-content { margin-left: 76px; }
+.sidebar-is-collapsed .taf-brand { justify-content: center; }
+.sidebar-is-collapsed .taf-brand > strong,
+.sidebar-is-collapsed .taf-system-state,
+.sidebar-is-collapsed .taf-side-nav .nav-label { display: none; }
+.sidebar-is-collapsed .taf-side-nav a { justify-content: center; padding-inline: 10px; }
 
 .taf-topbar {
   background: rgba(255,255,255,.97);
@@ -4894,4 +4901,153 @@ main.taf-main:has(.taf-project-list-page) {
   .taf-flow-card h2,
   .taf-current-action-card h2,
   .taf-production-info h2 { font-size: 17px; }
+}
+
+/* Design-spec production workspace refinements (July 2026). */
+.taf-create-button,
+.create-menu > .taf-create-button,
+.production-head-actions .primary-button,
+.narration-design .primary-button { background: #075bf5; border-color: #075bf5; color: #fff; }
+.taf-create-button:hover:not(:disabled),
+.production-head-actions .primary-button:hover:not(:disabled),
+.narration-design .primary-button:hover:not(:disabled) { background: #004de4; }
+.taf-project-outlet { background: #fbfcfe; }
+.taf-narration-page > :not(.narration-design) { display: none !important; }
+.narration-design { color: #172033; display: grid; gap: 14px; min-width: 0; }
+.production-page-head { align-items: center; display: flex; justify-content: space-between; min-height: 58px; }
+.production-page-head h1 { font-size: 25px; letter-spacing: -.025em; margin: 0; }
+.production-page-head p { color: #738096; font-size: 13px; margin: 3px 0 0; }
+.production-head-actions { display: flex; gap: 10px; }
+.narration-status-strip { align-items: center; background: #fff; border: 1px solid #e3e8f0; border-radius: 12px; display: flex; min-height: 68px; padding: 9px 18px; }
+.narration-status-strip > div { align-items: center; display: grid; flex: 1; gap: 1px; grid-template-columns: 38px 1fr; min-width: 0; }
+.narration-status-strip > i { background: #e4e8ef; height: 30px; margin: 0 14px; width: 1px; }
+.narration-status-strip small { color: #778397; font-size: 10px; grid-column: 2; }
+.narration-status-strip strong { font-size: 12px; grid-column: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-orb { align-items: center; background: #edf3ff; border-radius: 10px; color: #075bf5; display: flex; font-size: 18px; grid-row: 1 / 3; height: 34px; justify-content: center; width: 34px; }
+.status-orb.purple { background: #f2eafe; color: #8d4bea; }.status-orb.green { background: #e6f8f1; color: #0bad77; }.status-orb.orange { background: #fff2e2; color: #f28a0a; }
+.narration-editor-grid { display: grid; gap: 12px; grid-template-columns: minmax(0, 1.04fr) minmax(0, 1.2fr); }
+.narration-script-card, .segment-preview-card, .narration-segments-card { overflow: hidden; }
+.narration-script-card > header, .segment-preview-card > header, .narration-segments-card > header { align-items: center; border-bottom: 1px solid #e8ecf2; display: flex; justify-content: space-between; min-height: 48px; padding: 0 14px; }
+.narration-design h2 { font-size: 15px; margin: 0; }
+.narration-script-card header > div, .segment-preview-card header > div, .narration-segments-card header > div { align-items: center; display: flex; gap: 10px; }
+.narration-script-card header span, .segment-preview-card header span { color: #778397; font-size: 10px; }
+.narration-script-card textarea { border: 0; border-radius: 0; font-size: 12px; line-height: 1.9; min-height: 250px; padding: 14px 18px; resize: vertical; width: 100%; }
+.narration-script-card textarea:focus { box-shadow: inset 0 0 0 1px #8eb7ff; outline: 0; }
+.narration-script-card > footer { align-items: center; border-top: 1px solid #edf0f4; color: #8993a3; display: flex; font-size: 9px; justify-content: space-between; min-height: 29px; padding: 0 14px; }
+.saved-dot { color: #11aa78 !important; }
+.segment-preview-head, .segment-preview-row { align-items: center; display: grid; gap: 8px; grid-template-columns: 32px minmax(0,1fr) 45px 65px; padding: 0 13px; }
+.segment-preview-head { background: #f7f9fc; color: #6e7a8f; font-size: 10px; min-height: 29px; }
+.segment-preview-list { max-height: 219px; min-height: 219px; overflow: auto; }
+.segment-preview-row { border-bottom: 1px solid #edf0f4; font-size: 10px; min-height: 38px; }
+.segment-preview-row strong { font-size: 10px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.segment-preview-row > span { color: #637086; }
+.segment-preview-card > footer { align-items: center; border-top: 1px solid #e8ecf2; display: flex; gap: 8px; justify-content: flex-end; min-height: 44px; padding: 0 12px; }
+.segment-preview-card .compact-empty { align-items: center; color: #8290a4; display: flex; font-size: 11px; justify-content: center; min-height: 200px; }
+.narration-impact-note { background: #fff8e9; border: 1px solid #ffe0a6; border-radius: 8px; color: #966719; font-size: 10px; padding: 9px 13px; }
+.narration-segments-card > header nav { display: flex; gap: 2px; }
+.narration-segments-card > header nav button { background: transparent; border-radius: 6px; color: #6b778c; font-size: 10px; padding: 5px 8px; }
+.narration-segments-card > header nav button.active { background: #edf3ff; color: #075bf5; }
+.narration-segments-card input[type=search] { border: 1px solid #e0e5ed; border-radius: 7px; font-size: 10px; min-height: 30px; padding: 0 10px; width: 180px; }
+.narration-table-head, .narration-table-row { align-items: center; display: grid; gap: 10px; grid-template-columns: 38px minmax(240px,1.7fr) minmax(150px,.9fr) 70px 78px minmax(130px,.8fr) 105px; padding: 0 13px; }
+.narration-table-head { background: #f7f9fc; color: #657187; font-size: 10px; min-height: 28px; }
+.narration-table-body { max-height: 260px; overflow: auto; }
+.narration-table-row { border-bottom: 1px solid #edf0f4; font-size: 10px; min-height: 46px; }
+.narration-table-row > strong { font-size: 10px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.narration-table-row .audio-player { min-width: 0; }
+.narration-table-row .row-error { color: #7b8698; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-actions { display: flex; gap: 4px; }.row-actions button { background: #fff; border: 1px solid #d2def3; border-radius: 5px; color: #075bf5; font-size: 9px; padding: 4px 6px; }
+.narration-audio-dock { align-items: center; display: grid; gap: 18px; grid-template-columns: 150px minmax(280px,1fr) auto; min-height: 68px; padding: 11px 16px; }
+.narration-audio-dock > div:first-child { display: grid; gap: 4px; }.narration-audio-dock > div:first-child span { color: #768297; font-size: 10px; }
+.audio-dock-actions { display: flex; gap: 9px; }.audio-dock-actions .primary-link { background: #075bf5; border-radius: 8px; color: #fff; min-height: 36px; }
+@media (max-width: 1180px) {
+  .narration-editor-grid { grid-template-columns: 1fr; }
+  .narration-status-strip > i { margin-inline: 5px; }
+  .narration-table-head, .narration-table-row { min-width: 900px; }
+  .narration-segments-card { overflow-x: auto; }
+}
+
+/* Compact all project steps to the same 1920×1080 production canvas. */
+.taf-project-outlet > section:not(.taf-project-overview):not(.taf-narration-page) { color: #172033; }
+.taf-project-outlet .section-eyebrow,
+.taf-project-outlet .page-kicker { display: none; }
+.taf-project-outlet .project-hero,
+.taf-project-outlet .page-header,
+.taf-project-outlet .page-title { align-items: center; display: flex; justify-content: space-between; margin: 0 0 14px; min-height: 58px; }
+.taf-project-outlet .project-hero h1,
+.taf-project-outlet .page-header h1,
+.taf-project-outlet .page-title h1 { font-size: 25px; letter-spacing: -.025em; margin: 0; }
+.taf-project-outlet .project-hero p,
+.taf-project-outlet .page-header p,
+.taf-project-outlet .page-title p { color: #748096; font-size: 12px; margin: 3px 0 0; }
+.taf-project-outlet .panel { border-color: #e2e7ef; border-radius: 12px; box-shadow: 0 2px 10px rgba(26,43,74,.035); padding: 14px; }
+.taf-project-outlet .section-head h2,
+.taf-project-outlet .section-toolbar h2 { font-size: 15px; }
+.taf-project-outlet .primary-button,
+.taf-project-outlet .primary-link { background: #075bf5; border-color: #075bf5; color: #fff; }
+.taf-project-outlet .primary-button:hover:not(:disabled),
+.taf-project-outlet .primary-link:hover { background: #004de4; }
+
+/* Subtitles: list / waveform timeline / cue inspector. */
+.subtitle-workspace-page .project-metrics-strip { display: none; }
+.subtitle-workspace-page .subtitle-workspace { gap: 10px; grid-template-columns: minmax(220px,.62fr) minmax(520px,1.85fr) minmax(245px,.72fr); min-height: 650px; }
+.subtitle-workspace-page .subtitle-cue-list,
+.subtitle-workspace-page .subtitle-timeline-panel,
+.subtitle-workspace-page .subtitle-properties { border: 1px solid #e2e7ef; border-radius: 11px; background:#fff; padding: 12px; }
+.subtitle-workspace-page .cue-scroll { max-height: 540px; overflow: auto; }
+.subtitle-workspace-page .cue-scroll > button { border-radius: 7px; font-size: 10px; margin-bottom: 4px; padding: 8px; }
+.subtitle-workspace-page .waveform { min-height: 150px; }
+.subtitle-workspace-page .timeline-scroll { min-height: 270px; }
+
+/* Storyboard: dense selectable scene cards. */
+.storyboard-page .storyboard-section-title { margin: 0 0 10px; }
+.storyboard-page .scene-card-list { display: grid; gap: 10px; grid-template-columns: repeat(2,minmax(0,1fr)); }
+.storyboard-page .scene-card { margin: 0; min-height: 0; padding: 12px; }
+.storyboard-page .scene-card-head strong { font-size: 12px; }
+.storyboard-page .scene-narration { font-size: 10px; line-height: 1.55; margin: 8px 0; }
+.storyboard-page .storyboard-edit-grid { gap: 7px; grid-template-columns: repeat(2,minmax(0,1fr)); }
+.storyboard-page .storyboard-edit-grid .field { font-size: 9px; }
+.storyboard-page .storyboard-edit-grid input,
+.storyboard-page .storyboard-edit-grid textarea { font-size: 10px; padding: 7px; }
+
+/* Media review keeps the three working columns visible above the fold. */
+.media-review-page .project-hero { margin-bottom: 10px; }
+.media-review-page .media-review-layout { gap: 10px; grid-template-columns: minmax(220px,.72fr) minmax(520px,1.55fr); }
+.media-review-page .scene-review-rail { max-height: 720px; overflow: auto; padding: 10px; }
+.media-review-page .scene-review-item { font-size: 10px; min-height: 70px; padding: 9px; }
+.media-review-page .selected-scene-query { padding: 12px; }
+.media-review-page .candidate-grid { gap: 9px; grid-template-columns: repeat(3,minmax(0,1fr)); }
+.media-review-page .candidate-card { padding: 0; }
+.media-review-page .candidate-body { padding: 9px; }
+.media-review-page .scene-shot-track { max-height: 370px; overflow: auto; }
+
+/* Rendering mirrors the horizontal status rail and compact control cards. */
+.pipeline-page .pipeline-stage-grid { display: grid; gap: 10px; grid-template-columns: repeat(6,minmax(0,1fr)); margin-bottom: 12px; }
+.pipeline-page .pipeline-stage-card { align-items: center; display: flex; gap: 10px; min-height: 72px; padding: 12px; }
+.pipeline-page .pipeline-stage-card h3 { font-size: 12px; margin: 0; }
+.pipeline-page .pipeline-stage-card p { font-size: 9px; margin: 3px 0 0; }
+.pipeline-page .pipeline-detail-grid { gap: 12px; grid-template-columns: minmax(360px,.9fr) minmax(420px,1.2fr); }
+.pipeline-page .output-path-list { font-size: 10px; }
+
+/* Delivery and settings use low-height cards rather than long document sections. */
+.delivery-page .delivery-video-grid { gap: 12px; grid-template-columns: minmax(540px,1.15fr) minmax(360px,.8fr); }
+.delivery-page .final-video-card video,
+.delivery-page .video-empty { max-height: 330px; min-height: 280px; }
+.delivery-page .qa-summary-card { min-height: 0; }
+.delivery-page .dashboard-section { margin-top: 12px; }
+.delivery-page .delivery-artifact-grid { gap: 10px; grid-template-columns: repeat(5,minmax(0,1fr)); }
+.delivery-page .delivery-artifact-card { min-height: 110px; padding: 10px; }
+.project-config-page > .grid { display: grid; gap: 10px; }
+.project-config-page > .grid > .panel { padding: 12px 16px; }
+.project-config-page .section-head { margin-bottom: 8px; }
+.project-config-page .section-head p { display: none; }
+.project-config-page .field { gap: 5px; margin-bottom: 8px; }
+.project-config-page input,
+.project-config-page select { min-height: 34px; }
+.project-config-page textarea { min-height: 68px; }
+.project-config-page .reference-field > .muted { display: none; }
+
+@media (max-width: 1300px) {
+  .pipeline-page .pipeline-stage-grid { grid-template-columns: repeat(3,1fr); }
+  .delivery-page .delivery-artifact-grid { grid-template-columns: repeat(3,1fr); }
+  .storyboard-page .scene-card-list { grid-template-columns: 1fr; }
 }

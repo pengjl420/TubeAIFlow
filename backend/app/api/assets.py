@@ -75,6 +75,12 @@ def import_assets(
     return {"success": True, "data": data}
 
 
+@router.post("/assets/cleanup-cache")
+def cleanup_asset_cache(session: Session = Depends(get_session)) -> dict:
+    data = ingestion_service.clear_search_cache(session)
+    return {"success": True, "data": data}
+
+
 @router.patch("/assets/{media_id}")
 def update_asset(
     media_id: str,

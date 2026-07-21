@@ -2,6 +2,7 @@ import { apiClient, unwrap } from './client'
 
 export interface ProjectTaskStatus {
   id: string | null
+  project_id?: string
   status: 'idle' | 'queued' | 'running' | 'paused' | 'review_required' | 'completed' | 'failed' | 'cancelled'
   running: boolean
   queued: boolean
@@ -15,6 +16,14 @@ export interface ProjectTaskStatus {
   workflow_duration_seconds?: number | null
   compensation_count?: number
   workflow?: 'narration_generation' | 'video_synthesis'
+  attempt_count?: number
+  lease_owner?: string | null
+  checkpoint_json?: string
+  updated_at?: string
+}
+
+export async function listTasks() {
+  return unwrap<ProjectTaskStatus[]>(await apiClient.get('/tasks'))
 }
 
 export async function cancelProjectTask(projectId: string) {

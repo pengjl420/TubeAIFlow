@@ -1,8 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import {
+  AlertTriangle, Check, ChevronLeft, ChevronRight, CirclePause, Clock3,
+  ExternalLink, Gauge, Pause, Play, RotateCcw, Settings2, Square, Users,
+} from 'lucide-vue-next'
 
-import { deleteBatch, getBatch, pauseBatch, retryBatchItem, startBatch, type BatchJob } from '../../api/batches'
+import { deleteBatch, getBatch, pauseBatch, retryBatchItem, startBatch, type BatchItem, type BatchJob } from '../../api/batches'
 import { confirmAction, showToast } from '../../services/feedback'
 import { formatDateTime, formatDuration } from '../../utils/time'
 
@@ -13,217 +17,63 @@ const batch = ref<BatchJob | null>(null)
 const loading = ref(false)
 const acting = ref(false)
 const error = ref('')
+const page = ref(1)
+const pageSize = ref(10)
 let pollTimer: number | undefined
 
-const percent = computed(() => {
-  if (!batch.value?.total) return 0
-  return Math.round(((batch.value.completed + batch.value.failed) / batch.value.total) * 100)
-})
-
-const canPause = computed(() => batch.value?.status === 'queued' || batch.value?.status === 'running')
-const canResume = computed(() => batch.value?.status === 'paused' || batch.value?.status === 'draft')
-const totalAudioDuration = computed(() => (
-  (batch.value?.items || []).reduce((total, item) => total + (item.audio_duration_seconds || 0), 0)
-))
-
-const statusLabels: Record<string, string> = {
-  draft: '草稿', queued: '排队中', running: '执行中', paused: '已暂停',
-  review_required: '等待人工复核',
-  completed: '已完成', completed_with_errors: '部分失败', failed: '执行失败',
+const statusMeta: Record<string, { label: string; tone: string }> = {
+  draft:{label:'草稿',tone:'muted'},queued:{label:'运行中',tone:'blue'},running:{label:'运行中',tone:'blue'},paused:{label:'已暂停',tone:'muted'},review_required:{label:'待人工处理',tone:'orange'},completed:{label:'已完成',tone:'green'},completed_with_errors:{label:'部分失败',tone:'red'},failed:{label:'失败',tone:'red'},
 }
+const stageLabels: Record<string,string> = {segmenting:'文本切段',tts:'生成配音',audio_merge:'合并音频',subtitles:'生成字幕',video:'生成视频',storyboard:'生成分镜',asset_search:'素材检索',asset_review:'素材审核',image_generation:'生成分镜图片',image_review:'图片审核',scene_render:'场景渲染',final_render:'最终合成',quality_check:'质量检查',quality_review:'质量复核',fcpxml_export:'工程导出',completed:'导出完成'}
+const statusOf = (status:string) => statusMeta[status] || {label:status,tone:'muted'}
+const stageOf = (stage:string) => stageLabels[stage] || stage || '等待执行'
+const completedCount = computed(() => batch.value?.completed || 0)
+const failedCount = computed(() => batch.value?.failed || 0)
+const reviewCount = computed(() => batch.value?.items?.filter(item => item.status === 'review_required').length || 0)
+const runningCount = computed(() => batch.value?.items?.filter(item => ['queued','running'].includes(item.status)).length || 0)
+const pausedCount = computed(() => batch.value?.items?.filter(item => item.status === 'paused').length || 0)
+const processedCount = computed(() => completedCount.value + failedCount.value)
+const percent = computed(() => batch.value?.total ? Math.round(processedCount.value / batch.value.total * 100) : 0)
+const currentItem = computed(() => batch.value?.items?.find(item => item.status === 'running') || batch.value?.items?.find(item => item.status === 'queued') || null)
+const totalAudioDuration = computed(() => (batch.value?.items || []).reduce((total,item) => total + (item.audio_duration_seconds || 0),0))
+const totalPages = computed(() => Math.max(1,Math.ceil((batch.value?.items?.length || 0)/pageSize.value)))
+const pagedItems = computed(() => (batch.value?.items || []).slice((page.value-1)*pageSize.value,page.value*pageSize.value))
+const canPause = computed(() => ['queued','running'].includes(batch.value?.status || ''))
+const canResume = computed(() => ['paused','draft'].includes(batch.value?.status || ''))
 
-function statusLabel(status: string) {
-  return statusLabels[status] || status
-}
+function stopPolling(){if(pollTimer!==undefined){window.clearInterval(pollTimer);pollTimer=undefined}}
+async function load(silent=false){if(!silent)loading.value=true;try{batch.value=await getBatch(batchId);error.value='';if(['completed','completed_with_errors','failed'].includes(batch.value.status))stopPolling()}catch(err){error.value=err instanceof Error?err.message:'批次加载失败'}finally{loading.value=false}}
+async function pause(){acting.value=true;try{batch.value=await pauseBatch(batchId)}catch(err){error.value=err instanceof Error?err.message:'暂停失败'}finally{acting.value=false}}
+async function resume(){acting.value=true;try{batch.value=await startBatch(batchId)}catch(err){error.value=err instanceof Error?err.message:'继续执行失败'}finally{acting.value=false}}
+async function retry(item:BatchItem){acting.value=true;try{await retryBatchItem(batchId,item.id);await load(true);showToast({title:'项目已重新加入队列',description:item.project_name,tone:'success'})}catch(err){error.value=err instanceof Error?err.message:'重试失败'}finally{acting.value=false}}
+async function removeBatch(){if(!batch.value)return;const confirmed=await confirmAction({eyebrow:'删除批次记录',title:`删除批次“${batch.value.name}”？`,description:'批次记录将被移除，但已创建的项目和生成文件仍会保留。',confirmText:'删除批次',tone:'danger'});if(!confirmed)return;acting.value=true;try{await deleteBatch(batchId);stopPolling();await router.push('/batches');showToast({title:'批次记录已删除',tone:'success'})}catch(err){error.value=err instanceof Error?err.message:'删除失败'}finally{acting.value=false}}
+function showSettings(){showToast({title:'批次配置已锁定',description:'生产配置在创建批次时固化，可复制配置新建批次。',tone:'warning'})}
 
-const stageLabels: Record<string, string> = {
-  segmenting: '生成切段',
-  tts: '生成分段音频',
-  audio_merge: '合并完整音频',
-  subtitles: '生成原文 SRT 字幕',
-  video: '生成视频',
-  storyboard: '生成视觉分镜',
-  asset_search: '检索语义素材',
-  asset_review: '等待素材审核',
-  image_generation: '本地生成分镜图片',
-  image_review: '等待图片审核',
-  scene_render: '渲染场景视频',
-  final_render: '合成最终视频',
-  quality_check: '执行质量检查',
-  quality_review: '等待质量复核',
-  fcpxml_export: '生成 FCPXML 工程',
-  completed: '完成',
-}
-
-function stageLabel(stage: string) {
-  return stageLabels[stage] || stage
-}
-
-function stopPolling() {
-  if (pollTimer !== undefined) {
-    window.clearInterval(pollTimer)
-    pollTimer = undefined
-  }
-}
-
-async function load(silent = false) {
-  if (!silent) loading.value = true
-  try {
-    batch.value = await getBatch(batchId)
-    if (['completed', 'completed_with_errors'].includes(batch.value.status)) stopPolling()
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '批次加载失败'
-  } finally {
-    loading.value = false
-  }
-}
-
-async function pause() {
-  acting.value = true
-  error.value = ''
-  try {
-    batch.value = await pauseBatch(batchId)
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '暂停失败'
-  } finally {
-    acting.value = false
-  }
-}
-
-async function resume() {
-  acting.value = true
-  error.value = ''
-  try {
-    batch.value = await startBatch(batchId)
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '继续失败'
-  } finally {
-    acting.value = false
-  }
-}
-
-async function retry(itemId: string) {
-  acting.value = true
-  error.value = ''
-  try {
-    await retryBatchItem(batchId, itemId)
-    await load(true)
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '重试失败'
-  } finally {
-    acting.value = false
-  }
-}
-
-async function removeBatch() {
-  if (!batch.value) return
-  const batchName = batch.value.name
-  const confirmed = await confirmAction({
-    eyebrow: '删除批次记录',
-    title: `删除批次“${batchName}”？`,
-    description: '该批次会从生产记录中移除，之后无法再查看它的汇总进度。',
-    detail: '批次创建的项目和已生成文件仍会保留在项目工作台。',
-    confirmText: '删除批次',
-    tone: 'danger',
-  })
-  if (!confirmed) return
-  acting.value = true
-  error.value = ''
-  try {
-    await deleteBatch(batchId)
-    stopPolling()
-    await router.push('/batches')
-    showToast({
-      title: '批次记录已删除',
-      description: `“${batchName}”创建的项目与文件均已保留。`,
-      tone: 'success',
-    })
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '批次删除失败'
-    showToast({ title: '批次删除失败', description: error.value, tone: 'danger' })
-  } finally {
-    acting.value = false
-  }
-}
-
-onMounted(async () => {
-  await load()
-  pollTimer = window.setInterval(() => load(true), 1500)
-})
-
-onBeforeUnmount(() => {
-  stopPolling()
-})
+onMounted(async()=>{await load();pollTimer=window.setInterval(()=>load(true),3000)})
+onBeforeUnmount(stopPolling)
 </script>
 
 <template>
-  <section v-if="batch">
-    <div class="page-title">
-      <div>
-        <span class="page-kicker">BATCH DETAIL</span>
-        <h1>{{ batch.name }}</h1>
-        <span class="muted">创建于 {{ formatDateTime(batch.created_at) }}</span>
-      </div>
-      <div class="page-title-actions">
-        <button v-if="canPause" class="danger-button" :disabled="acting" @click="pause">终止当前任务并暂停</button>
-        <button v-if="canResume" class="primary-button" :disabled="acting" @click="resume">继续执行</button>
-        <button
-          class="danger-button"
-          :disabled="acting || canPause"
-          :data-tooltip="canPause ? '请先暂停批次再删除' : '删除批次记录并保留项目'"
-          @click="removeBatch"
-        >删除批次</button>
-        <RouterLink class="secondary-button" to="/batches">返回批次列表</RouterLink>
-      </div>
-    </div>
+  <section v-if="batch" class="batch-detail-page">
+    <div class="breadcrumb"><RouterLink to="/batches">批量生产</RouterLink><span>›</span><RouterLink to="/batches">批次列表</RouterLink><span>›</span><strong>批次详情</strong></div>
+    <div class="detail-actions"><button v-if="canPause" class="primary" :disabled="acting" @click="pause"><Pause :size="17"/>暂停批次</button><button v-if="canResume" class="primary" :disabled="acting" @click="resume"><Play :size="17"/>继续批次</button><button class="danger" :disabled="acting || canPause" @click="removeBatch"><Square :size="15"/>终止并删除</button><button @click="showSettings"><Settings2 :size="16"/>批次设置</button></div>
 
-    <div class="panel batch-summary">
-      <div class="section-head">
-        <strong>总进度 {{ percent }}%</strong>
-        <span class="status-pill" :class="batch.failed ? 'is-danger' : batch.status === 'completed' ? 'is-success' : 'is-running'"><i></i>{{ statusLabel(batch.status) }}</span>
-      </div>
-      <div class="progress-bar"><div class="progress-fill" :style="{ width: `${percent}%` }"></div></div>
-      <div class="stats-row">
-        <span>总数 {{ batch.total }}</span>
-        <span>完成 {{ batch.completed }}</span>
-        <span>失败 {{ batch.failed }}</span>
-        <span>待处理 {{ Math.max(0, batch.total - batch.completed - batch.failed) }}</span>
-      </div>
-      <div class="generation-timing batch-timing">
-        <div><span class="muted">批次创建时间</span><strong>{{ formatDateTime(batch.created_at) }}</strong></div>
-        <div><span class="muted">实际开始时间</span><strong>{{ formatDateTime(batch.started_at, '尚未开始') }}</strong></div>
-        <div><span class="muted">批次流程用时</span><strong>{{ formatDuration(batch.workflow_duration_seconds, batch.started_at ? '计算中' : '未开始') }}</strong></div>
-        <div><span class="muted">音频总时长</span><strong>{{ formatDuration(totalAudioDuration || null, '未生成') }}</strong></div>
-      </div>
-      <p v-if="error" class="error">{{ error }}</p>
-    </div>
+    <article class="detail-hero"><div class="hero-title"><h1>{{ batch.name }}</h1><span :class="statusOf(batch.status).tone">{{ statusOf(batch.status).label }}</span><p>批次 ID：{{ batch.id }}　创建时间：{{ formatDateTime(batch.created_at) }}</p></div><div class="progress-ring" :style="{ '--percent': `${percent*3.6}deg` }"><strong>{{ percent }}%</strong><small>总进度</small></div><div class="hero-stat green"><Check/> <span><small>已完成</small><strong>{{ completedCount }}</strong></span></div><div class="hero-stat red"><AlertTriangle/><span><small>失败</small><strong>{{ failedCount }}</strong></span></div><div class="hero-stat orange"><Clock3/><span><small>等待审核</small><strong>{{ reviewCount }}</strong></span></div><div class="hero-text"><small>总项目数</small><strong>{{ batch.total }}</strong></div><div class="hero-text"><small>已运行</small><strong>{{ formatDuration(batch.workflow_duration_seconds,batch.started_at?'计算中':'-') }}</strong></div><div class="hero-text"><small>预计完成</small><strong>{{ batch.finished_at?formatDateTime(batch.finished_at):'计算中' }}</strong></div></article>
 
-    <div class="panel batch-items-panel">
-      <div class="batch-item-table batch-item-head">
-        <span>顺序</span><span>文件 / 项目</span><span>状态</span><span>当前阶段</span><span>音频时长</span><span>实际执行</span><span>操作</span>
-      </div>
-      <div v-for="item in batch.items || []" :key="item.id" class="batch-item-table batch-item-row">
-        <span>#{{ item.order_index }}</span>
-        <div>
-          <strong>{{ item.original_filename }}</strong>
-          <p class="muted">项目：{{ item.project_name }}</p>
-          <p v-if="item.error_message" class="error batch-item-error">{{ item.error_message }}</p>
-        </div>
-        <span class="status-pill">{{ statusLabel(item.status) }}</span>
-        <span>{{ stageLabel(item.current_stage) }}</span>
-        <strong class="tabular-number">{{ formatDuration(item.audio_duration_seconds || null, '未生成') }}</strong>
-        <div class="batch-item-timing">
-          <span>开始 {{ formatDateTime(item.workflow_started_at, '尚未开始') }}</span>
-          <strong>用时 {{ formatDuration(item.workflow_duration_seconds, item.workflow_started_at ? '计算中' : '未开始') }}</strong>
-        </div>
-        <div class="batch-item-actions">
-          <RouterLink class="mini-button" :to="`/projects/${item.project_id}`">查看项目</RouterLink>
-          <RouterLink v-if="item.status === 'review_required'" class="mini-button" :to="`/projects/${item.project_id}/render`">进入复核</RouterLink>
-          <button v-if="item.status === 'failed'" class="mini-button" :disabled="acting" @click="retry(item.id)">重试</button>
-        </div>
-      </div>
-    </div>
+    <div class="detail-grid"><main>
+      <article class="current-card"><h2>当前执行项目</h2><div v-if="currentItem" class="current-body"><div class="project-art"><Gauge :size="36"/></div><div class="current-info"><small>项目名称</small><strong>[第 {{ currentItem.order_index }}/{{ batch.total }} 项] {{ currentItem.project_name }}</strong><p>原始文件：{{ currentItem.original_filename }}</p></div><div class="current-progress"><small>当前阶段</small><strong>{{ stageOf(currentItem.current_stage) }}</strong><span><i></i></span><p>运行耗时　{{ formatDuration(currentItem.workflow_duration_seconds,currentItem.workflow_started_at?'计算中':'-') }}</p></div><RouterLink :to="`/projects/${currentItem.project_id}`">进入项目<ExternalLink :size="15"/></RouterLink></div><div v-else class="no-current"><Check :size="19"/>当前没有正在执行的项目</div></article>
+
+      <article class="items-card"><h2>批次项目列表 <small>({{ batch.total }})</small></h2><div class="items-head"><span>顺序</span><span>原始文件</span><span>项目名称</span><span>当前状态</span><span>当前阶段</span><span>音频时长</span><span>耗时</span><span>错误</span><span>操作</span></div><div v-for="item in pagedItems" :key="item.id" class="item-row"><span>{{ item.order_index }}</span><div class="source-file"><strong>{{ item.original_filename }}</strong><small>{{ item.project_status }}</small></div><strong class="project-name">{{ item.project_name }}</strong><span class="status-tag" :class="statusOf(item.status).tone">{{ statusOf(item.status).label }}</span><span>{{ stageOf(item.current_stage) }}</span><span>{{ formatDuration(item.audio_duration_seconds||null,'-') }}</span><span>{{ formatDuration(item.workflow_duration_seconds,item.workflow_started_at?'计算中':'-') }}</span><span class="item-error">{{ item.error_message || '-' }}</span><div class="item-action"><RouterLink :to="`/projects/${item.project_id}`">{{ item.status==='review_required'?'处理任务':item.status==='running'?'进入项目':'查看详情' }}</RouterLink><button v-if="item.status==='failed'" :disabled="acting" @click="retry(item)"><RotateCcw :size="14"/>重试</button></div></div><footer><span>共 {{ batch.items?.length || 0 }} 项</span><select v-model="pageSize" @change="page=1"><option :value="10">10 条/页</option><option :value="20">20 条/页</option></select><div><button :disabled="page<=1" @click="page--"><ChevronLeft :size="15"/></button><strong>{{ page }}</strong><span>/ {{ totalPages }}</span><button :disabled="page>=totalPages" @click="page++"><ChevronRight :size="15"/></button></div></footer></article>
+    </main><aside>
+      <article class="side-card"><h2>状态分布</h2><div class="donut-wrap"><div class="donut" :style="{ '--complete': `${batch.total?completedCount/batch.total*360:0}deg` }"><strong>{{ batch.total }}</strong><small>总项目数</small></div><ul><li><i class="green"></i>已完成 <b>{{ completedCount }}</b></li><li><i class="blue"></i>运行中 <b>{{ runningCount }}</b></li><li><i class="orange"></i>待人工处理 <b>{{ reviewCount }}</b></li><li><i class="red"></i>失败 <b>{{ failedCount }}</b></li><li><i class="muted"></i>已暂停 <b>{{ pausedCount }}</b></li></ul></div></article>
+      <article class="side-card"><h2>当前吞吐情况</h2><div class="throughput"><div><Gauge/><span><small>处理速度</small><strong>{{ batch.workflow_duration_seconds?((processedCount/(batch.workflow_duration_seconds/3600||1)).toFixed(1)):'-' }} 项/小时</strong></span></div><div><Users/><span><small>并发项目</small><strong>{{ Math.max(1,runningCount) }} 个</strong></span></div><div><Clock3/><span><small>平均耗时</small><strong>{{ formatDuration(processedCount?totalAudioDuration/processedCount:null,'-') }}</strong></span></div></div><div class="sparkline"><i v-for="height in [20,34,32,55,45,65,58,80,72,88,70,92]" :key="height" :style="{height:`${height}%`}"></i></div></article>
+      <article class="side-card"><h2>批次事件记录</h2><ul class="event-list"><li><i class="blue"></i><span><strong>批次开始</strong><small>{{ formatDateTime(batch.started_at,'尚未开始') }}</small></span></li><li v-if="batch.status==='paused'"><i class="orange"></i><span><strong>批次已暂停</strong><small>{{ formatDateTime(batch.updated_at) }}</small></span></li><li v-for="item in (batch.items||[]).filter(i=>i.error_message).slice(0,3)" :key="item.id"><i class="red"></i><span><strong>项目失败</strong><small>第 {{ item.order_index }} 项 · {{ item.error_message }}</small></span></li><li v-if="batch.completed"><i class="green"></i><span><strong>项目完成</strong><small>已有 {{ batch.completed }} 个项目导出完成</small></span></li></ul></article>
+    </aside></div>
+    <p v-if="error" class="detail-error">{{ error }}</p>
   </section>
-
-  <section v-else class="panel"><p class="muted">{{ loading ? '加载中' : error }}</p></section>
+  <section v-else class="detail-loading">{{ loading ? '正在加载批次详情…' : error }}</section>
 </template>
+
+<style scoped>
+.batch-detail-page{color:#1c2738;position:relative}.breadcrumb{align-items:center;color:#8a96a8;display:flex;font-size:12px;gap:10px;margin-bottom:16px}.breadcrumb a{color:#607086;text-decoration:none}.detail-actions{display:flex;gap:10px;position:absolute;right:0;top:-8px}.detail-actions button{align-items:center;background:#fff;border:1px solid #dce3eb;border-radius:8px;color:#445267;display:flex;font-weight:700;gap:6px;padding:9px 13px}.detail-actions .primary{background:#0864eb;border-color:#0864eb;color:#fff}.detail-actions .danger{border-color:#ffbdc1;color:#e43e49}.detail-actions button:disabled{opacity:.45}.detail-hero{align-items:center;background:#fff;border:1px solid #e1e7ef;border-radius:12px;box-shadow:0 5px 18px #3342600a;display:flex;gap:20px;margin-bottom:14px;padding:15px 18px}.hero-title{flex:1;min-width:280px}.hero-title h1{display:inline;font-size:22px;margin:0 9px 0 0}.hero-title>span{border-radius:15px;font-size:10px;padding:5px 9px}.hero-title>span.green{background:#e6f8f1;color:#0a9f6c}.hero-title>span.blue{background:#eaf2ff;color:#126bea}.hero-title>span.orange{background:#fff3df;color:#d77a06}.hero-title>span.red{background:#ffebec;color:#df3945}.hero-title p{color:#7c899c;font-size:10px;margin:9px 0 0}.progress-ring{align-items:center;background:conic-gradient(#09aa78 var(--percent),#e8edf2 0);border-radius:50%;display:flex;flex-direction:column;height:78px;justify-content:center;position:relative;width:78px}.progress-ring:after{background:#fff;border-radius:50%;content:"";inset:8px;position:absolute}.progress-ring strong,.progress-ring small{position:relative;z-index:1}.progress-ring strong{font-size:16px}.progress-ring small{color:#718094;font-size:9px}.hero-stat,.hero-text{border-left:1px solid #edf0f4;display:flex;gap:8px;min-width:82px;padding-left:18px}.hero-stat svg{height:16px;width:16px}.hero-stat span,.hero-text{flex-direction:column}.hero-stat small,.hero-text small{color:#718094;display:block;font-size:9px}.hero-stat strong,.hero-text strong{display:block;font-size:20px;margin-top:3px}.hero-stat.green svg{color:#08aa75}.hero-stat.red svg{color:#ec4550}.hero-stat.orange svg{color:#ef9918}.hero-text strong{font-size:13px}.detail-grid{display:grid;gap:14px;grid-template-columns:minmax(0,1fr) 330px}.detail-grid main,.detail-grid aside{display:grid;gap:14px}.current-card,.items-card,.side-card{background:#fff;border:1px solid #e1e7ef;border-radius:12px;box-shadow:0 4px 15px #33426008}.current-card,.side-card{padding:15px}.current-card h2,.items-card h2,.side-card h2{font-size:14px;margin:0 0 14px}.current-body{align-items:center;display:grid;gap:16px;grid-template-columns:100px minmax(200px,1.3fr) minmax(180px,1fr) auto}.project-art{align-items:center;background:linear-gradient(135deg,#061d3b,#0872a6);border-radius:7px;color:#58dcff;display:flex;height:70px;justify-content:center}.current-info small,.current-progress small{color:#7c899c;font-size:10px}.current-info strong,.current-progress strong{display:block;font-size:12px;margin:5px 0}.current-info p,.current-progress p{color:#6e7c91;font-size:10px;margin:6px 0}.current-progress>span{background:#e6ecf3;border-radius:3px;display:block;height:5px}.current-progress>span i{background:#1671ef;border-radius:3px;display:block;height:100%;width:50%}.current-body>a{align-items:center;background:#0864eb;border-radius:7px;color:#fff;display:flex;font-size:11px;font-weight:700;gap:6px;padding:10px 13px;text-decoration:none}.no-current{align-items:center;color:#08a36f;display:flex;gap:7px;padding:20px}.items-card{overflow:hidden}.items-card h2{padding:15px 15px 0}.items-card h2 small{color:#7d8999}.items-head,.item-row{align-items:center;display:grid;gap:9px;grid-template-columns:.35fr 1fr 1.35fr .75fr 1fr .65fr .7fr 1fr .9fr;padding:10px 13px}.items-head{background:#f7f9fc;color:#59677b;font-size:10px;font-weight:700}.item-row{border-top:1px solid #edf0f4;color:#59677b;font-size:10px;min-height:55px}.source-file strong,.source-file small{display:block;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.source-file small{color:#95a0b0}.project-name{color:#2f3b4d;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.status-tag{border-radius:5px;padding:4px 6px;text-align:center}.status-tag.green{background:#e5f8f0;color:#079c69}.status-tag.blue{background:#e8f2ff;color:#126bea}.status-tag.orange{background:#fff1df;color:#dc7c08}.status-tag.red{background:#ffebec;color:#dd3743}.status-tag.muted{background:#eff2f5;color:#707d90}.item-error{color:#e4454f;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.item-action{display:grid;gap:4px}.item-action a,.item-action button{align-items:center;background:#fff;border:1px solid #dce4ed;border-radius:5px;color:#0864eb;display:flex;font-size:9px;gap:4px;justify-content:center;padding:5px;text-decoration:none}.items-card footer{align-items:center;border-top:1px solid #edf0f4;color:#758196;display:flex;font-size:10px;gap:15px;padding:12px 15px}.items-card footer>div{align-items:center;display:flex;gap:6px;margin-left:auto}.items-card footer button,.items-card footer select{background:#fff;border:1px solid #dce3ec;border-radius:5px;padding:5px}.donut-wrap{align-items:center;display:flex;gap:25px}.donut{align-items:center;background:conic-gradient(#0ab477 0 var(--complete),#1671ef var(--complete) 72%,#efa40c 72% 86%,#ef4a55 86% 100%);border-radius:50%;display:flex;flex-direction:column;height:112px;justify-content:center;position:relative;width:112px}.donut:after{background:#fff;border-radius:50%;content:"";inset:17px;position:absolute}.donut strong,.donut small{position:relative;z-index:1}.donut strong{font-size:20px}.donut small{color:#7b8799;font-size:9px}.donut-wrap ul{display:grid;flex:1;gap:8px;list-style:none;margin:0;padding:0}.donut-wrap li{align-items:center;color:#667489;display:flex;font-size:10px;gap:7px}.donut-wrap li i,.event-list>li>i{background:var(--tone);border-radius:50%;height:7px;width:7px}.green{--tone:#0ab477}.blue{--tone:#1671ef}.orange{--tone:#efa40c}.red{--tone:#ef4a55}.muted{--tone:#9aa4b2}.donut-wrap li b{color:#2c3748;margin-left:auto}.throughput{display:grid;grid-template-columns:repeat(3,1fr)}.throughput>div{align-items:center;display:flex;gap:6px}.throughput svg{background:#edf4ff;border-radius:6px;color:#1671ef;height:28px;padding:6px;width:28px}.throughput small,.throughput strong{display:block}.throughput small{color:#8090a4;font-size:8px}.throughput strong{font-size:10px;margin-top:3px}.sparkline{align-items:flex-end;border-bottom:1px solid #dce8f6;display:flex;gap:6px;height:80px;margin-top:12px}.sparkline i{background:#1671ef;border-radius:3px 3px 0 0;flex:1;opacity:.68}.event-list{display:grid;gap:14px;list-style:none;margin:0;padding:0}.event-list li{align-items:flex-start;display:flex;gap:9px}.event-list>li>i{margin-top:3px}.event-list strong,.event-list small{display:block}.event-list strong{font-size:10px}.event-list small{color:#8995a6;font-size:9px;margin-top:3px;max-width:255px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.detail-error,.detail-loading{background:#fff0f0;border:1px solid #ffc7cb;border-radius:8px;color:#cb3640;margin-top:12px;padding:12px}@media(max-width:1450px){.detail-hero{flex-wrap:wrap}.hero-title{flex-basis:45%}.items-head,.item-row{grid-template-columns:.35fr 1fr 1.35fr .75fr 1fr .7fr .9fr}.items-head>:nth-child(6),.item-row>:nth-child(6),.items-head>:nth-child(8),.item-row>:nth-child(8){display:none}}@media(max-width:1100px){.detail-grid{grid-template-columns:1fr}.detail-grid aside{grid-template-columns:repeat(3,1fr)}.detail-actions{position:static;margin-bottom:12px}.hero-title{flex-basis:100%}}@media(max-width:800px){.detail-grid aside{grid-template-columns:1fr}.current-body{grid-template-columns:70px 1fr}.current-progress{grid-column:1/-1}.items-head{display:none}.item-row{grid-template-columns:1fr auto}.item-row>*{display:none!important}.item-row>.project-name,.item-row>.item-action{display:grid!important}.detail-actions{flex-wrap:wrap}.hero-stat,.hero-text{min-width:65px}}
+</style>

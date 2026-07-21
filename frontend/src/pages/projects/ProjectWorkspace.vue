@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { ArrowLeft, Check, Circle, Settings2 } from 'lucide-vue-next'
+import { Check, Settings2 } from 'lucide-vue-next'
 
 import { getProject } from '../../api/projects'
 import { getProjectTaskStatus, type ProjectTaskStatus } from '../../api/tasks'
@@ -15,63 +15,44 @@ let timer: number | undefined
 
 const items = computed(() => {
   const stage = task.value?.stage || ''
-  const projectStatus = project.value?.status || ''
-  const narrationDone = ['narration_ready', 'video_in_progress', 'review_required', 'completed'].includes(projectStatus)
-  const subtitleDone = narrationDone
-  const storyboardDone = ['asset_search', 'asset_review', 'image_generation', 'image_review', 'scene_render', 'visual_track', 'final_render', 'quality_check', 'quality_review', 'completed'].includes(stage) || ['review_required', 'completed'].includes(projectStatus)
-  const mediaDone = ['scene_render', 'visual_track', 'final_render', 'quality_check', 'quality_review', 'completed'].includes(stage) || projectStatus === 'completed'
-  const renderDone = projectStatus === 'completed' || ['quality_check', 'quality_review', 'completed'].includes(stage)
+  const status = project.value?.status || ''
+  const narrationDone = ['narration_ready', 'video_in_progress', 'review_required', 'completed'].includes(status)
+  const storyboardDone = ['asset_search', 'asset_review', 'scene_render', 'final_render', 'quality_check', 'quality_review', 'completed'].includes(stage) || ['review_required', 'completed'].includes(status)
+  const mediaDone = ['scene_render', 'final_render', 'quality_check', 'quality_review', 'completed'].includes(stage) || status === 'completed'
+  const renderDone = status === 'completed' || ['quality_check', 'quality_review', 'completed'].includes(stage)
   return [
-    { path: 'overview', label: '项目概览', done: true },
-    { path: 'narration', label: '逐字稿与配音', done: narrationDone },
-    { path: 'subtitles', label: '字幕与时间轴', done: subtitleDone },
-    { path: 'storyboard', label: '视觉分镜', done: storyboardDone },
-    { path: 'media-review', label: '素材审核', done: mediaDone },
-    { path: 'render', label: '视频渲染', done: renderDone },
-    { path: 'delivery', label: '质量与交付', done: projectStatus === 'completed' },
+    { path: 'overview', label: '项目概览', hint: '全局状态与下一步', done: true },
+    { path: 'narration', label: '逐字稿与配音', hint: '脚本生成与配音合成', done: narrationDone },
+    { path: 'subtitles', label: '字幕与时间轴', hint: '字幕校对与时间轴', done: narrationDone },
+    { path: 'storyboard', label: '视觉分镜', hint: '镜头设计与分镜', done: storyboardDone },
+    { path: 'media-review', label: '素材审核', hint: '素材筛选与合规审核', done: mediaDone },
+    { path: 'render', label: '视频渲染', hint: '视频合成与渲染输出', done: renderDone },
+    { path: 'delivery', label: '质量与交付', hint: 'QA 检测与交付', done: status === 'completed' },
   ]
 })
 
-const statusLabel = computed(() => ({
-  created: '待开始', narration_in_progress: '配音生成中', narration_ready: '配音字幕已就绪',
-  video_in_progress: '视频生成中', review_required: '等待人工复核', completed: '已完成', failed: '执行失败',
-}[project.value?.status || ''] || project.value?.status || '加载中'))
-
 async function load() {
-  try {
-    const [loadedProject, loadedTask] = await Promise.all([getProject(projectId.value), getProjectTaskStatus(projectId.value)])
-    project.value = loadedProject
-    task.value = loadedTask
-  } catch {
-    // Child pages surface actionable API errors.
-  }
+  try { [project.value, task.value] = await Promise.all([getProject(projectId.value), getProjectTaskStatus(projectId.value)]) }
+  catch { /* child page displays actionable errors */ }
 }
-
-onMounted(() => {
-  void load()
-  timer = window.setInterval(load, 10000)
-})
+onMounted(() => { void load(); timer = window.setInterval(load, 10000) })
 onBeforeUnmount(() => { if (timer !== undefined) window.clearInterval(timer) })
 </script>
 
 <template>
-  <section class="project-workspace">
-    <header class="project-context-bar">
-      <RouterLink class="project-back" to="/projects"><ArrowLeft :size="16" /> 项目</RouterLink>
-      <span class="project-context-divider"></span>
-      <div><strong>{{ project?.name || '加载项目…' }}</strong><small>{{ statusLabel }}</small></div>
-      <span class="project-context-meta">{{ project?.config?.video_mode === 'none' ? '仅配音字幕' : project?.config?.video_output_format === 'fcpxml' ? 'FCPXML 工程' : '完整 MP4' }}</span>
-      <RouterLink class="project-settings-link" :to="`/projects/${projectId}/settings`"><Settings2 :size="15" /> 项目设置</RouterLink>
-    </header>
-
-    <nav class="project-step-nav" aria-label="项目生产步骤">
-      <RouterLink v-for="item in items" :key="item.path" :to="`/projects/${projectId}/${item.path}`" active-class="is-active">
-        <span class="step-state"><Check v-if="item.done" :size="13" /><Circle v-else :size="10" /></span>
-        <span>{{ item.label }}</span>
-      </RouterLink>
-      <RouterLink :to="`/projects/${projectId}/settings`" active-class="is-active"><span class="step-state"><Settings2 :size="13" /></span><span>项目设置</span></RouterLink>
-    </nav>
-
-    <div class="project-page-outlet"><RouterView /></div>
+  <section class="taf-project-workspace">
+    <aside class="taf-project-nav">
+      <h2>项目导航</h2>
+      <nav aria-label="项目生产步骤">
+        <RouterLink v-for="(item, index) in items" :key="item.path" :to="`/projects/${projectId}/${item.path}`" active-class="is-active">
+          <span class="taf-step-number"><Check v-if="item.done && index > 0" :size="14" /> <template v-else>{{ index + 1 }}</template></span>
+          <span><strong>{{ item.label }}</strong><small>{{ item.hint }}</small></span>
+        </RouterLink>
+        <RouterLink :to="`/projects/${projectId}/settings`" active-class="is-active">
+          <span class="taf-step-number">8</span><span><strong>项目设置</strong><small>项目信息与成员权限</small></span>
+        </RouterLink>
+      </nav>
+    </aside>
+    <div class="taf-project-outlet"><RouterView /></div>
   </section>
 </template>

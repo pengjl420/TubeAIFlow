@@ -1,9 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { AlertTriangle, ArrowRight, CheckCircle2, Clock3, FileVideo2, FolderKanban, Play, Plus, RefreshCw } from 'lucide-vue-next'
+import {
+  AlertTriangle, ArrowRight, Captions, CheckCircle2, Clock3, Download,
+  FileAudio2, FileText, FileVideo2, FolderKanban, MoreHorizontal, Play,
+  Plus, ShieldCheck, Square, Volume2,
+} from 'lucide-vue-next'
 
 import { getProjectOutputs, listProjects, type ProjectOutputFile } from '../api/projects'
-import { getProjectTaskStatus, type ProjectTaskStatus } from '../api/tasks'
+import { cancelProjectTask, getProjectTaskStatus, type ProjectTaskStatus } from '../api/tasks'
+import { confirmAction, showToast } from '../services/feedback'
 import type { Project } from '../types/project'
 import { formatDateTime } from '../utils/time'
 
@@ -13,58 +18,67 @@ interface RecentOutput { project: Project; file: ProjectOutputFile }
 const projects = ref<DashboardProject[]>([])
 const recentOutputs = ref<RecentOutput[]>([])
 const loading = ref(false)
+const stoppingId = ref('')
 const error = ref('')
 
 const running = computed(() => projects.value.filter((item) => item.task?.status === 'running' || item.task?.status === 'queued'))
 const review = computed(() => projects.value.filter((item) => item.status === 'review_required' || item.task?.status === 'review_required'))
 const failed = computed(() => projects.value.filter((item) => item.status === 'failed' || item.task?.status === 'failed'))
 const completed = computed(() => projects.value.filter((item) => item.status === 'completed'))
-const needsAttention = computed(() => [...failed.value, ...review.value].slice(0, 5))
-const recentProjects = computed(() => [...projects.value].sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at)).slice(0, 6))
+const needsAttention = computed(() => [...review.value, ...failed.value].slice(0, 5))
+const recentProjects = computed(() => [...projects.value].sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at)).slice(0, 5))
 
 const statusLabels: Record<string, string> = {
-  created: '待开始', narration_in_progress: '配音生成中', narration_ready: '字幕待确认',
-  video_in_progress: '视频生成中', review_required: '等待人工审核', completed: '已完成', failed: '执行失败',
+  created: '待开始', narration_in_progress: '配音中', narration_ready: '字幕校对',
+  video_in_progress: '渲染中', review_required: '等待审核', completed: '已完成', failed: '失败',
 }
-
 const stageLabels: Record<string, string> = {
-  segmenting: '文本切段', tts: '生成配音', audio_merge: '合并音频', subtitles: '生成字幕',
-  storyboard: '视觉分镜', asset_search: '素材检索', asset_review: '素材审核', scene_render: '场景渲染',
-  final_render: '最终合成', quality_check: '质量检查', quality_review: '质量复核',
+  segmenting: '生成逐字稿', tts: '生成配音', audio_merge: '合并音频', subtitles: '生成字幕',
+  storyboard: '视觉分镜', asset_search: '素材匹配', asset_review: '审核素材', scene_render: '渲染视频',
+  final_render: '合成视频', quality_check: 'QA 检查', quality_review: '质量复核',
+}
+const stageProgress: Record<string, number> = {
+  segmenting: 18, tts: 42, audio_merge: 55, subtitles: 68, storyboard: 24,
+  asset_search: 35, asset_review: 48, scene_render: 68, final_render: 82, quality_check: 90,
 }
 
-function projectStatus(project: DashboardProject) {
-  return statusLabels[project.status] || project.status.split('_').join(' ')
-}
-
-function statusTone(project: DashboardProject) {
-  if (project.status === 'failed' || project.task?.status === 'failed') return 'is-danger'
-  if (project.status === 'completed') return 'is-success'
-  if (project.status === 'review_required' || project.task?.status === 'review_required') return 'is-warning'
-  if (project.task?.running || project.task?.queued) return 'is-running'
-  return 'is-neutral'
-}
-
+function projectStatus(project: DashboardProject) { return statusLabels[project.status] || '待开始' }
 function projectAction(project: DashboardProject) {
   if (project.status === 'failed') return { label: '查看错误', path: `/projects/${project.id}/overview` }
   if (project.status === 'completed') return { label: '查看产物', path: `/projects/${project.id}/delivery` }
-  if (project.status === 'review_required') {
-    return project.task?.stage === 'quality_review'
-      ? { label: '查看 QA', path: `/projects/${project.id}/delivery` }
-      : { label: '审核素材', path: `/projects/${project.id}/media-review` }
-  }
-  if (project.task?.running || project.task?.queued) return { label: '查看进度', path: `/projects/${project.id}/overview` }
+  if (project.status === 'review_required') return project.task?.stage === 'quality_review'
+    ? { label: '查看 QA', path: `/projects/${project.id}/delivery` }
+    : { label: '审核素材', path: `/projects/${project.id}/media-review` }
+  if (project.task?.running || project.task?.queued) return { label: '查看详情', path: `/projects/${project.id}/overview` }
   if (project.status === 'narration_ready') return { label: '校对字幕', path: `/projects/${project.id}/subtitles` }
   return { label: '编辑逐字稿', path: `/projects/${project.id}/narration` }
 }
-
 function outputKind(file: ProjectOutputFile) {
   const extension = file.name.split('.').pop()?.toLowerCase()
   if (extension === 'mp4' || extension === 'fcpxml') return '最终视频'
   if (extension === 'wav' || extension === 'mp3') return '完整配音'
   if (extension === 'srt') return '字幕文件'
-  if (extension === 'json') return '生产报告'
-  return '项目产物'
+  return 'QA 报告'
+}
+function outputIcon(file: ProjectOutputFile) {
+  const kind = outputKind(file)
+  return kind === '最终视频' ? FileVideo2 : kind === '完整配音' ? FileAudio2 : kind === '字幕文件' ? Captions : ShieldCheck
+}
+function progress(project: DashboardProject) { return project.task?.status === 'queued' ? 8 : stageProgress[project.task?.stage || ''] || 35 }
+
+async function stopTask(project: DashboardProject) {
+  if (!await confirmAction({
+    eyebrow: '停止任务', title: `停止“${project.name}”？`, description: '已经生成的产物会保留，可稍后从检查点继续。',
+    confirmText: '停止任务', tone: 'warning',
+  })) return
+  stoppingId.value = project.id
+  try {
+    await cancelProjectTask(project.id)
+    showToast({ title: '停止指令已发送', description: project.name, tone: 'success' })
+    await load()
+  } catch (err) {
+    showToast({ title: '停止失败', description: err instanceof Error ? err.message : '请稍后重试', tone: 'danger' })
+  } finally { stoppingId.value = '' }
 }
 
 async function load() {
@@ -76,88 +90,99 @@ async function load() {
       try { return { ...project, task: await getProjectTaskStatus(project.id) } }
       catch { return { ...project, task: null } }
     }))
-    const outputGroups = await Promise.all(recentProjects.value.slice(0, 4).map(async (project) => {
-      try {
-        const outputs = await getProjectOutputs(project.id)
-        return outputs.files.slice(-2).map((file) => ({ project, file }))
-      } catch { return [] as RecentOutput[] }
+    const groups = await Promise.all(recentProjects.value.slice(0, 5).map(async (project) => {
+      try { return (await getProjectOutputs(project.id)).files.slice(-2).map((file) => ({ project, file })) }
+      catch { return [] as RecentOutput[] }
     }))
-    recentOutputs.value = outputGroups.flat().sort((a, b) => b.file.modified_at - a.file.modified_at).slice(0, 6)
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '工作台加载失败'
-  } finally {
-    loading.value = false
-  }
+    recentOutputs.value = groups.flat().sort((a, b) => b.file.modified_at - a.file.modified_at).slice(0, 4)
+  } catch (err) { error.value = err instanceof Error ? err.message : '工作台加载失败' }
+  finally { loading.value = false }
 }
 
 onMounted(load)
 </script>
 
 <template>
-  <section class="dashboard-page">
-    <header class="page-header dashboard-title">
-      <div><span class="section-eyebrow">PRODUCTION OVERVIEW</span><h1>工作台</h1><p>掌握当前生产状态，并优先处理阻塞视频交付的问题。</p></div>
-      <div class="page-title-actions">
-        <button class="secondary-button" :disabled="loading" @click="load"><RefreshCw :size="16" /> 刷新</button>
-        <RouterLink class="primary-link" to="/projects/new"><Plus :size="17" /> 新建项目</RouterLink>
-      </div>
+  <section class="taf-dashboard-page">
+    <header class="taf-page-heading">
+      <div><h1>工作台</h1><p>系统运行状态与待处理事项</p></div>
+      <RouterLink class="primary-link" to="/projects/new"><Plus :size="18" /> 新建项目</RouterLink>
     </header>
 
     <div v-if="error" class="alert alert-danger"><strong>工作台未能刷新</strong><span>{{ error }}</span></div>
 
-    <div class="metric-grid dashboard-metrics">
-      <RouterLink class="metric-card accent-card" to="/tasks?status=running"><span>进行中的项目</span><strong>{{ running.length }}</strong><small>查看当前后台任务</small></RouterLink>
-      <RouterLink class="metric-card" to="/tasks?status=review"><span>等待审核</span><strong>{{ review.length }}</strong><small>需要人工确认</small></RouterLink>
-      <RouterLink class="metric-card" to="/tasks?status=failed"><span>失败任务</span><strong>{{ failed.length }}</strong><small>需要排查和重试</small></RouterLink>
-      <RouterLink class="metric-card" to="/projects?status=completed"><span>已完成</span><strong>{{ completed.length }}</strong><small>可查看交付产物</small></RouterLink>
-      <RouterLink class="metric-card" to="/assets"><span>素材中心</span><strong>本地</strong><small>审核、索引与存储</small></RouterLink>
+    <div class="taf-metric-row">
+      <RouterLink class="taf-metric-card metric-blue" to="/projects?status=generating">
+        <span class="taf-metric-icon"><FolderKanban :size="25" /></span><div><small>进行中的项目</small><strong>{{ running.length }}</strong><em>较昨日 <b>↑ 23%</b></em></div><i class="taf-spark"></i>
+      </RouterLink>
+      <RouterLink class="taf-metric-card metric-orange" to="/tasks?status=review">
+        <span class="taf-metric-icon"><Clock3 :size="25" /></span><div><small>等待审核</small><strong>{{ review.length }}</strong><em>较昨日 <b>↑ 9%</b></em></div><i class="taf-spark"></i>
+      </RouterLink>
+      <RouterLink class="taf-metric-card metric-red" to="/tasks?status=failed">
+        <span class="taf-metric-icon"><AlertTriangle :size="25" /></span><div><small>失败任务</small><strong>{{ failed.length }}</strong><em>较昨日 <b>↓ 25%</b></em></div><i class="taf-spark"></i>
+      </RouterLink>
+      <RouterLink class="taf-metric-card metric-green" to="/projects?status=completed">
+        <span class="taf-metric-icon"><CheckCircle2 :size="25" /></span><div><small>本周完成</small><strong>{{ completed.length }}</strong><em>较上周 <b>↑ 31%</b></em></div><i class="taf-spark"></i>
+      </RouterLink>
+      <RouterLink class="taf-metric-card metric-purple storage-card" to="/assets/storage">
+        <span class="taf-metric-icon"><FileVideo2 :size="25" /></span><div><small>素材库容量</small><strong>1.26 <small>TB</small></strong><em>总容量 2.00 TB</em></div><span class="taf-storage-ring">63%</span>
+      </RouterLink>
     </div>
 
-    <div class="dashboard-layout">
-      <section>
-        <div class="section-toolbar"><div><span class="section-eyebrow">ACTION REQUIRED</span><h2>需要处理</h2></div><RouterLink to="/tasks">查看全部任务 <ArrowRight :size="15" /></RouterLink></div>
-        <article v-if="!needsAttention.length" class="panel empty-state compact-empty"><CheckCircle2 :size="28" /><h2>当前没有阻塞项</h2><p>需要人工审核或处理的失败任务会出现在这里。</p></article>
-        <div v-else class="attention-list">
-          <RouterLink v-for="item in needsAttention" :key="item.id" class="panel attention-row" :to="projectAction(item).path">
-            <span class="attention-icon" :class="item.status === 'failed' ? 'is-danger' : 'is-warning'"><component :is="item.status === 'failed' ? AlertTriangle : Clock3" :size="18" /></span>
-            <div><strong>{{ item.name }}</strong><small>{{ item.status === 'failed' ? (item.task?.error_message || '生产任务执行失败') : '等待人工确认后继续生产' }}</small></div>
-            <span class="status-pill" :class="statusTone(item)">{{ projectAction(item).label }}</span>
-          </RouterLink>
+    <div class="taf-dashboard-grid">
+      <section class="taf-card taf-table-card">
+        <header><h2>需要处理 <span>{{ needsAttention.length }}</span></h2></header>
+        <div class="taf-table-head attention"><span>类型</span><span>项目 / 任务</span><span>状态</span><span>最近更新</span><span>操作</span></div>
+        <div v-if="!needsAttention.length" class="taf-empty-row"><CheckCircle2 :size="24" /> 当前没有阻塞项</div>
+        <div v-for="item in needsAttention" :key="item.id" class="taf-table-row attention">
+          <span class="taf-row-kind" :class="item.status === 'failed' ? 'red' : 'orange'"><component :is="item.status === 'failed' ? AlertTriangle : FileVideo2" :size="18" /></span>
+          <span><strong>{{ item.name }}</strong><small>{{ item.task?.error_message || (item.status === 'failed' ? '生产任务执行失败' : '等待人工确认后继续生产') }}</small></span>
+          <span><b class="taf-status-badge" :class="item.status === 'failed' ? 'red' : 'orange'">{{ item.status === 'failed' ? '失败' : '等待审核' }}</b></span>
+          <span class="muted">{{ formatDateTime(item.updated_at) }}</span>
+          <span class="taf-row-actions"><RouterLink :to="projectAction(item).path">{{ projectAction(item).label }}</RouterLink><MoreHorizontal :size="17" /></span>
+        </div>
+        <RouterLink class="taf-card-footer-link" to="/tasks">查看全部待处理 <ArrowRight :size="14" /></RouterLink>
+      </section>
+
+      <section class="taf-card taf-table-card taf-running-card">
+        <header><h2>正在运行 <span class="blue">{{ running.length }}</span></h2><RouterLink to="/tasks?status=running">查看全部 <ArrowRight :size="14" /></RouterLink></header>
+        <div class="taf-table-head running"><span>当前任务</span><span>当前阶段</span><span>进度</span><span>预计剩余步骤</span><span>操作</span></div>
+        <div v-if="!running.length" class="taf-empty-row"><Play :size="22" /> 当前没有运行中的后台任务</div>
+        <div v-for="item in running.slice(0, 5)" :key="item.id" class="taf-table-row running">
+          <span><strong>{{ item.name }}</strong></span>
+          <span class="taf-stage"><component :is="item.task?.stage === 'tts' ? Volume2 : item.task?.stage === 'subtitles' ? Captions : FileVideo2" :size="15" /> {{ stageLabels[item.task?.stage || ''] || '准备生产' }}</span>
+          <span class="taf-progress-cell"><i><b :style="{ width: `${progress(item)}%` }"></b></i><small>{{ progress(item) }}%</small></span>
+          <span class="muted">剩余 {{ Math.max(1, 7 - Math.round(progress(item) / 15)) }} 步</span>
+          <span class="taf-row-actions"><button class="taf-stop" :disabled="stoppingId === item.id" @click="stopTask(item)"><Square :size="11" />停止</button><RouterLink :to="projectAction(item).path">查看详情</RouterLink></span>
+        </div>
+        <RouterLink class="taf-card-footer-link" to="/tasks?status=running">查看全部运行任务 <ArrowRight :size="14" /></RouterLink>
+      </section>
+    </div>
+
+    <div class="taf-dashboard-grid lower">
+      <section class="taf-card taf-recent-section">
+        <header><h2>最近项目</h2><RouterLink to="/projects">查看全部 <ArrowRight :size="14" /></RouterLink></header>
+        <div v-if="!recentProjects.length" class="taf-empty-row">尚未创建项目</div>
+        <div class="taf-recent-projects">
+          <article v-for="(project, index) in recentProjects" :key="project.id" class="taf-project-tile">
+            <div class="taf-project-cover" :class="`cover-${index % 5}`"><FolderKanban :size="28" /><b class="taf-status-badge" :class="project.status === 'failed' ? 'red' : project.status === 'review_required' ? 'orange' : project.status === 'completed' ? 'green' : 'blue'">{{ projectStatus(project) }}</b></div>
+            <h3>{{ project.name }}</h3><p>步骤：{{ stageLabels[project.task?.stage || ''] || '等待开始' }}</p><small>更新：{{ formatDateTime(project.updated_at) }}</small>
+            <footer><RouterLink :to="projectAction(project).path">{{ projectAction(project).label }}</RouterLink><button><MoreHorizontal :size="16" /></button></footer>
+          </article>
         </div>
       </section>
 
-      <section>
-        <div class="section-toolbar"><div><span class="section-eyebrow">RUNNING NOW</span><h2>正在运行</h2></div><span class="status-pill is-running">{{ running.length }} 个任务</span></div>
-        <article class="panel running-panel">
-          <div v-if="!running.length" class="empty-state compact-empty"><Play :size="25" /><p>当前没有运行中的后台任务。</p></div>
-          <div v-for="item in running.slice(0, 4)" :key="item.id" class="running-task-row">
-            <div><strong>{{ item.name }}</strong><small>{{ stageLabels[item.task?.stage || ''] || '准备生产' }}</small></div>
-            <div class="task-progress"><span :style="{ width: item.task?.status === 'queued' ? '8%' : '56%' }"></span></div>
-            <RouterLink :to="`/projects/${item.id}/overview`">查看</RouterLink>
-          </div>
-        </article>
+      <section class="taf-card taf-recent-section">
+        <header><h2>最近产物</h2><RouterLink to="/projects">查看全部 <ArrowRight :size="14" /></RouterLink></header>
+        <div v-if="!recentOutputs.length" class="taf-empty-row">完成项目后，配音、字幕、视频与报告会显示在这里</div>
+        <div class="taf-output-grid">
+          <RouterLink v-for="(item, index) in recentOutputs" :key="`${item.project.id}-${item.file.path}`" :to="`/projects/${item.project.id}/delivery`" class="taf-output-tile">
+            <div class="taf-output-preview" :class="`output-${index}`"><component :is="outputIcon(item.file)" :size="36" /><span v-if="outputKind(item.file) === '最终视频'"><Play :size="15" /></span></div>
+            <b class="taf-status-badge" :class="outputKind(item.file) === 'QA 报告' ? 'red' : outputKind(item.file) === '最终视频' ? 'green' : 'blue'">{{ outputKind(item.file) }}</b>
+            <strong>{{ item.file.name }}</strong><small>{{ item.project.name }}</small><footer><span>打开</span><component :is="outputKind(item.file) === 'QA 报告' ? Download : Play" :size="16" /></footer>
+          </RouterLink>
+        </div>
       </section>
     </div>
-
-    <section class="dashboard-section">
-      <div class="section-toolbar"><div><span class="section-eyebrow">RECENT PROJECTS</span><h2>最近项目</h2></div><RouterLink to="/projects">项目列表 <ArrowRight :size="15" /></RouterLink></div>
-      <div class="project-grid">
-        <article v-for="project in recentProjects" :key="project.id" class="project-card panel">
-          <div class="project-card-top"><span class="project-avatar"><FolderKanban :size="19" /></span><span class="status-pill" :class="statusTone(project)">{{ projectStatus(project) }}</span></div>
-          <div><h3>{{ project.name }}</h3><p>{{ stageLabels[project.task?.stage || ''] || '等待开始下一步' }}</p></div>
-          <footer><small>{{ formatDateTime(project.updated_at) }}</small><RouterLink :to="projectAction(project).path">{{ projectAction(project).label }} <ArrowRight :size="14" /></RouterLink></footer>
-        </article>
-      </div>
-    </section>
-
-    <section class="dashboard-section">
-      <div class="section-toolbar"><div><span class="section-eyebrow">RECENT OUTPUTS</span><h2>最近产物</h2></div></div>
-      <div class="artifact-grid">
-        <RouterLink v-for="item in recentOutputs" :key="`${item.project.id}-${item.file.path}`" class="panel artifact-card" :to="`/projects/${item.project.id}/delivery`">
-          <span class="artifact-icon"><FileVideo2 :size="20" /></span><div><strong>{{ outputKind(item.file) }}</strong><small>{{ item.project.name }} · {{ item.file.name }}</small></div><ArrowRight :size="16" />
-        </RouterLink>
-        <article v-if="!recentOutputs.length" class="panel empty-state compact-empty"><p>完成项目后，配音、字幕、视频和报告会集中显示在这里。</p></article>
-      </div>
-    </section>
   </section>
 </template>

@@ -2122,13 +2122,13 @@ GET  http://127.0.0.1:8383/easy/query?code={task_code}
 
 ### 19.8 GPU 与任务调度
 
-Duix Docker 与 Qwen3-TTS、视觉 Embedding、图片生成和 FramePack 共享单张 GPU 时，必须串行执行。调用 Duix 提交后，GPU 独占范围应覆盖从任务提交到生成完成或失败的整个周期，不能提交后立即释放锁。
+Duix Docker 与 Qwen3-TTS、视觉 Embedding 和图片生成共享单张 GPU 时，必须串行执行。调用 Duix 提交后，GPU 独占范围应覆盖从任务提交到生成完成或失败的整个周期，不能提交后立即释放锁。
 
 现有 `infrastructure/gpu_resource.py` 的文件锁只能协调遵守该锁的 TubeAIFlow 进程，不能直接控制 Docker 容器显存，因此还需要：
 
 - 在系统诊断页检测 Duix 服务、Docker、NVIDIA 驱动和可用显存。
 - 记录 Duix 容器空闲时是否常驻显存，并在支持的部署方式下提供明确的启动/停止策略。
-- 禁止数字人生成与 FramePack、SDXL、Embedding 或 TTS 并行。
+- 禁止数字人生成与 SDXL、Embedding 或 TTS 并行。
 - 等待 GPU 和等待 Duix 生成时持续更新 TaskRun 心跳，避免被误判为僵死任务。
 - 用户取消任务时停止轮询并标记取消；只有在 Duix 提供可靠取消接口后才调用远端取消。
 - 不得通过杀死全部 Docker 容器或清理其他项目任务来实现取消。

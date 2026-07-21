@@ -133,7 +133,7 @@ export interface SceneAssignment {
   trim_end_ms: number | null
   playback_speed: number
   display_duration_ms: number | null
-  render_mode: 'auto' | 'ffmpeg' | 'framepack'
+  render_mode: 'auto' | 'ffmpeg'
   motion_type:
     | 'auto'
     | 'static'

@@ -47,25 +47,6 @@ export interface SystemSettings {
   image_generation_candidates_per_scene: number
   image_generation_cpu_offload: boolean
   image_generation_negative_prompt: string
-  framepack_enabled: boolean
-  framepack_auto_start_worker: boolean
-  framepack_python: string | null
-  framepack_cache_dir: string | null
-  framepack_worker_host: string
-  framepack_worker_port: number
-  framepack_model_id: string
-  framepack_base_model_id: string
-  framepack_sampling_type: string
-  framepack_allow_model_download: boolean
-  framepack_width: number
-  framepack_height: number
-  framepack_steps: number
-  framepack_guidance_scale: number
-  framepack_cpu_offload: boolean
-  framepack_max_ratio: number
-  framepack_max_retries: number
-  framepack_startup_timeout_seconds: number
-  framepack_job_timeout_seconds: number
   qwen_tts_root: string | null
   qwen_tts_python: string | null
   qwen_tts_model_dir: string | null
@@ -104,20 +85,6 @@ export interface MediaProviderStatus {
   updated_at: string | null
 }
 
-export interface FramePackStatus {
-  enabled: boolean
-  configured: boolean
-  worker: { managed: boolean; running: boolean; pid: number | null }
-  health: {
-    status: 'starting' | 'loading_model' | 'ready' | 'busy' | 'unavailable' | 'error'
-    model_loaded: boolean
-    gpu?: string | null
-    free_vram_gb?: number | null
-    current_job_id?: string | null
-    error?: string | null
-  } | null
-}
-
 export async function getSystemSettings(): Promise<SystemSettings> {
   return unwrap<SystemSettings>(await apiClient.get('/settings'))
 }
@@ -137,10 +104,6 @@ export async function getMediaProviderStatuses(): Promise<MediaProviderStatus[]>
 
 export async function getFfmpegStatus(): Promise<FfmpegStatus> {
   return unwrap<FfmpegStatus>(await apiClient.get('/settings/ffmpeg/status'))
-}
-
-export async function getFramePackStatus(): Promise<FramePackStatus> {
-  return unwrap<FramePackStatus>(await apiClient.get('/settings/framepack/status'))
 }
 
 export async function installFfmpeg(): Promise<FfmpegInstallResult> {

@@ -6,13 +6,11 @@ import { selectDirectory } from '../../api/projects'
 import {
   clearSystemSecret,
   getFfmpegStatus,
-  getFramePackStatus,
   getMediaProviderStatuses,
   getSystemSettings,
   installFfmpeg,
   saveSystemSettings,
   type FfmpegStatus,
-  type FramePackStatus,
   type LandscapeTransitionName,
   type MediaProviderStatus,
   type SystemSettings,
@@ -23,7 +21,6 @@ const loading = ref(false)
 const saving = ref(false)
 const installingFfmpeg = ref(false)
 const ffmpegStatus = ref<FfmpegStatus | null>(null)
-const framepackStatus = ref<FramePackStatus | null>(null)
 const mediaProviderStatuses = ref<MediaProviderStatus[]>([])
 const error = ref('')
 const message = ref('')
@@ -50,16 +47,14 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [loadedSettings, loadedFfmpegStatus, loadedProviderStatuses, loadedFramePackStatus] = await Promise.all([
+    const [loadedSettings, loadedFfmpegStatus, loadedProviderStatuses] = await Promise.all([
       getSystemSettings(),
       getFfmpegStatus(),
       getMediaProviderStatuses(),
-      getFramePackStatus(),
     ])
     settings.value = loadedSettings
     ffmpegStatus.value = loadedFfmpegStatus
     mediaProviderStatuses.value = loadedProviderStatuses
-    framepackStatus.value = loadedFramePackStatus
   } catch (err) {
     error.value = err instanceof Error ? err.message : '系统设置加载失败'
   } finally {
@@ -239,41 +234,6 @@ onMounted(load)
           </button>
         </div>
         <div class="notice">系统设置数据库固定保存在 <code>backend/workspace/app.db</code>，不会随着“工作目录”一起移动。</div>
-        </div>
-      </details>
-
-      <details class="panel settings-disclosure">
-        <summary>
-          <span class="settings-disclosure-heading"><strong>FramePack 图片转视频</strong><small>独立常驻 Worker 与混合渲染</small></span>
-          <span class="settings-disclosure-icon" aria-hidden="true">⌄</span>
-        </summary>
-        <div class="settings-disclosure-content">
-          <p class="section-description">FramePack 在独立 Python 环境中常驻并串行生成重点镜头；不可用、超时、OOM 或质量不合格时自动降级到 FFmpeg。</p>
-          <div class="notice">
-            Worker：{{ framepackStatus?.health?.status || 'unavailable' }}；
-            模型：{{ framepackStatus?.health?.model_loaded ? '已加载' : '未加载' }}；
-            GPU：{{ framepackStatus?.health?.gpu || '未检测' }}
-            <template v-if="framepackStatus?.health?.error">；{{ framepackStatus.health.error }}</template>
-          </div>
-          <div class="form-grid">
-            <label class="checkbox-field"><input v-model="settings.framepack_enabled" type="checkbox" /><span><strong>启用混合渲染</strong><small>只对符合风险规则的重点图片镜头启用。</small></span></label>
-            <label class="checkbox-field"><input v-model="settings.framepack_auto_start_worker" type="checkbox" /><span><strong>自动启动 Worker</strong><small>需要先配置独立 Python 环境。</small></span></label>
-            <label class="field full-width"><span>FramePack Python</span><input v-model="settings.framepack_python" placeholder="D:\FramePack\.venv\Scripts\python.exe" /></label>
-            <label class="field full-width"><span>Hugging Face 模型缓存目录</span><input v-model="settings.framepack_cache_dir" placeholder="D:\FramePack\hf_download" /></label>
-            <label class="field"><span>Worker 地址</span><input v-model="settings.framepack_worker_host" /></label>
-            <label class="field"><span>Worker 端口</span><input v-model.number="settings.framepack_worker_port" type="number" min="1" max="65535" /></label>
-            <label class="field full-width"><span>FramePack Transformer</span><input v-model="settings.framepack_model_id" /></label>
-            <label class="field full-width"><span>HunyuanVideo 基础模型</span><input v-model="settings.framepack_base_model_id" /></label>
-            <label class="field"><span>采样策略</span><select v-model="settings.framepack_sampling_type"><option value="vanilla">F1 vanilla</option><option value="inverted_anti_drifting">Inverted anti-drifting</option></select></label>
-            <label class="checkbox-field"><input v-model="settings.framepack_allow_model_download" type="checkbox" /><span><strong>允许下载模型</strong><small>首次可能下载超过 30GB，默认关闭。</small></span></label>
-            <label class="field"><span>生成宽度</span><input v-model.number="settings.framepack_width" type="number" min="256" max="1920" step="16" /></label>
-            <label class="field"><span>生成高度</span><input v-model.number="settings.framepack_height" type="number" min="256" max="1088" step="16" /></label>
-            <label class="field"><span>采样步数</span><input v-model.number="settings.framepack_steps" type="number" min="1" max="100" /></label>
-            <label class="field"><span>Guidance Scale</span><input v-model.number="settings.framepack_guidance_scale" type="number" min="1" max="32" step="0.1" /></label>
-            <label class="field"><span>最大镜头比例</span><input v-model.number="settings.framepack_max_ratio" type="number" min="0" max="1" step="0.05" /></label>
-            <label class="field"><span>失败重试次数</span><input v-model.number="settings.framepack_max_retries" type="number" min="0" max="3" /></label>
-            <label class="checkbox-field"><input v-model="settings.framepack_cpu_offload" type="checkbox" /><span><strong>CPU Offload</strong><small>8GB 显存建议开启。</small></span></label>
-          </div>
         </div>
       </details>
 

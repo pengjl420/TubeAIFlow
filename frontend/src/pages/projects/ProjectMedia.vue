@@ -662,7 +662,6 @@ onMounted(load)
                     <select v-model="assignment.render_mode">
                       <option value="auto">自动路由</option>
                       <option value="ffmpeg">FFmpeg</option>
-                      <option value="framepack">FramePack 优先</option>
                     </select>
                   </label>
                   <label>

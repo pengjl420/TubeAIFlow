@@ -1,6 +1,5 @@
 import hashlib
 import json
-import logging
 from pathlib import Path
 
 from sqlmodel import Session, select
@@ -20,13 +19,11 @@ from app.models.media import (
 from app.models.project import Project
 from app.models.storyboard import VisualScene
 from app.services.rendering import timeline_composer
-from app.services.rendering import framepack_renderer, scene_router
 from app.services.rendering.motion_presets import select_motion_preset
 from app.services.rendering.render_config import get_project_render_config
 from app.services.rendering.scene_quality_checker import check_scene_video
 
 
-logger = logging.getLogger(__name__)
 RENDER_TIMING_VERSION = 3
 
 
@@ -57,8 +54,6 @@ def render_all_scenes(session: Session, project: Project) -> dict:
     if missing:
         raise ValueError(f"仍有 {len(missing)} 个场景未确认素材")
 
-    routes = scene_router.route_project_scenes(session, scenes, assignments, settings)
-
     rendered = []
     skipped = []
     for scene in scenes:
@@ -67,7 +62,6 @@ def render_all_scenes(session: Session, project: Project) -> dict:
             project,
             scene,
             assignments[scene.id],
-            route=routes[scene.id],
         )
         (skipped if result["skipped"] else rendered).append(result)
     return {"rendered": rendered, "skipped": skipped, "total": len(scenes)}
@@ -78,7 +72,6 @@ def render_scene(
     project: Project,
     scene: VisualScene,
     assignment: SceneAssignment | list[SceneAssignment] | None = None,
-    route: scene_router.SceneRoute | None = None,
 ) -> dict:
     if scene.project_id != project.id:
         raise ValueError("视觉场景不属于当前项目")
@@ -122,26 +115,15 @@ def render_scene(
     )
     duration = frame_count / config.video.fps
     presets = _resolved_presets(project, scene, clips)
-    route = route or scene_router.route_single_scene(session, scene, assignments, settings)
-    provider_config = _provider_config(settings) if route.provider == "framepack" else {}
     signature = _render_signature(
         scene,
         clips,
         config.model_dump(),
         presets,
-        route.provider,
-        provider_config,
     )
     manifest = _read_json(manifest_path)
     previous = manifest.get(scene.id)
-    cache_provider_matches = bool(
-        previous
-        and (
-            route.provider == "ffmpeg"
-            or previous.get("provider") == route.provider
-        )
-    )
-    if previous and previous.get("signature") == signature and cache_provider_matches and output_path.is_file():
+    if previous and previous.get("signature") == signature and output_path.is_file():
         try:
             quality = check_scene_video(
                 output_path,
@@ -156,58 +138,24 @@ def render_scene(
                 True,
                 presets,
                 quality,
-                route.provider,
-                previous.get("provider", route.provider),
-                previous.get("fallback_reason"),
+                "ffmpeg",
+                "ffmpeg",
+                None,
                 previous.get("attempts", 1),
             )
         except RuntimeError:
             pass
 
-    actual_provider = route.provider
-    fallback_reason = None
     attempts = 1
-    if route.provider == "framepack":
-        try:
-            if len(clips) != 1 or clips[0][2].media_type != "image":
-                raise ValueError("FramePack 只支持单张图片镜头")
-            details = framepack_renderer.render_framepack_scene(
-                project,
-                scene,
-                clips[0][3],
-                output_path,
-                settings,
-                config,
-                frame_count,
-            )
-            attempts = details["attempts"]
-        except (OSError, RuntimeError, ValueError) as exc:
-            actual_provider = "ffmpeg"
-            fallback_reason = f"{type(exc).__name__}: {exc}"
-            logger.warning(
-                "FramePack scene %s failed; falling back to FFmpeg: %s",
-                scene.id,
-                fallback_reason,
-            )
-            args = _scene_ffmpeg_args(
-                output_path,
-                frame_count,
-                scene.start_ms,
-                clips,
-                presets,
-                config.video,
-            )
-            run_ffmpeg(args, project.id)
-    else:
-        args = _scene_ffmpeg_args(
-            output_path,
-            frame_count,
-            scene.start_ms,
-            clips,
-            presets,
-            config.video,
-        )
-        run_ffmpeg(args, project.id)
+    args = _scene_ffmpeg_args(
+        output_path,
+        frame_count,
+        scene.start_ms,
+        clips,
+        presets,
+        config.video,
+    )
+    run_ffmpeg(args, project.id)
     quality = check_scene_video(
         output_path,
         duration,
@@ -225,11 +173,11 @@ def render_scene(
         "start_frame": start_frame,
         "end_frame": end_frame,
         "frame_count": frame_count,
-        "requested_provider": route.provider,
-        "provider": actual_provider,
-        "route_reason": route.reason,
+        "requested_provider": "ffmpeg",
+        "provider": "ffmpeg",
+        "route_reason": "FFmpeg 是默认渲染方式",
         "attempts": attempts,
-        "fallback_reason": fallback_reason,
+        "fallback_reason": None,
         "motion_presets": presets,
         "quality": quality,
     }
@@ -244,9 +192,9 @@ def render_scene(
         False,
         presets,
         quality,
-        route.provider,
-        actual_provider,
-        fallback_reason,
+        "ffmpeg",
+        "ffmpeg",
+        None,
         attempts,
     )
 
@@ -513,8 +461,6 @@ def _render_signature(
     clips: list[tuple[SceneAssignment, MediaShot, MediaFile, Path]],
     render_config: dict,
     presets: list[str],
-    provider: str,
-    provider_config: dict,
 ) -> str:
     value = {
         "render_timing_version": RENDER_TIMING_VERSION,
@@ -529,8 +475,6 @@ def _render_signature(
         ],
         "render_config": render_config,
         "motion_presets": presets,
-        "provider": provider,
-        "provider_config": provider_config,
     }
     raw = json.dumps(value, sort_keys=True, ensure_ascii=False, default=str)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
@@ -577,20 +521,6 @@ def _resolved_presets(
             select_motion_preset(project.id, scene, assignment, presets)
         )
     return presets
-
-
-def _provider_config(settings) -> dict:
-    return {
-        "model_id": settings.framepack_model_id,
-        "base_model_id": settings.framepack_base_model_id,
-        "sampling_type": settings.framepack_sampling_type,
-        "width": settings.framepack_width,
-        "height": settings.framepack_height,
-        "steps": settings.framepack_steps,
-        "guidance_scale": settings.framepack_guidance_scale,
-        "cpu_offload": settings.framepack_cpu_offload,
-        "max_retries": settings.framepack_max_retries,
-    }
 
 
 def _read_json(path: Path) -> dict:

@@ -86,28 +86,6 @@ def install_ffmpeg(session: Session) -> dict:
     return install(session)
 
 
-def get_framepack_status() -> dict:
-    from app.integrations.framepack.client import FramePackClient, FramePackUnavailableError
-    from app.integrations.framepack.process_manager import worker_process_status
-
-    settings = get_settings()
-    result = {
-        "enabled": settings.framepack_enabled,
-        "configured": bool(settings.framepack_python),
-        "worker": worker_process_status(),
-        "health": None,
-    }
-    try:
-        result["health"] = FramePackClient(settings).health(start_if_needed=False).model_dump()
-    except FramePackUnavailableError as exc:
-        result["health"] = {
-            "status": "unavailable",
-            "model_loaded": False,
-            "error": str(exc),
-        }
-    return result
-
-
 def _validate_paths(settings: Settings) -> None:
     workspace = settings.workspace_dir.expanduser().resolve()
     workspace.mkdir(parents=True, exist_ok=True)
@@ -127,7 +105,6 @@ def _validate_paths(settings: Settings) -> None:
         "cosyvoice_model_dir",
         "vision_embedding_model_dir",
         "image_generation_config_dir",
-        "framepack_cache_dir",
     ):
         path: Path | None = getattr(settings, field_name)
         if path is not None and not path.is_dir():
@@ -143,5 +120,3 @@ def _validate_paths(settings: Settings) -> None:
         raise ValueError("image_generation_model_path must be an existing file")
     if settings.image_generation_python is not None and not settings.image_generation_python.is_file():
         raise ValueError("image_generation_python must be an existing file")
-    if settings.framepack_python is not None and not settings.framepack_python.is_file():
-        raise ValueError("framepack_python must be an existing file")

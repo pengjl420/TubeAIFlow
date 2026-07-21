@@ -114,25 +114,6 @@ class Settings(BaseModel):
     image_selection_min_score_margin: float = Field(default=0.03, ge=0, le=1)
     image_selection_min_sharpness: float = Field(default=0.001, ge=0, le=1)
     image_selection_max_clipped_ratio: float = Field(default=0.55, ge=0, le=1)
-    framepack_enabled: bool = False
-    framepack_auto_start_worker: bool = False
-    framepack_python: Path | None = None
-    framepack_cache_dir: Path | None = None
-    framepack_worker_host: str = "127.0.0.1"
-    framepack_worker_port: int = Field(default=7861, ge=1, le=65535)
-    framepack_model_id: str = "lllyasviel/FramePack_F1_I2V_HY_20250503"
-    framepack_base_model_id: str = "hunyuanvideo-community/HunyuanVideo"
-    framepack_sampling_type: str = "vanilla"
-    framepack_allow_model_download: bool = False
-    framepack_width: int = Field(default=832, ge=256, le=1920, multiple_of=16)
-    framepack_height: int = Field(default=480, ge=256, le=1088, multiple_of=16)
-    framepack_steps: int = Field(default=25, ge=1, le=100)
-    framepack_guidance_scale: float = Field(default=9.0, ge=1, le=32)
-    framepack_cpu_offload: bool = True
-    framepack_max_ratio: float = Field(default=0.2, ge=0, le=1)
-    framepack_max_retries: int = Field(default=1, ge=0, le=3)
-    framepack_startup_timeout_seconds: float = Field(default=600, gt=0, le=3600)
-    framepack_job_timeout_seconds: float = Field(default=3600, gt=0, le=14400)
     qwen_tts_root: Path | None = None
     qwen_tts_python: Path | None = None
     qwen_tts_model_dir: Path | None = None
@@ -161,8 +142,6 @@ class Settings(BaseModel):
         "image_generation_model_path",
         "image_generation_config_dir",
         "image_generation_python",
-        "framepack_python",
-        "framepack_cache_dir",
         "pexels_storage_dir",
         "pixabay_storage_dir",
         mode="before",
@@ -235,19 +214,6 @@ class Settings(BaseModel):
             raise ValueError("Image generation device and negative prompt cannot be empty")
         return text
 
-    @field_validator(
-        "framepack_worker_host",
-        "framepack_model_id",
-        "framepack_base_model_id",
-        "framepack_sampling_type",
-    )
-    @classmethod
-    def non_empty_framepack_setting(cls, value):
-        text = str(value or "").strip()
-        if not text:
-            raise ValueError("FramePack settings cannot be empty")
-        return text
-
     @field_validator("vision_embedding_device", "vision_embedding_instruction")
     @classmethod
     def non_empty_vision_embedding_setting(cls, value):
@@ -275,8 +241,6 @@ def _normalize_paths(settings: Settings) -> Settings:
         "image_generation_model_path",
         "image_generation_config_dir",
         "image_generation_python",
-        "framepack_python",
-        "framepack_cache_dir",
         "pexels_storage_dir",
         "pixabay_storage_dir",
     ):

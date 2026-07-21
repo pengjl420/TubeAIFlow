@@ -59,7 +59,7 @@ class SceneAssignmentRequest(BaseModel):
     trim_end_ms: int | None = Field(default=None, gt=0)
     playback_speed: float = Field(default=1.0, ge=0.5, le=2.0)
     display_duration_ms: int | None = Field(default=None, ge=500, le=60000)
-    render_mode: Literal["auto", "ffmpeg", "framepack"] = "auto"
+    render_mode: Literal["auto", "ffmpeg"] = "auto"
     motion_type: MotionPreset = "auto"
     zoom_start: float = Field(default=1.0, ge=1.0, le=1.2)
     zoom_end: float = Field(default=1.06, ge=1.0, le=1.2)
@@ -79,7 +79,7 @@ class SceneAssignmentReorderRequest(BaseModel):
 
 
 class SceneAssignmentRenderUpdate(BaseModel):
-    render_mode: Literal["auto", "ffmpeg", "framepack"] = "auto"
+    render_mode: Literal["auto", "ffmpeg"] = "auto"
     motion_type: MotionPreset
     zoom_start: float = Field(default=1.0, ge=1.0, le=1.2)
     zoom_end: float = Field(default=1.06, ge=1.0, le=1.2)

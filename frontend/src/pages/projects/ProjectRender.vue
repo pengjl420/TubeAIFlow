@@ -37,8 +37,6 @@ const needsAssetReview = computed(() => task.value?.status === 'review_required'
 const needsQualityReview = computed(() => task.value?.status === 'review_required' && task.value.stage === 'quality_review')
 const missingAssignments = computed(() => Math.max(0, (status.value?.scene_count || 0) - (status.value?.assignment_count || 0)))
 const assetReviewBlocked = computed(() => needsAssetReview.value && missingAssignments.value > 0)
-const framepackSceneCount = computed(() => Object.values(status.value?.scene_render_results || {}).filter((item) => item.provider === 'framepack').length)
-const framepackFallbackCount = computed(() => Object.values(status.value?.scene_render_results || {}).filter((item) => item.requested_provider === 'framepack' && item.provider === 'ffmpeg').length)
 
 const pipelineStages = computed(() => {
   const value = status.value
@@ -46,7 +44,7 @@ const pipelineStages = computed(() => {
   return [
     { label: '分镜生成', caption: value?.scene_count ? `${value.scene_count} 个场景` : '尚未生成', done: Boolean(value?.scene_count) },
     { label: '素材审核', caption: value?.scene_count ? `${value.assignment_count}/${value.scene_count} 已确认` : '等待分镜', done: Boolean(value?.scene_count && value.assignment_count === value.scene_count) },
-    { label: '场景渲染', caption: value?.scene_count ? `${value.rendered_scene_count}/${value.scene_count} 已完成 · FramePack ${framepackSceneCount.value} · 降级 ${framepackFallbackCount.value}` : '等待审核', done: Boolean(value?.scene_count && value.rendered_scene_count === value.scene_count) },
+    { label: '场景渲染', caption: value?.scene_count ? `${value.rendered_scene_count}/${value.scene_count} 已完成` : '等待审核', done: Boolean(value?.scene_count && value.rendered_scene_count === value.scene_count) },
     { label: '纯视频轨道', caption: value?.visual_track_exists ? '无音轨 MP4 已生成' : '等待场景渲染', done: Boolean(value?.visual_track_exists) },
     { label: '最终合成', caption: value?.final_video_exists ? 'MP4 已生成' : '尚未生成', done: Boolean(value?.final_video_exists) },
     { label: '质量检查', caption: qa ? (qa.passed ? 'QA 通过' : `${qa.summary.error_count} 个错误`) : '尚未执行', done: Boolean(qa?.passed) },

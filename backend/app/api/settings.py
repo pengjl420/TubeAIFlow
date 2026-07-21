@@ -63,8 +63,3 @@ def install_ffmpeg(session: Session = Depends(get_session)) -> dict:
     except (OSError, ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail={"success": False, "error": str(exc)}) from exc
     return {"success": True, "data": data}
-
-
-@router.get("/settings/framepack/status")
-def get_framepack_status() -> dict:
-    return {"success": True, "data": system_settings_service.get_framepack_status()}

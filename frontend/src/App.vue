@@ -1,10 +1,31 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
+import {
+  AudioLines,
+  Boxes,
+  ChevronRight,
+  FolderKanban,
+  Layers3,
+  Plus,
+  Settings2,
+  Sparkles,
+} from 'lucide-vue-next'
 
 import AppFeedback from './components/common/AppFeedback.vue'
 
 const route = useRoute()
+
+const primaryNavigation = [
+  { to: '/', label: '项目工作台', icon: FolderKanban, exact: true },
+  { to: '/batches', label: '批量生产', icon: Layers3 },
+  { to: '/assets', label: '本地素材库', icon: Boxes },
+]
+
+const systemNavigation = [
+  { to: '/voices', label: '参考音频', icon: AudioLines },
+  { to: '/settings', label: '系统设置', icon: Settings2 },
+]
 
 const sectionTitle = computed(() => {
   if (route.path.startsWith('/voices')) return '参考音频'
@@ -22,26 +43,25 @@ const sectionTitle = computed(() => {
   <div class="app-shell">
     <aside class="sidebar">
       <RouterLink class="brand" to="/" aria-label="返回项目总览">
-        <span class="brand-mark">T</span>
+        <span class="brand-mark"><Sparkles :size="20" :stroke-width="2.2" /></span>
         <span>
           <strong>TubeAIFlow</strong>
-          <small>本地视频工作台</small>
+          <small>AI 视频生产工作台</small>
         </span>
       </RouterLink>
 
       <div class="sidebar-section-label">工作空间</div>
       <nav class="side-nav" aria-label="主要导航">
-        <RouterLink to="/" exact-active-class="is-active">
-          <span class="nav-icon">项</span>
-          <span>项目工作台</span>
-        </RouterLink>
-        <RouterLink to="/batches" active-class="is-active">
-          <span class="nav-icon">批</span>
-          <span>批量生产</span>
-        </RouterLink>
-        <RouterLink to="/assets" active-class="is-active">
-          <span class="nav-icon">材</span>
-          <span>本地素材库</span>
+        <RouterLink
+          v-for="item in primaryNavigation"
+          :key="item.to"
+          :to="item.to"
+          :exact-active-class="item.exact ? 'is-active' : undefined"
+          active-class="is-active"
+        >
+          <span class="nav-icon"><component :is="item.icon" :size="18" :stroke-width="1.9" /></span>
+          <span class="nav-label">{{ item.label }}</span>
+          <ChevronRight class="nav-chevron" :size="15" />
         </RouterLink>
       </nav>
 
@@ -51,13 +71,10 @@ const sectionTitle = computed(() => {
         <span><strong>本地模式</strong><small>数据仅保存在此设备</small></span>
       </div>
       <nav class="side-nav side-nav-bottom" aria-label="系统导航">
-        <RouterLink to="/voices" active-class="is-active">
-          <span class="nav-icon">声</span>
-          <span>参考音频</span>
-        </RouterLink>
-        <RouterLink to="/settings" active-class="is-active">
-          <span class="nav-icon">设</span>
-          <span>系统设置</span>
+        <RouterLink v-for="item in systemNavigation" :key="item.to" :to="item.to" active-class="is-active">
+          <span class="nav-icon"><component :is="item.icon" :size="18" :stroke-width="1.9" /></span>
+          <span class="nav-label">{{ item.label }}</span>
+          <ChevronRight class="nav-chevron" :size="15" />
         </RouterLink>
       </nav>
     </aside>
@@ -70,7 +87,7 @@ const sectionTitle = computed(() => {
         </div>
         <div class="topbar-actions">
           <RouterLink class="secondary-button topbar-batch-link" to="/batches/new">新建批次</RouterLink>
-          <RouterLink class="primary-link" to="/projects/new"><span>＋</span> 新建项目</RouterLink>
+          <RouterLink class="primary-link" to="/projects/new"><Plus :size="17" /> 新建项目</RouterLink>
         </div>
       </header>
       <main><RouterView /></main>

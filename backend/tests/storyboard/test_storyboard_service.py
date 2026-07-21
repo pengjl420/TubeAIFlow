@@ -151,6 +151,25 @@ class _PercentScoreRepairDeepSeek(_FakeDeepSeek):
 
 
 class StoryboardServiceTests(unittest.TestCase):
+    def test_segment_storyboard_mode_groups_cues_by_source_segment(self) -> None:
+        cues = [
+            {"id": "c1", "source_segment_id": "s1"},
+            {"id": "c2", "source_segment_id": "s1"},
+            {"id": "c3", "source_segment_id": "s2"},
+        ]
+
+        groups = storyboard_service._group_cues_by_segment(cues)
+
+        self.assertEqual([[cue["id"] for cue in group] for group in groups], [["c1", "c2"], ["c3"]])
+
+    def test_ai_storyboard_prompt_includes_complete_script_context(self) -> None:
+        prompt = storyboard_service._storyboard_user_prompt(
+            [{"id": "scene-1", "start_ms": 0, "end_ms": 1000, "narration": "第一段"}],
+            "第一段\n第二段",
+        )
+
+        self.assertEqual(json.loads(prompt)["full_script_context"], "第一段\n第二段")
+
     def test_percentage_storyboard_scores_are_normalized_to_ten_point_scale(self) -> None:
         payload = {
             "scenes": [

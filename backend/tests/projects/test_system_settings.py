@@ -77,22 +77,27 @@ class SettingsModelTests(unittest.TestCase):
             workspace / "assets" / "media_2",
         )
 
-    def test_landscape_transition_defaults_total_one_hundred_percent(self) -> None:
+    def test_storyboard_transition_defaults_are_configurable(self) -> None:
         settings = Settings()
 
         self.assertEqual(
-            [item.name for item in settings.landscape_transition_effects],
+            [item.name for item in settings.storyboard_transition_effects],
             ["fade", "dissolve", "fadeblack", "smoothleft", "smoothright"],
         )
         self.assertEqual(
-            sum(item.percentage for item in settings.landscape_transition_effects if item.enabled),
+            sum(item.percentage for item in settings.storyboard_transition_effects if item.enabled),
             100,
         )
+        self.assertEqual(settings.storyboard_transition_group_min_clips, 2)
+        self.assertEqual(settings.storyboard_transition_group_max_clips, 5)
+        self.assertEqual(settings.storyboard_transition_min_per_group, 1)
+        self.assertEqual(settings.storyboard_transition_max_per_group, 2)
+        self.assertEqual(settings.storyboard_transition_duration_seconds, 0.45)
 
     def test_landscape_transition_percentages_must_total_one_hundred(self) -> None:
         with self.assertRaisesRegex(ValueError, "must total 100"):
             Settings(
-                landscape_transition_effects=[
+                storyboard_transition_effects=[
                     {"name": "fade", "enabled": True, "percentage": 40},
                     {"name": "dissolve", "enabled": True, "percentage": 20},
                     {"name": "fadeblack", "enabled": True, "percentage": 10},
@@ -103,7 +108,7 @@ class SettingsModelTests(unittest.TestCase):
 
     def test_all_landscape_transitions_can_be_disabled(self) -> None:
         settings = Settings(
-            landscape_transition_effects=[
+            storyboard_transition_effects=[
                 {"name": name, "enabled": False, "percentage": percentage}
                 for name, percentage in [
                     ("fade", 45),
@@ -115,7 +120,20 @@ class SettingsModelTests(unittest.TestCase):
             ]
         )
 
-        self.assertFalse(any(item.enabled for item in settings.landscape_transition_effects))
+        self.assertFalse(any(item.enabled for item in settings.storyboard_transition_effects))
+
+    def test_legacy_landscape_transition_settings_are_migrated(self) -> None:
+        settings = Settings(
+            landscape_transition_effects=[
+                {"name": "fade", "enabled": True, "percentage": 100},
+                {"name": "dissolve", "enabled": False, "percentage": 25},
+                {"name": "fadeblack", "enabled": False, "percentage": 10},
+                {"name": "smoothleft", "enabled": False, "percentage": 10},
+                {"name": "smoothright", "enabled": False, "percentage": 10},
+            ]
+        )
+
+        self.assertEqual(settings.storyboard_transition_effects[0].percentage, 100)
 
     def test_public_settings_never_expose_secret_values(self) -> None:
         configured = Settings(

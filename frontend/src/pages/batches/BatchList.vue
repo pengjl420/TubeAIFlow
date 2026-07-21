@@ -122,7 +122,7 @@ onMounted(load)
             class="danger-button batch-delete-button"
             type="button"
             :disabled="deletingBatchId === batch.id || ['queued', 'running'].includes(batch.status)"
-            :title="['queued', 'running'].includes(batch.status) ? '请先暂停批次再删除' : '删除批次记录并保留项目'"
+            :data-tooltip="['queued', 'running'].includes(batch.status) ? '请先暂停批次再删除' : '删除批次记录并保留项目'"
             @click="removeBatch(batch)"
           >
             {{ deletingBatchId === batch.id ? '删除中…' : '删除' }}

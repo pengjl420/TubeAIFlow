@@ -5,7 +5,7 @@ import { useRouter } from 'vue-router'
 import { createBatch } from '../../api/batches'
 import { selectDirectory } from '../../api/projects'
 import { listVoices, type VoiceProfile } from '../../api/voices'
-import type { SemanticReviewMode, VideoGenerationMode } from '../../types/project'
+import type { SegmentationMode, SemanticReviewMode, StoryboardMode, VideoGenerationMode } from '../../types/project'
 
 const router = useRouter()
 const name = ref(`批量生成 ${new Date().toLocaleDateString()}`)
@@ -16,6 +16,8 @@ const outputDir = ref('')
 const mediaVideoDir = ref('')
 const videoMode = ref<VideoGenerationMode>('landscape')
 const semanticReviewMode = ref<SemanticReviewMode>('manual')
+const segmentationMode = ref<SegmentationMode>('newline')
+const storyboardMode = ref<StoryboardMode>('ai')
 const continueOnError = ref(true)
 const saving = ref(false)
 const selectingFolder = ref<'output' | 'video' | null>(null)
@@ -84,6 +86,8 @@ async function submit() {
       includeVideo: videoMode.value !== 'none',
       videoMode: videoMode.value,
       semanticReviewMode: semanticReviewMode.value,
+      segmentationMode: segmentationMode.value,
+      storyboardMode: storyboardMode.value,
       continueOnError: continueOnError.value,
     })
     router.push(`/batches/${batch.id}`)
@@ -159,6 +163,15 @@ onMounted(async () => {
         </label>
 
         <label class="field">
+          <span>逐字稿切段方式</span>
+          <select v-model="segmentationMode">
+            <option value="newline">按换行切段（默认）</option>
+            <option value="ai">AI 自动切段（DeepSeek 全文理解）</option>
+          </select>
+          <small>该选择会应用到批次内的每个项目。</small>
+        </label>
+
+        <label class="field">
           <span>视频生成方式</span>
           <select v-model="videoMode">
             <option value="none">不生成视频（仅配音与原文 SRT）</option>
@@ -167,6 +180,15 @@ onMounted(async () => {
             <option value="ai_generated_images">本地 AI 分镜图片视频</option>
           </select>
           <small>所有方式共用 TTS、音频合并和 SRT 逻辑。</small>
+        </label>
+
+        <label v-if="videoMode === 'ai_semantic' || videoMode === 'ai_generated_images'" class="field">
+          <span>分镜头视觉场景切分</span>
+          <select v-model="storyboardMode">
+            <option value="ai">AI 自动生成分镜头（默认）</option>
+            <option value="segments">按逐字稿切段生成分镜头</option>
+          </select>
+          <small>按切段模式会继承上方切段方式产生的最终边界。</small>
         </label>
 
         <label v-if="videoMode === 'ai_semantic' || videoMode === 'ai_generated_images'" class="field">

@@ -11,7 +11,7 @@ import {
   installFfmpeg,
   saveSystemSettings,
   type FfmpegStatus,
-  type LandscapeTransitionName,
+  type StoryboardTransitionName,
   type MediaProviderStatus,
   type SystemSettings,
 } from '../../api/settings'
@@ -25,7 +25,7 @@ const mediaProviderStatuses = ref<MediaProviderStatus[]>([])
 const error = ref('')
 const message = ref('')
 
-const transitionLabels: Record<LandscapeTransitionName, { label: string; description: string }> = {
+const transitionLabels: Record<StoryboardTransitionName, { label: string; description: string }> = {
   fade: { label: '柔和叠化', description: '最自然的交叉淡化，适合作为主要转场。' },
   dissolve: { label: '轻微溶解', description: '带少量纹理变化的柔和过渡。' },
   fadeblack: { label: '短暂淡黑', description: '快速经过黑场，建议保持较低占比。' },
@@ -34,14 +34,74 @@ const transitionLabels: Record<LandscapeTransitionName, { label: string; descrip
 }
 
 const enabledTransitionPercentage = computed(() => (
-  settings.value?.landscape_transition_effects
+  settings.value?.storyboard_transition_effects
     .filter((item) => item.enabled)
     .reduce((total, item) => total + Number(item.percentage || 0), 0) || 0
 ))
 
 const enabledTransitionCount = computed(() => (
-  settings.value?.landscape_transition_effects.filter((item) => item.enabled).length || 0
+  settings.value?.storyboard_transition_effects.filter((item) => item.enabled).length || 0
 ))
+
+const transitionPreset = computed(() => {
+  if (!settings.value) return ''
+  const value = settings.value
+  if (value.storyboard_transition_group_min_clips === 4 && value.storyboard_transition_group_max_clips === 7
+    && value.storyboard_transition_min_per_group === 1 && value.storyboard_transition_max_per_group === 1
+    && value.storyboard_transition_duration_seconds === 0.35) return 'subtle'
+  if (value.storyboard_transition_group_min_clips === 2 && value.storyboard_transition_group_max_clips === 5
+    && value.storyboard_transition_min_per_group === 1 && value.storyboard_transition_max_per_group === 2
+    && value.storyboard_transition_duration_seconds === 0.45) return 'balanced'
+  if (value.storyboard_transition_group_min_clips === 2 && value.storyboard_transition_group_max_clips === 4
+    && value.storyboard_transition_min_per_group === 2 && value.storyboard_transition_max_per_group === 3
+    && value.storyboard_transition_duration_seconds === 0.3) return 'dynamic'
+  return 'custom'
+})
+
+const transitionStrategySummary = computed(() => {
+  if (!settings.value) return ''
+  const value = settings.value
+  if (!enabledTransitionCount.value) return '全局硬切，不插入转场'
+  return `每 ${value.storyboard_transition_group_min_clips}–${value.storyboard_transition_group_max_clips} 个分镜，随机应用 ${value.storyboard_transition_min_per_group}–${value.storyboard_transition_max_per_group} 处转场`
+})
+
+function applyTransitionPreset(preset: 'subtle' | 'balanced' | 'dynamic') {
+  if (!settings.value) return
+  const presets = {
+    subtle: { groupMin: 4, groupMax: 7, transitionMin: 1, transitionMax: 1, duration: 0.35 },
+    balanced: { groupMin: 2, groupMax: 5, transitionMin: 1, transitionMax: 2, duration: 0.45 },
+    dynamic: { groupMin: 2, groupMax: 4, transitionMin: 2, transitionMax: 3, duration: 0.3 },
+  }
+  const value = presets[preset]
+  settings.value.storyboard_transition_group_min_clips = value.groupMin
+  settings.value.storyboard_transition_group_max_clips = value.groupMax
+  settings.value.storyboard_transition_min_per_group = value.transitionMin
+  settings.value.storyboard_transition_max_per_group = value.transitionMax
+  settings.value.storyboard_transition_duration_seconds = value.duration
+}
+
+function normalizeTransitionPercentages() {
+  if (!settings.value) return
+  const enabled = settings.value.storyboard_transition_effects.filter((item) => item.enabled)
+  if (!enabled.length) return
+  const weights = enabled.map((item) => Math.max(0, Number(item.percentage) || 0))
+  const weightTotal = weights.reduce((total, value) => total + value, 0)
+  const distributable = 100 - enabled.length
+  const rawShares = weights.map((weight) => distributable * (weightTotal > 0 ? weight / weightTotal : 1 / enabled.length))
+  const shares = rawShares.map(Math.floor)
+  let remainder = distributable - shares.reduce((total, value) => total + value, 0)
+  const order = rawShares
+    .map((value, index) => ({ index, fraction: value - shares[index] }))
+    .sort((left, right) => right.fraction - left.fraction)
+  for (let index = 0; index < remainder; index += 1) shares[order[index].index] += 1
+  enabled.forEach((item, index) => { item.percentage = shares[index] + 1 })
+}
+
+function setAllTransitionEffects(enabled: boolean) {
+  if (!settings.value) return
+  settings.value.storyboard_transition_effects.forEach((item) => { item.enabled = enabled })
+  if (enabled) normalizeTransitionPercentages()
+}
 
 async function load() {
   loading.value = true
@@ -80,11 +140,19 @@ async function downloadFfmpeg() {
 
 async function save() {
   if (!settings.value) return
+  if (settings.value.storyboard_transition_group_min_clips > settings.value.storyboard_transition_group_max_clips) {
+    error.value = '每组最少分镜数不能大于最多分镜数'
+    return
+  }
+  if (settings.value.storyboard_transition_min_per_group > settings.value.storyboard_transition_max_per_group) {
+    error.value = '每组最少转场数不能大于最多转场数'
+    return
+  }
   if (enabledTransitionCount.value > 0 && enabledTransitionPercentage.value !== 100) {
     error.value = `已启用转场的占比合计必须为 100%，当前为 ${enabledTransitionPercentage.value}%`
     return
   }
-  const invalidTransition = settings.value.landscape_transition_effects.some(
+  const invalidTransition = settings.value.storyboard_transition_effects.some(
     (item) => item.enabled && (!Number.isFinite(item.percentage) || item.percentage <= 0),
   )
   if (invalidTransition) {
@@ -240,31 +308,90 @@ onMounted(load)
       <details class="panel settings-disclosure">
         <summary>
           <span class="settings-disclosure-heading">
-            <strong>纯风景视频转场</strong>
-            <small>短转场效果、启用状态与随机占比</small>
+            <strong>分镜头转场</strong>
+            <small>适用于全部 MP4 视频输出的场景边界</small>
           </span>
           <span class="settings-disclosure-icon" aria-hidden="true">⌄</span>
         </summary>
-        <div class="settings-disclosure-content">
-          <p class="section-description">
-            系统会把视频随机分成 2–5 个一组，并在每组中选择 1–2 个镜头边界应用转场，其余位置保持硬切。单次转场约 0.45 秒。
-          </p>
+        <div class="settings-disclosure-content storyboard-transition-panel">
+          <div class="transition-overview">
+            <div>
+              <span class="transition-eyebrow">当前策略</span>
+              <strong>{{ transitionStrategySummary }}</strong>
+              <small>每个分镜边界最多使用一种特效；未命中的边界保持硬切。</small>
+            </div>
+            <div class="transition-overview-metrics">
+              <span><b>{{ settings.storyboard_transition_group_min_clips }}–{{ settings.storyboard_transition_group_max_clips }}</b>分镜/组</span>
+              <span><b>{{ settings.storyboard_transition_min_per_group }}–{{ settings.storyboard_transition_max_per_group }}</b>转场/组</span>
+              <span><b>{{ settings.storyboard_transition_duration_seconds.toFixed(2) }}s</b>单次时长</span>
+            </div>
+          </div>
+
+          <div class="transition-section-head">
+            <div><strong>节奏预设</strong><small>先选一个接近的节奏，再按需微调</small></div>
+          </div>
+          <div class="transition-preset-grid">
+            <button type="button" :class="{ 'is-active': transitionPreset === 'subtle' }" @click="applyTransitionPreset('subtle')">
+              <span class="preset-icon">—</span><strong>克制</strong><small>长叙事、采访、历史内容</small>
+            </button>
+            <button type="button" :class="{ 'is-active': transitionPreset === 'balanced' }" @click="applyTransitionPreset('balanced')">
+              <span class="preset-icon">≋</span><strong>均衡</strong><small>通用纪录片节奏</small>
+            </button>
+            <button type="button" :class="{ 'is-active': transitionPreset === 'dynamic' }" @click="applyTransitionPreset('dynamic')">
+              <span class="preset-icon">»</span><strong>紧凑</strong><small>开场、快节奏解说</small>
+            </button>
+          </div>
+
+          <div class="transition-rule-grid">
+            <div class="transition-rule-card">
+              <div class="transition-rule-title"><span>01</span><div><strong>分镜分组</strong><small>系统随机取这个范围内的分镜组成一组</small></div></div>
+              <div class="transition-dual-input">
+                <label><span>最少</span><input v-model.number="settings.storyboard_transition_group_min_clips" type="number" min="2" max="20" step="1" /><b>个</b></label>
+                <i>至</i>
+                <label><span>最多</span><input v-model.number="settings.storyboard_transition_group_max_clips" type="number" min="2" max="20" step="1" /><b>个</b></label>
+              </div>
+            </div>
+            <div class="transition-rule-card">
+              <div class="transition-rule-title"><span>02</span><div><strong>组内转场</strong><small>每组随机选择若干分镜边界应用转场</small></div></div>
+              <div class="transition-dual-input">
+                <label><span>最少</span><input v-model.number="settings.storyboard_transition_min_per_group" type="number" min="0" max="10" step="1" /><b>处</b></label>
+                <i>至</i>
+                <label><span>最多</span><input v-model.number="settings.storyboard_transition_max_per_group" type="number" min="0" max="10" step="1" /><b>处</b></label>
+              </div>
+            </div>
+            <div class="transition-rule-card transition-duration-card">
+              <div class="transition-rule-title"><span>03</span><div><strong>转场时长</strong><small>建议保持在 0.30–0.60 秒，避免拖慢节奏</small></div></div>
+              <div class="transition-duration-control">
+                <input v-model.number="settings.storyboard_transition_duration_seconds" type="range" min="0.2" max="2" step="0.05" />
+                <label><input v-model.number="settings.storyboard_transition_duration_seconds" type="number" min="0.2" max="2" step="0.05" /><b>秒</b></label>
+              </div>
+            </div>
+          </div>
+
+          <div class="transition-section-head transition-effects-head">
+            <div><strong>特效池</strong><small>启用的特效会按照占比随机抽取</small></div>
+            <div class="transition-head-actions">
+              <button type="button" @click="setAllTransitionEffects(enabledTransitionCount === 0)">{{ enabledTransitionCount === 0 ? '全部启用' : '全部关闭' }}</button>
+              <button type="button" :disabled="enabledTransitionCount === 0 || enabledTransitionPercentage === 100" @click="normalizeTransitionPercentages">自动配平</button>
+            </div>
+          </div>
           <div class="transition-settings-list">
             <div
-              v-for="effect in settings.landscape_transition_effects"
+              v-for="effect in settings.storyboard_transition_effects"
               :key="effect.name"
               class="transition-setting-row"
               :class="{ 'is-disabled': !effect.enabled }"
             >
               <label class="transition-effect-toggle">
-                <input v-model="effect.enabled" type="checkbox" />
+                <input v-model="effect.enabled" type="checkbox" @change="normalizeTransitionPercentages" />
                 <span>
                   <strong>{{ transitionLabels[effect.name].label }}</strong>
                   <small>{{ transitionLabels[effect.name].description }}</small>
                 </span>
               </label>
               <label class="transition-percentage-field">
-                <span>选中占比</span>
+                <span>抽取占比</span>
+                <input v-model.number="effect.percentage" type="range" min="1" max="100" step="1" :disabled="!effect.enabled" />
                 <span class="transition-percentage-input">
                   <input
                     v-model.number="effect.percentage"
@@ -283,11 +410,8 @@ onMounted(load)
             class="transition-percentage-summary"
             :class="{ 'is-invalid': enabledTransitionCount > 0 && enabledTransitionPercentage !== 100 }"
           >
-            <span>已启用 {{ enabledTransitionCount }} 种效果</span>
-            <strong>占比合计 {{ enabledTransitionPercentage }}%</strong>
-          </div>
-          <div class="notice">
-            可以取消全部勾选来关闭纯风景视频转场。启用任意效果时，已启用效果的占比合计必须为 100%。
+            <span><i :class="{ 'is-on': enabledTransitionCount > 0 }"></i>{{ enabledTransitionCount ? `已启用 ${enabledTransitionCount} 种效果` : '当前全部使用硬切' }}</span>
+            <strong>{{ enabledTransitionCount ? `占比合计 ${enabledTransitionPercentage}%` : '转场已全局关闭' }}</strong>
           </div>
         </div>
       </details>

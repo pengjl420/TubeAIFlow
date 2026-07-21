@@ -29,10 +29,12 @@ const stageLabels: Record<string, string> = {
   final_render: '合成最终视频',
   quality_check: '执行质量检查',
   quality_review: '等待 QA 复核',
+  fcpxml_export: '生成 FCPXML 工程',
   completed: '流程已完成',
 }
 
 const active = computed(() => task.value?.status === 'queued' || task.value?.status === 'running')
+const usesFcpxml = computed(() => project.value?.config?.video_output_format === 'fcpxml')
 const needsAssetReview = computed(() => task.value?.status === 'review_required' && ['asset_review', 'image_review'].includes(task.value.stage || ''))
 const needsQualityReview = computed(() => task.value?.status === 'review_required' && task.value.stage === 'quality_review')
 const missingAssignments = computed(() => Math.max(0, (status.value?.scene_count || 0) - (status.value?.assignment_count || 0)))
@@ -41,6 +43,11 @@ const assetReviewBlocked = computed(() => needsAssetReview.value && missingAssig
 const pipelineStages = computed(() => {
   const value = status.value
   const qa = value?.qa_report
+  if (usesFcpxml.value) return [
+    { label: '分镜生成', caption: value?.scene_count ? `${value.scene_count} 个场景` : '尚未生成', done: Boolean(value?.scene_count) },
+    { label: '素材审核', caption: value?.scene_count ? `${value.assignment_count}/${value.scene_count} 已确认` : '等待分镜', done: Boolean(value?.scene_count && value.assignment_count === value.scene_count) },
+    { label: 'FCPXML 工程', caption: value?.final_fcpxml_exists ? '可编辑工程已生成' : '等待素材审核', done: Boolean(value?.final_fcpxml_exists) },
+  ]
   return [
     { label: '分镜生成', caption: value?.scene_count ? `${value.scene_count} 个场景` : '尚未生成', done: Boolean(value?.scene_count) },
     { label: '素材审核', caption: value?.scene_count ? `${value.assignment_count}/${value.scene_count} 已确认` : '等待分镜', done: Boolean(value?.scene_count && value.assignment_count === value.scene_count) },
@@ -159,11 +166,11 @@ onBeforeUnmount(stopPolling)
         <dl class="output-path-list">
           <div><dt>当前阶段</dt><dd>{{ stageLabels[task?.stage || ''] || task?.stage || '尚未启动' }}</dd></div>
           <div><dt>任务编号</dt><dd>{{ task?.id || '—' }}</dd></div>
-          <div><dt>最终视频</dt><dd>{{ status?.final_video_path || '生成后显示' }}</dd></div>
+          <div><dt>{{ usesFcpxml ? 'FCPXML 工程' : '最终视频' }}</dt><dd>{{ usesFcpxml ? (status?.final_fcpxml_path || '生成后显示') : (status?.final_video_path || '生成后显示') }}</dd></div>
         </dl>
       </article>
 
-      <article class="panel">
+      <article v-if="!usesFcpxml" class="panel">
         <div class="section-head"><h2>QA 报告</h2><span class="status-pill" :class="status?.qa_report?.passed ? 'is-success' : 'is-neutral'">{{ status?.qa_report ? (status.qa_report.passed ? '通过' : '需复核') : '未生成' }}</span></div>
         <div v-if="status?.qa_report" class="qa-issue-list">
           <div v-for="issue in status.qa_report.issues" :key="`${issue.type}-${issue.scene_id}-${issue.subtitle_id}`" class="qa-issue-row">
@@ -173,6 +180,10 @@ onBeforeUnmount(stopPolling)
           <p v-if="!status.qa_report.issues.length" class="muted">所有自动检查均已通过。</p>
         </div>
         <div v-else class="empty-state compact-empty"><p>最终合成完成后自动执行质量检查。</p></div>
+      </article>
+      <article v-else class="panel">
+        <div class="section-head"><h2>FCPXML 交付说明</h2><span class="status-pill" :class="status?.final_fcpxml_exists ? 'is-success' : 'is-neutral'">{{ status?.final_fcpxml_exists ? '已生成' : '未生成' }}</span></div>
+        <p class="muted">工程包含可编辑镜头时间线、完整配音和字幕标题轨。移动原始素材后，请在桌面版剪映中执行素材重链接；若字幕标题兼容不完整，可导入项目同时生成的 SRT。</p>
       </article>
     </div>
   </section>

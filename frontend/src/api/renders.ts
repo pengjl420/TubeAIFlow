@@ -65,6 +65,8 @@ export interface IntelligentRenderStatus {
   visual_track_exists: boolean
   final_video_path: string
   final_video_exists: boolean
+  final_fcpxml_path: string
+  final_fcpxml_exists: boolean
   qa_report?: QaReport | null
   work_dir: string
 }

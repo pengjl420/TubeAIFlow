@@ -26,19 +26,28 @@ from app.infrastructure.project_layout import (
     load_project_config,
     safe_filename_stem,
 )
-from app.services.narration.segmenter import split_script
+from app.services.narration.segmenter import split_script, split_script_with_ai
 from app.services.narration.text_cleaner import clean_script
 from app.shared.time import elapsed_seconds, utc_now_iso
 
 
 DEFAULT_TTS_ENGINE = "qwen3_tts"
 SUPPORTED_TTS_ENGINES = {DEFAULT_TTS_ENGINE, "cosyvoice"}
+SEGMENTATION_MODE_NEWLINE = "newline"
+SEGMENTATION_MODE_AI = "ai"
+SUPPORTED_SEGMENTATION_MODES = {SEGMENTATION_MODE_NEWLINE, SEGMENTATION_MODE_AI}
+STORYBOARD_MODE_AI = "ai"
+STORYBOARD_MODE_SEGMENTS = "segments"
+SUPPORTED_STORYBOARD_MODES = {STORYBOARD_MODE_AI, STORYBOARD_MODE_SEGMENTS}
 VIDEO_MODE_NONE = "none"
 VIDEO_MODE_LANDSCAPE = "landscape"
 VIDEO_MODE_AI_SEMANTIC = "ai_semantic"
 VIDEO_MODE_AI_GENERATED_IMAGES = "ai_generated_images"
 SEMANTIC_REVIEW_MANUAL = "manual"
 SEMANTIC_REVIEW_AUTO = "automatic"
+VIDEO_OUTPUT_MP4 = "mp4"
+VIDEO_OUTPUT_FCPXML = "fcpxml"
+SUPPORTED_VIDEO_OUTPUT_FORMATS = {VIDEO_OUTPUT_MP4, VIDEO_OUTPUT_FCPXML}
 SUPPORTED_SEMANTIC_REVIEW_MODES = {
     SEMANTIC_REVIEW_MANUAL,
     SEMANTIC_REVIEW_AUTO,
@@ -72,7 +81,16 @@ def create_project(session: Session, name: str, config: dict | None = None) -> P
         name=name,
         output_dir=str(output_dir),
         status="created",
-        config_json=json.dumps({"tts_engine": DEFAULT_TTS_ENGINE, **(config or {})}, ensure_ascii=False),
+        config_json=json.dumps(
+            {
+                "tts_engine": DEFAULT_TTS_ENGINE,
+                "segmentation_mode": SEGMENTATION_MODE_NEWLINE,
+                "storyboard_mode": STORYBOARD_MODE_AI,
+                "storyboard_transition_enabled": True,
+                **(config or {}),
+            },
+            ensure_ascii=False,
+        ),
     )
     session.add(project)
     session.commit()
@@ -179,6 +197,44 @@ def get_semantic_review_mode(project: Project) -> str:
     return normalize_semantic_review_mode(
         load_project_config(project).get("semantic_review_mode")
     )
+
+
+def normalize_segmentation_mode(mode: str | None) -> str:
+    normalized = str(mode or SEGMENTATION_MODE_NEWLINE).strip().lower()
+    if normalized not in SUPPORTED_SEGMENTATION_MODES:
+        raise ValueError("Unsupported transcript segmentation mode")
+    return normalized
+
+
+def get_segmentation_mode(project: Project) -> str:
+    return normalize_segmentation_mode(load_project_config(project).get("segmentation_mode"))
+
+
+def normalize_storyboard_mode(mode: str | None) -> str:
+    normalized = str(mode or STORYBOARD_MODE_AI).strip().lower()
+    if normalized not in SUPPORTED_STORYBOARD_MODES:
+        raise ValueError("Unsupported storyboard segmentation mode")
+    return normalized
+
+
+def get_storyboard_mode(project: Project) -> str:
+    return normalize_storyboard_mode(load_project_config(project).get("storyboard_mode"))
+
+
+def normalize_video_output_format(value: str | None) -> str:
+    normalized = str(value or VIDEO_OUTPUT_FCPXML).strip().lower()
+    if normalized not in SUPPORTED_VIDEO_OUTPUT_FORMATS:
+        raise ValueError(f"Unsupported video output format: {value}")
+    return normalized
+
+
+def get_video_output_format(project: Project) -> str:
+    configured = load_project_config(project).get("video_output_format")
+    # Projects created before output selection existed rendered MP4. Preserve
+    # that behavior while making newly saved projects default to FCPXML.
+    if configured is None:
+        return VIDEO_OUTPUT_MP4
+    return normalize_video_output_format(configured)
 
 
 def delete_project(session: Session, project: Project) -> dict:
@@ -311,7 +367,12 @@ def create_segments(session: Session, project: Project) -> list[Segment]:
     if not clean_path.is_file():
         raise ValueError("Cleaned script file does not exist")
     clean_text = clean_path.read_text(encoding="utf-8")
-    segment_data = split_script(clean_text)
+    segmentation_mode = get_segmentation_mode(project)
+    segment_data = (
+        split_script_with_ai(clean_text)
+        if segmentation_mode == SEGMENTATION_MODE_AI
+        else split_script(clean_text)
+    )
     if not segment_data:
         raise ValueError("Cleaned script is empty")
 
@@ -433,6 +494,10 @@ def update_project_settings(
     voice_profile_id: str = "",
     video_mode: str | None = None,
     semantic_review_mode: str | None = None,
+    video_output_format: str | None = None,
+    storyboard_transition_enabled: bool = True,
+    segmentation_mode: str | None = None,
+    storyboard_mode: str | None = None,
 ) -> Project:
     project_name = name.strip()
     if not project_name:
@@ -459,6 +524,9 @@ def update_project_settings(
 
     resolved_video_mode = normalize_video_mode(video_mode, include_video)
     resolved_semantic_review_mode = normalize_semantic_review_mode(semantic_review_mode)
+    resolved_video_output_format = normalize_video_output_format(video_output_format)
+    resolved_segmentation_mode = normalize_segmentation_mode(segmentation_mode)
+    resolved_storyboard_mode = normalize_storyboard_mode(storyboard_mode)
     include_video = resolved_video_mode != VIDEO_MODE_NONE
     video_directory: Path | None = None
     if resolved_video_mode == VIDEO_MODE_LANDSCAPE and not media_video_dir.strip():
@@ -476,6 +544,7 @@ def update_project_settings(
     previous_reference_audio_text = str(config.get("reference_audio_text") or "").strip()
     previous_cosyvoice_speed = float(config.get("cosyvoice_speed", 1.0))
     previous_voice_profile_id = str(config.get("voice_profile_id") or "")
+    previous_segmentation_mode = normalize_segmentation_mode(config.get("segmentation_mode"))
     if not str(config.get("project_directory_name") or "").strip():
         config["project_directory_name"] = _available_project_directory_name(
             output_directory,
@@ -489,6 +558,10 @@ def update_project_settings(
     config["include_video"] = include_video
     config["video_mode"] = resolved_video_mode
     config["semantic_review_mode"] = resolved_semantic_review_mode
+    config["video_output_format"] = resolved_video_output_format
+    config["storyboard_transition_enabled"] = bool(storyboard_transition_enabled)
+    config["segmentation_mode"] = resolved_segmentation_mode
+    config["storyboard_mode"] = resolved_storyboard_mode
     if video_directory:
         config["media_video_dir"] = str(video_directory)
     else:
@@ -517,6 +590,14 @@ def update_project_settings(
     ):
         if _reset_tts_segments(session, project.id):
             project.status = "segmented"
+
+    if previous_segmentation_mode != resolved_segmentation_mode:
+        for segment in session.exec(
+            select(Segment).where(Segment.project_id == project.id)
+        ).all():
+            session.delete(segment)
+        if project.script_clean_path:
+            project.status = "script_imported"
 
     project.name = project_name
     project.output_dir = str(output_directory)

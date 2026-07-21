@@ -56,6 +56,8 @@ def create_batch(
     voice_profile_id: str = "",
     video_mode: str | None = None,
     semantic_review_mode: str | None = None,
+    segmentation_mode: str | None = None,
+    storyboard_mode: str | None = None,
 ) -> BatchJob:
     if not scripts:
         raise ValueError("请至少上传一份逐字稿")
@@ -89,6 +91,8 @@ def create_batch(
     resolved_semantic_review_mode = project_service.normalize_semantic_review_mode(
         semantic_review_mode
     )
+    resolved_segmentation_mode = project_service.normalize_segmentation_mode(segmentation_mode)
+    resolved_storyboard_mode = project_service.normalize_storyboard_mode(storyboard_mode)
     include_video = resolved_video_mode != project_service.VIDEO_MODE_NONE
     output_root = Path(output_dir).expanduser().resolve()
     output_root.mkdir(parents=True, exist_ok=True)
@@ -111,6 +115,8 @@ def create_batch(
                 "include_video": include_video,
                 "video_mode": resolved_video_mode,
                 "semantic_review_mode": resolved_semantic_review_mode,
+                "segmentation_mode": resolved_segmentation_mode,
+                "storyboard_mode": resolved_storyboard_mode,
                 "continue_on_error": continue_on_error,
                 "reference_audio_filename": reference_audio_filename,
                 "tts_engine": normalized_tts_engine,
@@ -155,6 +161,8 @@ def create_batch(
             voice_profile_id=selected_profile.id if selected_profile else "",
             video_mode=resolved_video_mode,
             semantic_review_mode=resolved_semantic_review_mode,
+            segmentation_mode=resolved_segmentation_mode,
+            storyboard_mode=resolved_storyboard_mode,
         )
         if not selected_profile:
             reference_audio.seek(0)

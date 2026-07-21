@@ -6,6 +6,7 @@ from sqlmodel import Session
 from app.database import get_session
 from app.infrastructure import process_runner as task_control
 from app.services.batches import batch_service
+from app.services.projects import project_service
 from app.services.tasks import task_worker
 
 
@@ -35,6 +36,8 @@ def create_batch(
     include_video: bool = Form(True),
     video_mode: str | None = Form(None),
     semantic_review_mode: str | None = Form(None),
+    segmentation_mode: str = Form(project_service.SEGMENTATION_MODE_NEWLINE),
+    storyboard_mode: str = Form(project_service.STORYBOARD_MODE_AI),
     continue_on_error: bool = Form(True),
     tts_engine: str = Form(batch_service.DEFAULT_TTS_ENGINE),
     reference_audio_text: str = Form(""),
@@ -64,6 +67,8 @@ def create_batch(
             include_video=include_video,
             video_mode=video_mode,
             semantic_review_mode=semantic_review_mode,
+            segmentation_mode=segmentation_mode,
+            storyboard_mode=storyboard_mode,
             continue_on_error=continue_on_error,
             tts_engine=tts_engine,
             reference_audio_text=reference_audio_text,

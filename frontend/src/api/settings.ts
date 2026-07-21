@@ -1,9 +1,9 @@
 import { apiClient, unwrap } from './client'
 
-export type LandscapeTransitionName = 'fade' | 'dissolve' | 'fadeblack' | 'smoothleft' | 'smoothright'
+export type StoryboardTransitionName = 'fade' | 'dissolve' | 'fadeblack' | 'smoothleft' | 'smoothright'
 
-export interface LandscapeTransitionEffect {
-  name: LandscapeTransitionName
+export interface StoryboardTransitionEffect {
+  name: StoryboardTransitionName
   enabled: boolean
   percentage: number
 }
@@ -14,7 +14,12 @@ export interface SystemSettings {
   workspace_dir: string
   ffmpeg_path: string
   ffprobe_path: string
-  landscape_transition_effects: LandscapeTransitionEffect[]
+  storyboard_transition_effects: StoryboardTransitionEffect[]
+  storyboard_transition_group_min_clips: number
+  storyboard_transition_group_max_clips: number
+  storyboard_transition_min_per_group: number
+  storyboard_transition_max_per_group: number
+  storyboard_transition_duration_seconds: number
   deepseek_api_key: string
   deepseek_api_key_configured: boolean
   deepseek_base_url: string

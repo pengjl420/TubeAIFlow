@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 
 import { createProject, selectDirectory } from '../../api/projects'
 import { listVoices, type VoiceProfile } from '../../api/voices'
-import type { SemanticReviewMode, VideoGenerationMode } from '../../types/project'
+import type { SegmentationMode, SemanticReviewMode, StoryboardMode, VideoGenerationMode, VideoOutputFormat } from '../../types/project'
 
 const router = useRouter()
 const name = ref('')
@@ -15,6 +15,10 @@ const outputFilename = ref('')
 const mediaVideoDir = ref('')
 const videoMode = ref<VideoGenerationMode>('none')
 const semanticReviewMode = ref<SemanticReviewMode>('manual')
+const videoOutputFormat = ref<VideoOutputFormat>('fcpxml')
+const storyboardTransitionEnabled = ref(true)
+const segmentationMode = ref<SegmentationMode>('newline')
+const storyboardMode = ref<StoryboardMode>('ai')
 const saving = ref(false)
 const selectingFolder = ref<'output' | 'video' | null>(null)
 const error = ref('')
@@ -22,6 +26,10 @@ let outputFilenameEdited = false
 
 watch(name, (value) => {
   if (!outputFilenameEdited) outputFilename.value = value.trim()
+})
+
+watch(videoMode, (value) => {
+  if (value === 'none') videoOutputFormat.value = 'fcpxml'
 })
 
 function markOutputFilenameEdited() {
@@ -73,6 +81,10 @@ async function submit() {
       include_video: videoMode.value !== 'none',
       video_mode: videoMode.value,
       semantic_review_mode: semanticReviewMode.value,
+      video_output_format: videoOutputFormat.value,
+      storyboard_transition_enabled: storyboardTransitionEnabled.value,
+      segmentation_mode: segmentationMode.value,
+      storyboard_mode: storyboardMode.value,
     })
     router.push(`/projects/${project.id}`)
   } catch (err) {
@@ -156,6 +168,14 @@ onMounted(async () => {
       <div class="panel form-section-card">
         <div class="section-head"><h2>一键生成选项</h2></div>
         <label class="field reference-field">
+          <span>逐字稿切段方式</span>
+          <select v-model="segmentationMode">
+            <option value="newline">按换行切段（默认，本地处理）</option>
+            <option value="ai">AI 自动切段（DeepSeek 全文理解）</option>
+          </select>
+          <span class="muted">AI 模式会提交完整逐字稿，只选择切分边界，不改写原文，并同步生成视觉描述。</span>
+        </label>
+        <label class="field reference-field">
           <span>视频生成方式</span>
           <select v-model="videoMode">
             <option value="none">不生成视频（仅配音与原文 SRT）</option>
@@ -180,6 +200,28 @@ onMounted(async () => {
           </div>
           <span class="muted">生成最终视频时会扫描该目录中的视频素材。</span>
         </label>
+        <div class="field reference-field">
+          <span>最终交付格式</span>
+          <div class="output-format-options" role="radiogroup" aria-label="最终交付格式">
+            <label class="output-format-option" :class="{ 'is-selected': videoOutputFormat === 'fcpxml' }">
+              <input v-model="videoOutputFormat" type="radio" value="fcpxml" />
+              <span><strong>FCPXML 可编辑工程</strong><small>默认选项，可导入桌面版剪映继续深度剪辑</small></span>
+            </label>
+            <label class="output-format-option" :class="{ 'is-selected': videoOutputFormat === 'mp4' }">
+              <input v-model="videoOutputFormat" type="radio" value="mp4" />
+              <span><strong>{{ videoMode === 'none' ? '仅配音与原文 SRT' : '视频文件（MP4）' }}</strong><small>{{ videoMode === 'none' ? '不额外生成 FCPXML 时间线' : '直接渲染可播放的最终视频文件' }}</small></span>
+            </label>
+          </div>
+          <span class="muted">{{ videoMode === 'none' ? 'FCPXML 将创建仅包含完整配音和字幕标题轨的时间线，方便导入剪映后继续铺设画面。' : 'FCPXML 保留镜头裁剪、时间线、配音和字幕并引用原始素材，不渲染最终 MP4。' }}</span>
+        </div>
+        <label v-if="videoMode === 'ai_semantic' || videoMode === 'ai_generated_images'" class="field reference-field">
+          <span>分镜头视觉场景切分</span>
+          <select v-model="storyboardMode">
+            <option value="ai">AI 自动生成分镜头（默认，全文理解）</option>
+            <option value="segments">按逐字稿切段生成分镜头</option>
+          </select>
+          <span class="muted">按切段模式严格沿用最终切段结果；上方切段方式变化时，分镜边界也会随之变化。</span>
+        </label>
         <label v-if="videoMode === 'ai_semantic' || videoMode === 'ai_generated_images'" class="field reference-field">
           <span>素材审核方式</span>
           <select v-model="semanticReviewMode">
@@ -187,6 +229,13 @@ onMounted(async () => {
             <option value="automatic">自动审核拼接</option>
           </select>
           <span class="muted">人工模式保持现有逐分镜确认流程；自动模式按匹配度从高到低选用合格且不重复的素材。</span>
+        </label>
+        <label class="checkbox-field">
+          <input v-model="storyboardTransitionEnabled" type="checkbox" :disabled="videoMode === 'none'" />
+          <span>
+            <strong>启用分镜头转场</strong>
+            <small>默认开启；合并 MP4 时在部分分镜边界插入系统设置中的一个转场特效，可手动关闭。</small>
+          </span>
         </label>
       </div>
     </div>

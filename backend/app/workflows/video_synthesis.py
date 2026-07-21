@@ -11,7 +11,7 @@ from app.services.quality import qa_service
 from app.services.rendering import final_renderer, scene_renderer, visual_track_composer
 from app.services.rendering import timeline_composer
 from app.services.storyboard import storyboard_service
-from app.services.projects import project_service
+from app.services.projects import fcpxml_export_service, project_service
 
 
 StageChanged = Callable[[str], None]
@@ -26,6 +26,7 @@ STAGES = {
     "final_render",
     "quality_check",
     "quality_review",
+    "fcpxml_export",
     "completed",
 }
 
@@ -73,7 +74,7 @@ def run_video_synthesis(
         missing = assignment_gap(session, project.id)
         if missing:
             raise ReviewRequired("image_review", f"仍有 {missing} 个场景需要确认生成图片")
-        stage = "scene_render"
+        stage = _output_stage(project)
         on_stage_changed(stage)
 
     if stage == "asset_search":
@@ -96,13 +97,18 @@ def run_video_synthesis(
         missing = assignment_gap(session, project.id)
         if missing:
             raise ReviewRequired("asset_review", f"仍有 {missing} 个场景需要人工确认素材")
-        stage = "scene_render"
+        stage = _output_stage(project)
         on_stage_changed(stage)
 
     if stage == "scene_render":
         scene_renderer.render_all_scenes(session, project)
         stage = "visual_track"
         on_stage_changed(stage)
+
+    if stage == "fcpxml_export":
+        fcpxml_export_service.export_project_fcpxml(session, project)
+        on_stage_changed("completed")
+        return
 
     if stage == "visual_track":
         visual_track_composer.compose_visual_track(session, project)
@@ -130,7 +136,7 @@ def initial_stage(session: Session, project_id: str) -> str:
     if not scenes:
         return "storyboard"
     if assignment_gap(session, project_id) == 0:
-        return "scene_render"
+        return _output_stage(project) if project else "scene_render"
     if project and project_service.get_project_video_mode(project) == project_service.VIDEO_MODE_AI_GENERATED_IMAGES:
         return "image_generation"
     return "asset_search"
@@ -180,3 +186,9 @@ def _ingest_configured_assets(session: Session, project: Project) -> None:
             for shot in asset["shots"]
         ):
             ingestion_service.ingest_asset(session, asset["id"])
+
+
+def _output_stage(project: Project) -> str:
+    if project_service.get_video_output_format(project) == project_service.VIDEO_OUTPUT_FCPXML:
+        return "fcpxml_export"
+    return "scene_render"

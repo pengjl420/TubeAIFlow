@@ -270,6 +270,40 @@ class ImageMotionRenderingTests(unittest.TestCase):
                 self.assertTrue(Path(result["path"]).is_file())
             engine.dispose()
 
+    def test_visual_track_transition_keeps_total_scene_frame_count(self) -> None:
+        video_config = ProjectRenderConfig().video
+        args = visual_track_composer.build_scene_transition_args(
+            [Path("scene_0001.mp4"), Path("scene_0002.mp4"), Path("scene_0003.mp4")],
+            [4.0, 5.0, 6.0],
+            [
+                visual_track_composer.PlannedTransition(1, "fade", 0.45),
+                visual_track_composer.PlannedTransition(2, "dissolve", 0.45),
+            ],
+            Path("visual_track.mp4"),
+            video_config,
+            450,
+        )
+
+        graph = args[args.index("-filter_complex") + 1]
+        self.assertIn("[0:v]setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=0.450", graph)
+        self.assertIn("xfade=transition=fade:duration=0.450:offset=4.000", graph)
+        self.assertIn("xfade=transition=dissolve:duration=0.450:offset=9.000", graph)
+        self.assertEqual(args[args.index("-frames:v") + 1], "450")
+
+    def test_visual_track_rejects_two_effects_on_same_boundary(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Only one transition effect"):
+            visual_track_composer.build_scene_transition_args(
+                [Path("one.mp4"), Path("two.mp4")],
+                [3.0, 3.0],
+                [
+                    visual_track_composer.PlannedTransition(1, "fade", 0.45),
+                    visual_track_composer.PlannedTransition(1, "dissolve", 0.45),
+                ],
+                Path("out.mp4"),
+                ProjectRenderConfig().video,
+                180,
+            )
+
     def test_old_timing_manifest_forces_scene_rerender_on_visual_track_retry(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

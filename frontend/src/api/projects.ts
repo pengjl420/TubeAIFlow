@@ -1,5 +1,5 @@
 import { apiClient, unwrap } from './client'
-import type { Project, SemanticReviewMode, VideoGenerationMode } from '../types/project'
+import type { Project, SegmentationMode, SemanticReviewMode, StoryboardMode, VideoGenerationMode, VideoOutputFormat } from '../types/project'
 
 export interface CreateProjectInput {
   name: string
@@ -10,6 +10,10 @@ export interface CreateProjectInput {
   include_video: boolean
   video_mode: VideoGenerationMode
   semantic_review_mode: SemanticReviewMode
+  video_output_format: VideoOutputFormat
+  storyboard_transition_enabled: boolean
+  segmentation_mode: SegmentationMode
+  storyboard_mode: StoryboardMode
 }
 
 export async function listProjects(): Promise<Project[]> {
@@ -26,6 +30,10 @@ export async function createProject(input: CreateProjectInput): Promise<Project>
   form.append('include_video', String(input.include_video))
   form.append('video_mode', input.video_mode)
   form.append('semantic_review_mode', input.semantic_review_mode)
+  form.append('video_output_format', input.video_output_format)
+  form.append('storyboard_transition_enabled', String(input.storyboard_transition_enabled))
+  form.append('segmentation_mode', input.segmentation_mode)
+  form.append('storyboard_mode', input.storyboard_mode)
   return unwrap<Project>(await apiClient.post('/projects', form))
 }
 
@@ -51,6 +59,9 @@ export interface ProjectOutputs {
   final_audio_path?: string
   final_srt_path?: string
   final_video_path?: string
+  final_fcpxml_path?: string
+  final_video_exists?: boolean
+  final_fcpxml_exists?: boolean
   files: ProjectOutputFile[]
 }
 
@@ -101,7 +112,11 @@ export interface ProjectSettingsInput {
   include_video: boolean
   video_mode: VideoGenerationMode
   semantic_review_mode: SemanticReviewMode
+  video_output_format: VideoOutputFormat
   voice_profile_id: string
+  storyboard_transition_enabled: boolean
+  segmentation_mode: SegmentationMode
+  storyboard_mode: StoryboardMode
 }
 
 export async function saveProjectSettings(id: string, settings: ProjectSettingsInput): Promise<Project> {

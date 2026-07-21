@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from app.config import LandscapeTransitionEffect
+from app.config import StoryboardTransitionEffect
 from app.services.rendering import rough_cut_service as video_service
 
 
@@ -113,7 +113,7 @@ class VideoServiceTests(unittest.TestCase):
             video_service.SelectedVideo(Path(f"{index}.mp4"), str(index), 3.0, 2.9)
             for index in range(6)
         ]
-        effects = [LandscapeTransitionEffect(name="fade", percentage=100)]
+        effects = [StoryboardTransitionEffect(name="fade", percentage=100)]
 
         plan = video_service.build_transition_plan(selected, effects)
 

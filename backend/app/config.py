@@ -3,7 +3,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 from sqlalchemy.exc import OperationalError
 
 
@@ -27,7 +27,7 @@ DEFAULT_IMAGE_CONFIG_DIR = (
 ).resolve()
 DATABASE_PATH = DEFAULT_WORKSPACE_DIR / "app.db"
 
-LANDSCAPE_TRANSITION_NAMES = (
+STORYBOARD_TRANSITION_NAMES = (
     "fade",
     "dissolve",
     "fadeblack",
@@ -36,20 +36,24 @@ LANDSCAPE_TRANSITION_NAMES = (
 )
 
 
-class LandscapeTransitionEffect(BaseModel):
+class StoryboardTransitionEffect(BaseModel):
     name: Literal["fade", "dissolve", "fadeblack", "smoothleft", "smoothright"]
     enabled: bool = True
     percentage: int = Field(ge=0, le=100)
 
 
-def default_landscape_transition_effects() -> list[LandscapeTransitionEffect]:
+def default_storyboard_transition_effects() -> list[StoryboardTransitionEffect]:
     return [
-        LandscapeTransitionEffect(name="fade", percentage=45),
-        LandscapeTransitionEffect(name="dissolve", percentage=25),
-        LandscapeTransitionEffect(name="fadeblack", percentage=10),
-        LandscapeTransitionEffect(name="smoothleft", percentage=10),
-        LandscapeTransitionEffect(name="smoothright", percentage=10),
+        StoryboardTransitionEffect(name="fade", percentage=45),
+        StoryboardTransitionEffect(name="dissolve", percentage=25),
+        StoryboardTransitionEffect(name="fadeblack", percentage=10),
+        StoryboardTransitionEffect(name="smoothleft", percentage=10),
+        StoryboardTransitionEffect(name="smoothright", percentage=10),
     ]
+
+
+# Kept as an import-compatible alias for extensions written against older builds.
+LandscapeTransitionEffect = StoryboardTransitionEffect
 
 
 class Settings(BaseModel):
@@ -58,9 +62,14 @@ class Settings(BaseModel):
     workspace_dir: Path = DEFAULT_WORKSPACE_DIR
     ffmpeg_path: str = "ffmpeg"
     ffprobe_path: str = "ffprobe"
-    landscape_transition_effects: list[LandscapeTransitionEffect] = Field(
-        default_factory=default_landscape_transition_effects
+    storyboard_transition_effects: list[StoryboardTransitionEffect] = Field(
+        default_factory=default_storyboard_transition_effects
     )
+    storyboard_transition_group_min_clips: int = Field(default=2, ge=2, le=20)
+    storyboard_transition_group_max_clips: int = Field(default=5, ge=2, le=20)
+    storyboard_transition_min_per_group: int = Field(default=1, ge=0, le=10)
+    storyboard_transition_max_per_group: int = Field(default=2, ge=0, le=10)
+    storyboard_transition_duration_seconds: float = Field(default=0.45, ge=0.2, le=2.0)
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-v4-flash"
@@ -168,19 +177,37 @@ class Settings(BaseModel):
             raise ValueError("Unsupported Qwen3-TTS dtype")
         return dtype
 
-    @field_validator("landscape_transition_effects")
+    @model_validator(mode="before")
     @classmethod
-    def validate_landscape_transition_effects(cls, value):
+    def migrate_landscape_transition_settings(cls, value):
+        if isinstance(value, dict):
+            data = dict(value)
+            if "storyboard_transition_effects" not in data and "landscape_transition_effects" in data:
+                data["storyboard_transition_effects"] = data["landscape_transition_effects"]
+            return data
+        return value
+
+    @field_validator("storyboard_transition_effects")
+    @classmethod
+    def validate_storyboard_transition_effects(cls, value):
         names = [item.name for item in value]
-        if len(names) != len(set(names)) or set(names) != set(LANDSCAPE_TRANSITION_NAMES):
-            raise ValueError("Landscape transition settings must contain each supported effect once")
+        if len(names) != len(set(names)) or set(names) != set(STORYBOARD_TRANSITION_NAMES):
+            raise ValueError("Storyboard transition settings must contain each supported effect once")
         enabled = [item for item in value if item.enabled]
         if enabled and any(item.percentage <= 0 for item in enabled):
-            raise ValueError("Enabled landscape transitions must have a positive percentage")
+            raise ValueError("Enabled storyboard transitions must have a positive percentage")
         if enabled and sum(item.percentage for item in enabled) != 100:
-            raise ValueError("Enabled landscape transition percentages must total 100")
+            raise ValueError("Enabled storyboard transition percentages must total 100")
         by_name = {item.name: item for item in value}
-        return [by_name[name] for name in LANDSCAPE_TRANSITION_NAMES]
+        return [by_name[name] for name in STORYBOARD_TRANSITION_NAMES]
+
+    @model_validator(mode="after")
+    def validate_storyboard_transition_ranges(self):
+        if self.storyboard_transition_group_min_clips > self.storyboard_transition_group_max_clips:
+            raise ValueError("Minimum clips per transition group cannot exceed maximum clips")
+        if self.storyboard_transition_min_per_group > self.storyboard_transition_max_per_group:
+            raise ValueError("Minimum transitions per group cannot exceed maximum transitions")
+        return self
 
     @field_validator("qwen_tts_device", "qwen_tts_language")
     @classmethod

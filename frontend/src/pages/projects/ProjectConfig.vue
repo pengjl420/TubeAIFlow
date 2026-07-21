@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import {
@@ -10,7 +10,7 @@ import {
 import { API_BASE_URL } from '../../api/client'
 import { listVoices, type VoiceProfile } from '../../api/voices'
 import AudioPlayer from '../../components/common/AudioPlayer.vue'
-import type { Project, SemanticReviewMode, VideoGenerationMode } from '../../types/project'
+import type { Project, SegmentationMode, SemanticReviewMode, StoryboardMode, VideoGenerationMode, VideoOutputFormat } from '../../types/project'
 
 const route = useRoute()
 const router = useRouter()
@@ -24,6 +24,10 @@ const outputFilename = ref('')
 const mediaVideoDir = ref('')
 const videoMode = ref<VideoGenerationMode>('none')
 const semanticReviewMode = ref<SemanticReviewMode>('manual')
+const videoOutputFormat = ref<VideoOutputFormat>('fcpxml')
+const storyboardTransitionEnabled = ref(true)
+const segmentationMode = ref<SegmentationMode>('newline')
+const storyboardMode = ref<StoryboardMode>('ai')
 const loading = ref(false)
 const saving = ref(false)
 const selectingFolder = ref<'output' | 'video' | null>(null)
@@ -61,12 +65,20 @@ function fillForm() {
   semanticReviewMode.value = projectConfig.value.semantic_review_mode === 'automatic'
     ? 'automatic'
     : 'manual'
+  videoOutputFormat.value = projectConfig.value.video_output_format === 'fcpxml' ? 'fcpxml' : 'mp4'
+  storyboardTransitionEnabled.value = projectConfig.value.storyboard_transition_enabled !== false
+  segmentationMode.value = projectConfig.value.segmentation_mode === 'ai' ? 'ai' : 'newline'
+  storyboardMode.value = projectConfig.value.storyboard_mode === 'segments' ? 'segments' : 'ai'
   outputFilename.value = typeof filename === 'string' ? filename : ''
   mediaVideoDir.value = typeof videoDir === 'string' ? videoDir : ''
   voiceProfileId.value = typeof projectConfig.value.voice_profile_id === 'string'
     ? projectConfig.value.voice_profile_id
     : ''
 }
+
+watch(videoMode, (value) => {
+  if (value === 'none') videoOutputFormat.value = 'fcpxml'
+})
 
 async function load() {
   loading.value = true
@@ -129,7 +141,11 @@ async function save() {
       include_video: videoMode.value !== 'none',
       video_mode: videoMode.value,
       semantic_review_mode: semanticReviewMode.value,
+      video_output_format: videoOutputFormat.value,
       voice_profile_id: voiceProfileId.value,
+      storyboard_transition_enabled: storyboardTransitionEnabled.value,
+      segmentation_mode: segmentationMode.value,
+      storyboard_mode: storyboardMode.value,
     })
     fillForm()
     message.value = '项目设置已保存'
@@ -195,6 +211,14 @@ onMounted(load)
       <div class="panel">
         <div class="section-head"><h2>一键生成选项</h2></div>
         <label class="field reference-field">
+          <span>逐字稿切段方式</span>
+          <select v-model="segmentationMode">
+            <option value="newline">按换行切段（默认，本地处理）</option>
+            <option value="ai">AI 自动切段（DeepSeek 全文理解）</option>
+          </select>
+          <span class="muted">修改后会使现有切段失效；下次生成将按新方式重新切段。</span>
+        </label>
+        <label class="field reference-field">
           <span>视频生成方式</span>
           <select v-model="videoMode">
             <option value="none">不生成视频（仅配音与原文 SRT）</option>
@@ -219,6 +243,28 @@ onMounted(load)
           </div>
           <span class="muted">生成最终视频时会扫描该目录中的视频素材。</span>
         </label>
+        <div class="field reference-field">
+          <span>最终交付格式</span>
+          <div class="output-format-options" role="radiogroup" aria-label="最终交付格式">
+            <label class="output-format-option" :class="{ 'is-selected': videoOutputFormat === 'fcpxml' }">
+              <input v-model="videoOutputFormat" type="radio" value="fcpxml" />
+              <span><strong>FCPXML 可编辑工程</strong><small>可导入桌面版剪映继续深度剪辑</small></span>
+            </label>
+            <label class="output-format-option" :class="{ 'is-selected': videoOutputFormat === 'mp4' }">
+              <input v-model="videoOutputFormat" type="radio" value="mp4" />
+              <span><strong>{{ videoMode === 'none' ? '仅配音与原文 SRT' : '视频文件（MP4）' }}</strong><small>{{ videoMode === 'none' ? '不额外生成 FCPXML 时间线' : '直接渲染可播放的最终视频文件' }}</small></span>
+            </label>
+          </div>
+          <span class="muted">{{ videoMode === 'none' ? 'FCPXML 将创建仅包含完整配音和字幕标题轨的时间线，方便导入剪映后继续铺设画面。' : 'FCPXML 模式跳过视频渲染，输出可继续深度剪辑的时间线工程，并保留 SRT 字幕兜底。' }}</span>
+        </div>
+        <label v-if="videoMode === 'ai_semantic' || videoMode === 'ai_generated_images'" class="field reference-field">
+          <span>分镜头视觉场景切分</span>
+          <select v-model="storyboardMode">
+            <option value="ai">AI 自动生成分镜头（默认，全文理解）</option>
+            <option value="segments">按逐字稿切段生成分镜头</option>
+          </select>
+          <span class="muted">按切段模式消费最终逐字稿切段；AI 自动模式独立读取全文决定视觉场景边界。</span>
+        </label>
         <label v-if="videoMode === 'ai_semantic' || videoMode === 'ai_generated_images'" class="field reference-field">
           <span>素材审核方式</span>
           <select v-model="semanticReviewMode">
@@ -226,6 +272,13 @@ onMounted(load)
             <option value="automatic">自动审核拼接</option>
           </select>
           <span class="muted">自动模式只会按匹配度选用合格候选，并禁止同一分镜重复使用相同素材内容。</span>
+        </label>
+        <label class="checkbox-field">
+          <input v-model="storyboardTransitionEnabled" type="checkbox" :disabled="videoMode === 'none'" />
+          <span>
+            <strong>启用分镜头转场</strong>
+            <small>合并 MP4 时在部分分镜边界插入系统设置中的一个转场特效。</small>
+          </span>
         </label>
       </div>
 

@@ -655,7 +655,7 @@ onMounted(load)
                   {{ formatMilliseconds(assignment.scene_offset_start_ms) }}—{{ formatMilliseconds(assignment.scene_offset_end_ms) }}
                   · {{ assignment.playback_speed.toFixed(2) }}×
                 </small>
-                <small :title="assignment.selection_reason">{{ assignment.selection_reason }}</small>
+                <small :data-tooltip="assignment.selection_reason">{{ assignment.selection_reason }}</small>
                 <div v-if="assignment.media.media_type === 'image'" class="motion-controls">
                   <label>
                     <span>渲染方式</span>
@@ -728,7 +728,7 @@ onMounted(load)
                   :key="frame.id"
                   :src="assetPreviewUrl(frame.url)"
                   :alt="`${candidate.media.filename} ${frame.frame_index}`"
-                  :title="formatMilliseconds(frame.timestamp_ms)"
+                  :data-tooltip="formatMilliseconds(frame.timestamp_ms)"
                 />
               </div>
               <div v-if="candidate.conflicts.length" class="candidate-conflicts">

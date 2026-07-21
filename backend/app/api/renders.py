@@ -8,7 +8,11 @@ from sqlmodel import select
 from app.config import get_settings
 from app.database import get_session
 from app.infrastructure import process_runner as task_control
-from app.infrastructure.project_layout import get_final_video_path, get_project_work_dir
+from app.infrastructure.project_layout import (
+    get_final_fcpxml_path,
+    get_final_video_path,
+    get_project_work_dir,
+)
 from app.models.media import SceneAssignment
 from app.models.storyboard import VisualScene
 from app.services.projects import project_service
@@ -149,6 +153,7 @@ def intelligent_render_status(project_id: str, session: Session = Depends(get_se
         except (OSError, json.JSONDecodeError):
             scene_manifest = {}
     final_video_path = get_final_video_path(project, get_settings().workspace_dir)
+    final_fcpxml_path = get_final_fcpxml_path(project, get_settings().workspace_dir)
     return {
         "success": True,
         "data": {
@@ -161,6 +166,8 @@ def intelligent_render_status(project_id: str, session: Session = Depends(get_se
             "visual_track_exists": visual_track_path.is_file(),
             "final_video_path": str(final_video_path),
             "final_video_exists": final_video_path.is_file() and intelligent_render_complete,
+            "final_fcpxml_path": str(final_fcpxml_path),
+            "final_fcpxml_exists": final_fcpxml_path.is_file(),
             "qa_report": qa_service.read_report(project),
             "work_dir": str(work_dir),
         },

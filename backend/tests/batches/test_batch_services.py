@@ -141,6 +141,57 @@ class GenerationCheckpointTests(unittest.TestCase):
         smart_video.assert_not_called()
         self.assertEqual(stages, ["video", "completed"])
 
+    def test_landscape_fcpxml_mode_skips_mp4_composition(self) -> None:
+        session = MagicMock()
+        project = Project(
+            id="p1",
+            name="Project",
+            config_json='{"include_video":true,"video_mode":"landscape","video_output_format":"fcpxml"}',
+        )
+        stages: list[str] = []
+        with (
+            patch.object(narration_generation.rough_cut_service, "compose_video") as compose_video,
+            patch.object(
+                narration_generation.fcpxml_export_service,
+                "export_project_fcpxml",
+            ) as export_fcpxml,
+        ):
+            narration_generation.run_project_generation(
+                session, project, "video", True, stages.append
+            )
+
+        export_fcpxml.assert_called_once_with(session, project)
+        compose_video.assert_not_called()
+        self.assertEqual(stages, ["completed"])
+
+    def test_audio_only_fcpxml_branches_to_export_after_subtitles(self) -> None:
+        session = MagicMock()
+        project = Project(
+            id="p1",
+            name="Project",
+            config_json='{"video_mode":"none","video_output_format":"fcpxml"}',
+        )
+        stages: list[str] = []
+
+        def finish_fcpxml(_session, _project, stage, on_stage_changed):
+            self.assertEqual(stage, "fcpxml_export")
+            on_stage_changed("completed")
+
+        with (
+            patch.object(narration_generation, "_create_subtitles"),
+            patch.object(
+                narration_generation.video_synthesis,
+                "run_video_synthesis",
+                side_effect=finish_fcpxml,
+            ) as export_workflow,
+        ):
+            narration_generation.run_project_generation(
+                session, project, "subtitles", False, stages.append
+            )
+
+        export_workflow.assert_called_once()
+        self.assertEqual(stages, ["fcpxml_export", "completed"])
+
     def test_ai_semantic_mode_branches_after_shared_subtitle_stage(self) -> None:
         session = MagicMock()
         project = Project(

@@ -11,6 +11,7 @@ from app.database import get_session
 from app.infrastructure.file_storage import ensure_inside_any, project_dir
 from app.infrastructure.project_layout import (
     get_final_audio_path,
+    get_final_fcpxml_path,
     get_final_srt_path,
     get_final_video_path,
     get_legacy_project_work_dir,
@@ -42,9 +43,13 @@ class ProjectSettingsRequest(BaseModel):
     include_video: bool = False
     video_mode: str | None = None
     semantic_review_mode: str | None = None
+    video_output_format: str | None = project_service.VIDEO_OUTPUT_FCPXML
     tts_engine: str = project_service.DEFAULT_TTS_ENGINE
     reference_audio_text: str = ""
     voice_profile_id: str = ""
+    storyboard_transition_enabled: bool = True
+    segmentation_mode: str = project_service.SEGMENTATION_MODE_NEWLINE
+    storyboard_mode: str = project_service.STORYBOARD_MODE_AI
 
 
 class DirectoryPickerRequest(BaseModel):
@@ -75,9 +80,13 @@ def create_project(
     include_video: bool = Form(False),
     video_mode: str | None = Form(None),
     semantic_review_mode: str | None = Form(None),
+    video_output_format: str | None = Form(project_service.VIDEO_OUTPUT_FCPXML),
     tts_engine: str = Form(project_service.DEFAULT_TTS_ENGINE),
     reference_audio_text: str = Form(""),
     voice_profile_id: str = Form(""),
+    storyboard_transition_enabled: bool = Form(True),
+    segmentation_mode: str = Form(project_service.SEGMENTATION_MODE_NEWLINE),
+    storyboard_mode: str = Form(project_service.STORYBOARD_MODE_AI),
     session: Session = Depends(get_session),
 ) -> dict:
     if not name.strip():
@@ -105,6 +114,10 @@ def create_project(
             voice_profile_id,
             video_mode,
             semantic_review_mode,
+            video_output_format,
+            storyboard_transition_enabled,
+            segmentation_mode,
+            storyboard_mode,
         )
         if voice_profile_id.strip():
             return ok(project)
@@ -155,6 +168,7 @@ def get_project_outputs(project_id: str, session: Session = Depends(get_session)
     final_audio_path = get_final_audio_path(project, get_settings().workspace_dir)
     final_srt_path = get_final_srt_path(project, get_settings().workspace_dir)
     final_video_path = get_final_video_path(project, get_settings().workspace_dir)
+    final_fcpxml_path = get_final_fcpxml_path(project, get_settings().workspace_dir)
     output_files = []
     seen_paths: set[Path] = set()
     if work_dir.is_dir():
@@ -172,7 +186,7 @@ def get_project_outputs(project_id: str, session: Session = Depends(get_session)
                     "modified_at": stat.st_mtime,
                 }
             )
-    for final_path in (final_audio_path, final_video_path, final_srt_path):
+    for final_path in (final_audio_path, final_video_path, final_fcpxml_path, final_srt_path):
         if not final_path.is_file() or final_path.resolve() in seen_paths:
             continue
         stat = final_path.stat()
@@ -191,6 +205,9 @@ def get_project_outputs(project_id: str, session: Session = Depends(get_session)
         "final_audio_path": str(final_audio_path),
         "final_srt_path": str(final_srt_path),
         "final_video_path": str(final_video_path),
+        "final_fcpxml_path": str(final_fcpxml_path),
+        "final_video_exists": final_video_path.is_file(),
+        "final_fcpxml_exists": final_fcpxml_path.is_file(),
         "files": output_files,
     })
 
@@ -243,6 +260,10 @@ def save_project_settings(
             payload.voice_profile_id,
             payload.video_mode,
             payload.semantic_review_mode,
+            payload.video_output_format,
+            payload.storyboard_transition_enabled,
+            payload.segmentation_mode,
+            payload.storyboard_mode,
         ))
     except (OSError, ValueError) as exc:
         logger.exception("Failed to save settings for project %s", project_id)
@@ -326,6 +347,6 @@ def create_segments(project_id: str, session: Session = Depends(get_session)) ->
     try:
         project = project_service.ensure_output_filename(session, project)
         return ok(project_service.create_segments(session, project))
-    except ValueError as exc:
+    except (RuntimeError, ValueError) as exc:
         logger.exception("Failed to create segments for project %s", project_id)
         fail(str(exc))

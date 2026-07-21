@@ -11,7 +11,7 @@ from pathlib import Path
 
 from sqlmodel import Session
 
-from app.config import LandscapeTransitionEffect, get_settings
+from app.config import StoryboardTransitionEffect, get_settings
 from app.models.project import Project
 from app.infrastructure.ffmpeg import probe_duration, run_ffmpeg
 from app.infrastructure.project_layout import (
@@ -33,7 +33,6 @@ TARGET_FPS = 30
 # Skipping a few frames also prevents that frame from becoming a clip boundary.
 CLIP_START_OFFSET = 0.1
 VIDEO_TAIL_PADDING = 0.5
-TRANSITION_DURATION_SECONDS = 0.45
 MIN_TRANSITION_DURATION_SECONDS = 0.2
 PROGRESS_WRITE_RETRIES = 5
 _composing_project_ids: set[str] = set()
@@ -90,23 +89,6 @@ def compose_video(session: Session, project: Project) -> Path:
 
 def _compose_video(session: Session, project: Project) -> Path:
     settings = get_settings()
-    config = _load_project_config(project)
-    media_dir_value = str(config.get("media_video_dir") or "").strip()
-    if not media_dir_value:
-        raise ValueError("Video material directory is not configured")
-
-    media_dir = Path(media_dir_value).expanduser().resolve()
-    if not media_dir.is_dir():
-        raise ValueError("Video material directory does not exist")
-
-    audio_path = get_final_audio_path(project, settings.workspace_dir)
-    if not audio_path.is_file():
-        raise ValueError("Final WAV audio does not exist; merge audio before composing video")
-
-    target_duration = probe_duration(audio_path)
-    if target_duration <= 0:
-        raise ValueError("Final WAV audio duration is invalid")
-
     base_dir = get_project_work_dir(project, settings.workspace_dir)
     ensure_project_dirs(base_dir)
     video_dir = base_dir / "video"
@@ -120,22 +102,8 @@ def _compose_video(session: Session, project: Project) -> Path:
     session.add(project)
     session.commit()
 
-    source_paths = list_rough_cut_video_files(media_dir)
     write_video_progress(progress_path, "running", "selecting", 12, message="Selecting video materials")
-    grouped_paths = group_video_files(source_paths)
-    enabled_effects = [item for item in settings.landscape_transition_effects if item.enabled]
-    selected = select_videos_for_duration(
-        grouped_paths,
-        target_duration,
-        TRANSITION_DURATION_SECONDS if enabled_effects else 0.0,
-    )
-    transition_plan = build_transition_plan(selected, enabled_effects)
-    write_selected_manifest(
-        video_dir / "selected_videos.json",
-        selected,
-        target_duration,
-        transition_plan,
-    )
+    selected, transition_plan, target_duration = prepare_rough_cut_selection(project)
 
     write_video_progress(
         progress_path,
@@ -225,6 +193,60 @@ def _compose_video(session: Session, project: Project) -> Path:
         message="Video generation completed",
     )
     return output_path
+
+
+def prepare_rough_cut_selection(
+    project: Project,
+) -> tuple[list[SelectedVideo], list[PlannedTransition], float]:
+    """Select the rough-cut source clips without rendering them."""
+    settings = get_settings()
+    config = _load_project_config(project)
+    media_dir_value = str(config.get("media_video_dir") or "").strip()
+    if not media_dir_value:
+        raise ValueError("Video material directory is not configured")
+    media_dir = Path(media_dir_value).expanduser().resolve()
+    if not media_dir.is_dir():
+        raise ValueError("Video material directory does not exist")
+
+    audio_path = get_final_audio_path(project, settings.workspace_dir)
+    if not audio_path.is_file():
+        raise ValueError("Final WAV audio does not exist; merge audio before composing video")
+    target_duration = probe_duration(audio_path)
+    if target_duration <= 0:
+        raise ValueError("Final WAV audio duration is invalid")
+
+    source_paths = list_rough_cut_video_files(media_dir)
+    grouped_paths = group_video_files(source_paths)
+    transitions_enabled = bool(config.get("storyboard_transition_enabled", True))
+    enabled_effects = (
+        [item for item in settings.storyboard_transition_effects if item.enabled]
+        if transitions_enabled
+        else []
+    )
+    transition_duration = settings.storyboard_transition_duration_seconds
+    selected = select_videos_for_duration(
+        grouped_paths,
+        target_duration,
+        transition_duration if enabled_effects else 0.0,
+    )
+    transition_plan = build_transition_plan(
+        selected,
+        enabled_effects,
+        group_min_clips=settings.storyboard_transition_group_min_clips,
+        group_max_clips=settings.storyboard_transition_group_max_clips,
+        min_per_group=settings.storyboard_transition_min_per_group,
+        max_per_group=settings.storyboard_transition_max_per_group,
+        duration=transition_duration,
+    )
+    base_dir = get_project_work_dir(project, settings.workspace_dir)
+    ensure_project_dirs(base_dir)
+    write_selected_manifest(
+        base_dir / "video" / "selected_videos.json",
+        selected,
+        target_duration,
+        transition_plan,
+    )
+    return selected, transition_plan, target_duration
 
 
 def compose_normalized_clips(
@@ -417,32 +439,66 @@ def normalize_video_title(path: Path) -> str:
 
 def build_transition_plan(
     selected: list[SelectedVideo],
-    effects: list[LandscapeTransitionEffect],
+    effects: list[StoryboardTransitionEffect],
+    *,
+    group_min_clips: int = 2,
+    group_max_clips: int = 5,
+    min_per_group: int = 1,
+    max_per_group: int = 2,
+    duration: float = 0.45,
+) -> list[PlannedTransition]:
+    return build_transition_plan_for_durations(
+        [item.clip_duration for item in selected],
+        effects,
+        group_min_clips=group_min_clips,
+        group_max_clips=group_max_clips,
+        min_per_group=min_per_group,
+        max_per_group=max_per_group,
+        duration=duration,
+    )
+
+
+def build_transition_plan_for_durations(
+    clip_durations: list[float],
+    effects: list[StoryboardTransitionEffect],
+    *,
+    group_min_clips: int = 2,
+    group_max_clips: int = 5,
+    min_per_group: int = 1,
+    max_per_group: int = 2,
+    duration: float = 0.45,
 ) -> list[PlannedTransition]:
     enabled = [item for item in effects if item.enabled and item.percentage > 0]
-    if len(selected) < 2 or not enabled:
+    if len(clip_durations) < 2 or not enabled or max_per_group == 0:
         return []
 
     effect_names = [item.name for item in enabled]
     effect_weights = [item.percentage for item in enabled]
     plan: list[PlannedTransition] = []
     group_start = 0
-    while group_start < len(selected) - 1:
-        group_end = min(len(selected), group_start + random.randint(2, 5))
+    while group_start < len(clip_durations) - 1:
+        group_end = min(
+            len(clip_durations),
+            group_start + random.randint(group_min_clips, group_max_clips),
+        )
         candidates: list[tuple[int, float]] = []
         for boundary in range(group_start + 1, group_end):
-            duration = _resolve_transition_duration(
-                TRANSITION_DURATION_SECONDS,
-                selected[boundary - 1].clip_duration,
-                selected[boundary].clip_duration,
+            resolved_duration = _resolve_transition_duration(
+                duration,
+                clip_durations[boundary - 1],
+                clip_durations[boundary],
             )
-            if duration >= MIN_TRANSITION_DURATION_SECONDS:
-                candidates.append((boundary, duration))
+            if resolved_duration >= MIN_TRANSITION_DURATION_SECONDS:
+                candidates.append((boundary, resolved_duration))
         if candidates:
-            count = random.randint(1, min(2, len(candidates)))
-            for boundary, duration in sorted(random.sample(candidates, count)):
+            lower = min(min_per_group, len(candidates))
+            upper = min(max_per_group, len(candidates))
+            count = random.randint(lower, upper) if upper else 0
+            for boundary, resolved_duration in sorted(random.sample(candidates, count)):
                 effect = random.choices(effect_names, weights=effect_weights, k=1)[0]
-                plan.append(PlannedTransition(boundary, effect, duration))
+                # Candidates are sampled without replacement, so a scene boundary
+                # can receive at most one transition effect.
+                plan.append(PlannedTransition(boundary, effect, resolved_duration))
         group_start = group_end
     return plan
 

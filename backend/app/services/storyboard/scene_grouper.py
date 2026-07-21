@@ -12,12 +12,16 @@ MAX_CHARACTERS_PER_REQUEST = 12_000
 MAX_SCENE_DURATION_MS = 15_000
 
 
-def group_cues(cues: list[dict], client: DeepSeekClient) -> tuple[list[list[dict]], list[str]]:
+def group_cues(
+    cues: list[dict],
+    client: DeepSeekClient,
+    full_script: str = "",
+) -> tuple[list[list[dict]], list[str]]:
     groups: list[list[dict]] = []
     warnings: list[str] = []
     for chunk in _chunk_cues(cues):
         try:
-            suggested_ids = _request_groups(chunk, client)
+            suggested_ids = _request_groups(chunk, client, full_script)
             groups.extend(_split_long_groups(_materialize_groups(chunk, suggested_ids)))
         except (RuntimeError, ValueError, ValidationError) as exc:
             warnings.append(f"语义分组已回退到时长规则：{exc}")
@@ -25,7 +29,11 @@ def group_cues(cues: list[dict], client: DeepSeekClient) -> tuple[list[list[dict
     return groups, warnings
 
 
-def _request_groups(cues: list[dict], client: DeepSeekClient) -> list[list[str]]:
+def _request_groups(
+    cues: list[dict],
+    client: DeepSeekClient,
+    full_script: str = "",
+) -> list[list[str]]:
     system_prompt = """
 You are a documentary visual scene editor. Group consecutive subtitle cues into visual semantic scenes.
 Return JSON only. The JSON format must be:
@@ -47,7 +55,13 @@ Rules:
         for cue in cues
     ]
     result = SceneGroupingResult.model_validate(
-        client.chat_json(system_prompt, json.dumps({"subtitle_cues": payload}, ensure_ascii=False))
+        client.chat_json(
+            system_prompt,
+            json.dumps(
+                {"full_script": full_script, "subtitle_cues": payload},
+                ensure_ascii=False,
+            ),
+        )
     )
     return [group.subtitle_ids for group in result.groups]
 

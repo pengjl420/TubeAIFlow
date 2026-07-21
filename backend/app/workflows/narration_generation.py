@@ -8,7 +8,7 @@ from app.infrastructure import process_runner as task_control
 from app.config import get_settings
 from app.infrastructure.project_layout import get_final_audio_path
 from app.services.narration import audio_service, srt_service, timeline_service, tts_service
-from app.services.projects import project_service
+from app.services.projects import fcpxml_export_service, project_service
 from app.services.rendering import rough_cut_service
 from app.workflows import video_synthesis
 
@@ -85,6 +85,8 @@ def run_project_generation(
             project_service.VIDEO_MODE_AI_GENERATED_IMAGES,
         }:
             stage = "storyboard"
+        elif project_service.get_video_output_format(project) == project_service.VIDEO_OUTPUT_FCPXML:
+            stage = "fcpxml_export"
         else:
             stage = "completed"
         on_stage_changed(stage)
@@ -92,7 +94,10 @@ def run_project_generation(
     if stage == "video":
         try:
             with task_control.controlled(project.id, "video"):
-                rough_cut_service.compose_video(session, project)
+                if project_service.get_video_output_format(project) == project_service.VIDEO_OUTPUT_FCPXML:
+                    fcpxml_export_service.export_project_fcpxml(session, project)
+                else:
+                    rough_cut_service.compose_video(session, project)
         except task_control.TaskCancelledError:
             raise
         except (OSError, RuntimeError, ValueError) as exc:

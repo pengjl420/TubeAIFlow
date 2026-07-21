@@ -11,6 +11,10 @@ export interface Project {
     include_video?: boolean
     video_mode?: VideoGenerationMode
     semantic_review_mode?: SemanticReviewMode
+    video_output_format?: VideoOutputFormat
+    storyboard_transition_enabled?: boolean
+    segmentation_mode?: SegmentationMode
+    storyboard_mode?: StoryboardMode
     [key: string]: unknown
   }
   config_json?: string
@@ -25,3 +29,6 @@ export interface Project {
 
 export type VideoGenerationMode = 'none' | 'landscape' | 'ai_semantic' | 'ai_generated_images'
 export type SemanticReviewMode = 'manual' | 'automatic'
+export type VideoOutputFormat = 'mp4' | 'fcpxml'
+export type SegmentationMode = 'newline' | 'ai'
+export type StoryboardMode = 'ai' | 'segments'

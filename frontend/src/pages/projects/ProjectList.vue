@@ -425,12 +425,12 @@ onBeforeUnmount(() => {
               @change="toggleProjectSelection(project.id)"
             />
             <span class="project-avatar">{{ project.name.slice(0, 1).toUpperCase() }}</span>
-            <h3 :title="project.name">{{ project.name }}</h3>
+            <h3 :data-tooltip="project.name">{{ project.name }}</h3>
           </div>
           <span class="status-pill" :class="statusTone(project.status)"><i></i>{{ statusLabel(project.status) }}</span>
         </div>
         <div class="project-card-body">
-          <p class="project-reference-audio" :title="`${voiceProfileName(project)} ${ttsEngineName(project)}`">
+          <p class="project-reference-audio" :data-tooltip="`${voiceProfileName(project)} ${ttsEngineName(project)}`">
             <span>参考音频</span>
             <strong>{{ voiceProfileName(project) }}</strong>
             <span v-if="ttsEngineName(project)" class="project-engine">{{ ttsEngineName(project) }}</span>

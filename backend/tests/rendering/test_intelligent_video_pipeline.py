@@ -137,6 +137,39 @@ class IntelligentVideoPipelineTests(unittest.TestCase):
             qa.assert_called_once_with(session, project)
             self.assertEqual(media_file.id, "media-1")
 
+    def test_fcpxml_output_skips_scene_and_final_video_rendering(self) -> None:
+        with Session(self.engine) as session:
+            project, scene = self._project_with_scene(session)
+            project.config_json = '{"video_mode":"ai_semantic","video_output_format":"fcpxml"}'
+            _, shot = self._media(session)
+            session.add(
+                SceneAssignment(
+                    id="assignment-1",
+                    project_id=project.id,
+                    scene_id=scene.id,
+                    media_shot_id=shot.id,
+                    scene_offset_start_ms=0,
+                    scene_offset_end_ms=5_000,
+                    manual_confirmed=True,
+                )
+            )
+            session.add(project)
+            session.commit()
+            changed = []
+            with (
+                patch.object(video_synthesis.fcpxml_export_service, "export_project_fcpxml") as export,
+                patch.object(video_synthesis.scene_renderer, "render_all_scenes") as render_scenes,
+                patch.object(video_synthesis.final_renderer, "compose_final_video") as render_final,
+            ):
+                video_synthesis.run_video_synthesis(
+                    session, project, "asset_review", changed.append
+                )
+
+            self.assertEqual(changed, ["fcpxml_export", "completed"])
+            export.assert_called_once_with(session, project)
+            render_scenes.assert_not_called()
+            render_final.assert_not_called()
+
     def test_scene_renderer_is_resumable_for_unchanged_assignment(self) -> None:
         source = self.root / "source.mp4"
         source.write_bytes(b"video")

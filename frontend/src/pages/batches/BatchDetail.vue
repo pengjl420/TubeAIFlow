@@ -51,6 +51,7 @@ const stageLabels: Record<string, string> = {
   final_render: '合成最终视频',
   quality_check: '执行质量检查',
   quality_review: '等待质量复核',
+  fcpxml_export: '生成 FCPXML 工程',
   completed: '完成',
 }
 
@@ -169,7 +170,7 @@ onBeforeUnmount(() => {
         <button
           class="danger-button"
           :disabled="acting || canPause"
-          :title="canPause ? '请先暂停批次再删除' : '删除批次记录并保留项目'"
+          :data-tooltip="canPause ? '请先暂停批次再删除' : '删除批次记录并保留项目'"
           @click="removeBatch"
         >删除批次</button>
         <RouterLink class="secondary-button" to="/batches">返回批次列表</RouterLink>

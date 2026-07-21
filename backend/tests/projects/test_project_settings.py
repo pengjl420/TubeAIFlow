@@ -109,6 +109,7 @@ class ProjectSettingsTests(unittest.TestCase):
             self.assertEqual(config["project_directory_name"], "New_name")
             self.assertEqual(config["output_filename"], "voice_file")
             self.assertEqual(config["media_video_dir"], str(video_dir.resolve()))
+            self.assertTrue(config["storyboard_transition_enabled"])
             self.assertEqual(session.commits, 1)
 
     def test_update_project_settings_validates_before_mutating_project(self) -> None:
@@ -195,6 +196,17 @@ class ProjectSettingsTests(unittest.TestCase):
         self.assertEqual(
             project_service.get_project_video_mode(project),
             project_service.VIDEO_MODE_LANDSCAPE,
+        )
+
+    def test_new_output_selection_defaults_to_fcpxml_but_legacy_projects_stay_mp4(self) -> None:
+        legacy = Project(id="legacy", name="Legacy", config_json="{}")
+        self.assertEqual(
+            project_service.normalize_video_output_format(None),
+            project_service.VIDEO_OUTPUT_FCPXML,
+        )
+        self.assertEqual(
+            project_service.get_video_output_format(legacy),
+            project_service.VIDEO_OUTPUT_MP4,
         )
 
     def test_semantic_review_mode_defaults_to_manual_and_persists_automatic(self) -> None:

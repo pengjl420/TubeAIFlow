@@ -230,12 +230,21 @@ const videoMode = computed(() => {
 const includeVideo = computed(() => videoMode.value !== 'none')
 const usesAiSemanticVideo = computed(() => videoMode.value === 'ai_semantic' || videoMode.value === 'ai_generated_images')
 const usesLandscapeVideo = computed(() => videoMode.value === 'landscape')
+const usesFcpxml = computed(() => projectConfig.value.video_output_format === 'fcpxml')
+const hasTimelineOutput = computed(() => includeVideo.value || usesFcpxml.value)
 
 const finalVideoPath = computed(() => {
   if (!hasOutputFilename.value) return ''
   const dir = outputs.value?.output_dir || project.value?.output_dir || ''
   if (!dir || !outputFilename.value.trim()) return outputs.value?.final_video_path || ''
   return outputs.value?.final_video_path || `${dir.replace(/[\\/]$/, '')}\\${outputFilename.value.trim()}.mp4`
+})
+
+const finalFcpxmlPath = computed(() => {
+  if (!hasOutputFilename.value) return ''
+  const dir = outputs.value?.output_dir || project.value?.output_dir || ''
+  if (!dir || !outputFilename.value.trim()) return outputs.value?.final_fcpxml_path || ''
+  return outputs.value?.final_fcpxml_path || `${dir.replace(/[\\/]$/, '')}\\${outputFilename.value.trim()}.fcpxml`
 })
 
 const projectStatusLabel = computed(() => {
@@ -264,17 +273,19 @@ const workflowSteps = computed(() => {
   const scriptReady = scriptCharacterCount.value > 0 || segmentReady
   const voiceReady = ttsStatus.value.total > 0 && ttsStatus.value.completed >= ttsStatus.value.total
   const audioReady = Boolean(finalAudioPath.value && outputs.value?.final_audio_path)
-  const videoReady = Boolean(finalVideoPath.value && outputs.value?.final_video_path)
+  const videoReady = usesFcpxml.value
+    ? outputs.value?.final_fcpxml_exists === true
+    : outputs.value?.final_video_exists === true
   const videoActive = composingVideo.value || Boolean(
     projectTask.value?.status === 'running'
-    && ['storyboard', 'asset_search', 'asset_review', 'image_generation', 'image_review', 'scene_render', 'final_render', 'quality_check', 'quality_review'].includes(projectTask.value.stage || ''),
+    && ['storyboard', 'asset_search', 'asset_review', 'image_generation', 'image_review', 'scene_render', 'final_render', 'quality_check', 'quality_review', 'fcpxml_export'].includes(projectTask.value.stage || ''),
   )
   return [
     { label: '脚本', caption: scriptCharacterCount.value ? `${scriptCharacterCount.value} 字` : scriptReady ? '已保存' : '等待输入', state: scriptReady ? 'done' : 'current' },
     { label: '切段', caption: segmentReady ? `${segments.value.length} 段` : '尚未生成', state: segmentReady ? 'done' : scriptCharacterCount.value ? 'current' : 'pending' },
     { label: '配音', caption: voiceReady ? '音频已就绪' : ttsRunning.value ? '正在生成' : '等待生成', state: voiceReady ? 'done' : ttsRunning.value ? 'current' : 'pending' },
     { label: '字幕', caption: audioReady ? '已生成' : '等待合并', state: audioReady ? 'done' : mergingAudio.value || generatingSubtitles.value ? 'current' : 'pending' },
-    { label: '成片', caption: includeVideo.value ? (videoReady ? '已输出' : '等待合成') : '未启用', state: videoReady ? 'done' : videoActive ? 'current' : 'pending' },
+    { label: usesFcpxml.value ? 'FCPXML' : '成片', caption: hasTimelineOutput.value ? (videoReady ? '已输出' : '等待生成') : '未启用', state: videoReady ? 'done' : videoActive ? 'current' : 'pending' },
   ]
 })
 
@@ -420,6 +431,7 @@ function taskStageLabel(task: ProjectTaskStatus) {
     final_render: '合成最终视频',
     quality_check: '执行质量检查',
     quality_review: '等待质量复核',
+    fcpxml_export: '生成 FCPXML 工程',
     completed: '生成完成',
   }
   return labels[task.stage || ''] || task.stage || '准备执行'
@@ -980,7 +992,7 @@ onBeforeUnmount(() => {
             <div><dt>项目文件夹</dt><dd>{{ outputs?.work_dir || outputs?.output_dir || project.output_dir || '暂无输出目录' }}</dd></div>
             <div><dt>完整音频</dt><dd>{{ finalAudioPath || '生成后自动创建' }}</dd></div>
             <div><dt>字幕</dt><dd>{{ finalSrtPath || '生成后自动创建' }}</dd></div>
-            <div v-if="includeVideo"><dt>最终视频</dt><dd>{{ finalVideoPath || '生成后自动创建' }}</dd></div>
+            <div v-if="hasTimelineOutput"><dt>{{ usesFcpxml ? 'FCPXML 工程' : '最终视频' }}</dt><dd>{{ usesFcpxml ? (finalFcpxmlPath || '生成后自动创建') : (finalVideoPath || '生成后自动创建') }}</dd></div>
           </dl>
         </div>
       </aside>

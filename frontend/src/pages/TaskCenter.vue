@@ -12,7 +12,7 @@ import {
   cancelProjectTask, listTasks, startProjectWorkflow, startVideoWorkflow,
   type ProjectTaskStatus,
 } from '../api/tasks'
-import { confirmAction, showToast } from '../services/feedback'
+import { confirmAction, showToast, usePageFeedback } from '../services/feedback'
 import type { Project } from '../types/project'
 import { formatDateTime, formatDuration } from '../utils/time'
 
@@ -28,6 +28,7 @@ const type = ref('all')
 const onlyAbnormal = ref(false)
 const selected = ref<TaskItem | null>(null)
 const error = ref('')
+usePageFeedback(error, undefined, { errorTitle: '任务状态异常' })
 const page = ref(1)
 const pageSize = ref(10)
 const acting = ref(false)
@@ -242,7 +243,6 @@ onBeforeUnmount(() => { if (refreshTimer !== undefined) window.clearInterval(ref
       <button :class="{ active: status === 'completed' }" @click="selectStatus('completed')"><i class="green"><CheckCircle2 :size="22" /></i><span><small>今日完成</small><strong>{{ counts.completed }}</strong></span></button>
     </div>
 
-    <div v-if="error" class="alert alert-danger"><strong>任务状态异常</strong><span>{{ error }}</span></div>
 
     <div class="task-content-grid">
       <section class="task-list-card">
@@ -271,7 +271,7 @@ onBeforeUnmount(() => { if (refreshTimer !== undefined) window.clearInterval(ref
         <footer class="task-pagination"><span>共 {{ filtered.length }} 条</span><div><button :disabled="page <= 1" @click="page--"><ChevronLeft :size="16" /></button><button v-for="value in visiblePages" :key="value" :class="{ active: page === value }" @click="page = value">{{ value }}</button><button :disabled="page >= pageCount" @click="page++"><ChevronRight :size="16" /></button></div><label><select v-model="pageSize"><option :value="10">10 条/页</option><option :value="20">20 条/页</option><option :value="50">50 条/页</option></select></label></footer>
       </section>
 
-      <aside v-if="selected" class="task-detail-card">
+      <aside v-if="selected" v-click-outside="() => { selected = null }" class="task-detail-card">
         <header><div><h2>任务详情</h2><p>{{ selected.project.name }} - {{ workflowLabel(selected) }} <b class="status-chip" :class="tone(selected.task.status)">{{ statusLabels[selected.task.status] }}</b></p></div><button @click="selected = null"><X :size="19" /></button></header>
 
         <dl class="task-meta"><div><dt>任务 ID</dt><dd>{{ shortId(selected) }}</dd></div><div><dt>执行器</dt><dd>{{ selected.task.lease_owner || 'local-worker' }}</dd></div><div><dt>所属项目</dt><dd>{{ selected.project.name }}</dd></div><div><dt>优先级</dt><dd><b class="priority">● 普通</b></dd></div><div><dt>任务类型</dt><dd>{{ workflowLabel(selected) }}</dd></div><div><dt>预计完成</dt><dd>按当前阶段动态计算</dd></div><div><dt>创建时间</dt><dd>{{ selected.task.created_at ? formatDateTime(selected.task.created_at) : '—' }}</dd></div><div><dt>重试次数</dt><dd>{{ selected.task.attempt_count || 0 }}</dd></div></dl>

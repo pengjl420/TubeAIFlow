@@ -11,6 +11,7 @@ import { getProject, getProjectOutputs, type ProjectOutputs } from '../../api/pr
 import { getIntelligentRenderStatus, type IntelligentRenderStatus } from '../../api/renders'
 import { getStoryboard } from '../../api/storyboard'
 import { getProjectTaskStatus, type ProjectTaskStatus } from '../../api/tasks'
+import { usePageFeedback } from '../../services/feedback'
 import type { Project } from '../../types/project'
 import type { Segment } from '../../types/narration'
 import type { VisualScene } from '../../types/storyboard'
@@ -26,6 +27,7 @@ const scenes = ref<VisualScene[]>([])
 const render = ref<IntelligentRenderStatus | null>(null)
 const loading = ref(false)
 const error = ref('')
+usePageFeedback(error, undefined, { errorTitle: '项目概览未能更新' })
 
 const completedSegments = computed(() => segments.value.filter((item) => item.status === 'completed').length)
 const confirmedScenes = computed(() => render.value?.assignment_count || 0)
@@ -95,7 +97,6 @@ onMounted(load)
       <div><RouterLink class="secondary-button" :to="`/projects/${projectId}/settings`"><Settings2 :size="17" /> 项目设置</RouterLink><RouterLink class="primary-link" :to="nextAction.path">继续下一步 <ArrowRight :size="17" /></RouterLink></div>
     </header>
 
-    <div v-if="error" class="alert alert-danger"><strong>概览未能更新</strong><span>{{ error }}</span></div>
 
     <section class="taf-card taf-flow-card">
       <h2>生产流程状态</h2>

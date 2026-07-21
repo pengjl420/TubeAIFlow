@@ -10,6 +10,7 @@ import {
 import { API_BASE_URL } from '../../api/client'
 import { listVoices, type VoiceProfile } from '../../api/voices'
 import AudioPlayer from '../../components/common/AudioPlayer.vue'
+import { usePageFeedback } from '../../services/feedback'
 import type { Project, SegmentationMode, SemanticReviewMode, StoryboardMode, VideoGenerationMode, VideoOutputFormat } from '../../types/project'
 
 const route = useRoute()
@@ -33,6 +34,7 @@ const saving = ref(false)
 const selectingFolder = ref<'output' | 'video' | null>(null)
 const error = ref('')
 const message = ref('')
+usePageFeedback(error, message, { errorTitle: '项目设置操作失败', messageTitle: '项目设置' })
 
 const projectConfig = computed(() => {
   if (project.value?.config) return project.value.config
@@ -303,8 +305,6 @@ onMounted(load)
       </div>
     </div>
 
-    <p v-if="error" class="error">{{ error }}</p>
-    <p v-if="message" class="success">{{ message }}</p>
 
   </section>
 

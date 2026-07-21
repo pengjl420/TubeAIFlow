@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 
 import { getProject } from '../../api/projects'
+import { usePageFeedback } from '../../services/feedback'
 import {
   generateStoryboard,
   getStoryboard,
@@ -39,6 +40,7 @@ const generating = ref(false)
 const savingSceneId = ref('')
 const error = ref('')
 const message = ref('')
+usePageFeedback(error, message, { errorTitle: '分镜操作未完成', messageTitle: '分镜状态' })
 
 const timelineDuration = computed(() => {
   if (!cues.value.length) return 0
@@ -230,8 +232,6 @@ onMounted(load)
       </div>
     </div>
 
-    <div v-if="error" class="alert alert-danger"><strong>操作未完成</strong><span>{{ error }}</span></div>
-    <div v-if="message" class="alert alert-success"><strong>当前状态</strong><span>{{ message }}</span></div>
     <div v-for="warning in warnings" :key="warning" class="alert storyboard-warning">
       <strong>生成提醒</strong><span>{{ warning }}</span>
     </div>

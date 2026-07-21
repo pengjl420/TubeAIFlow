@@ -12,7 +12,7 @@ import {
   type AssetLibrarySummary,
 } from '../../api/assets'
 import { selectDirectory } from '../../api/projects'
-import { confirmAction } from '../../services/feedback'
+import { confirmAction, usePageFeedback } from '../../services/feedback'
 import type { LibraryRole, MediaAsset } from '../../types/media'
 import { formatDuration } from '../../utils/time'
 
@@ -31,6 +31,7 @@ const roleFilter = ref<'all' | LibraryRole>('all')
 const searchText = ref('')
 const message = ref('')
 const error = ref('')
+usePageFeedback(error, message, { errorTitle: '素材操作失败', messageTitle: '素材库状态' })
 const currentVectorModel = ref('')
 const page = ref(1)
 const pageSize = ref(24)
@@ -388,8 +389,6 @@ onMounted(loadAssets)
       <div><span>向量 / 预览</span><strong>{{ summary.indexed_shot_count }} / {{ summary.preview_shot_count }}</strong></div>
     </div>
 
-    <div v-if="error" class="alert alert-danger"><strong>操作未完成</strong><span>{{ error }}</span></div>
-    <div v-if="message" class="alert alert-success"><strong>素材库状态</strong><span>{{ message }}</span></div>
 
     <article v-if="false" class="panel asset-import-panel">
       <div class="section-head">

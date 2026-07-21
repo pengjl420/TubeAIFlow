@@ -6,7 +6,7 @@ import { AlertTriangle, CheckCircle2, Clipboard, Download, ExternalLink, FileArc
 import { getProject, getProjectOutputs, projectOutputFileUrl, type ProjectOutputFile, type ProjectOutputs } from '../../api/projects'
 import { getIntelligentRenderStatus, getQualityReport, runQualityCheck, type IntelligentRenderStatus, type QaReport } from '../../api/renders'
 import AudioPlayer from '../../components/common/AudioPlayer.vue'
-import { showToast } from '../../services/feedback'
+import { showToast, usePageFeedback } from '../../services/feedback'
 import type { Project } from '../../types/project'
 import { formatDuration } from '../../utils/time'
 
@@ -19,6 +19,7 @@ const qa = ref<QaReport | null>(null)
 const loading = ref(false)
 const checking = ref(false)
 const error = ref('')
+usePageFeedback(error, undefined, { errorTitle: '交付状态异常' })
 const issueFilter = ref('all')
 
 const finalVideo = computed(() => outputs.value?.files.find((file) => file.path === outputs.value?.final_video_path || file.name.toLowerCase().endsWith('.mp4')))
@@ -75,7 +76,6 @@ onMounted(load)
       <div><span class="section-eyebrow">QUALITY & DELIVERY</span><h1>质量与交付</h1><p>集中预览最终视频、处理 QA 问题，并获取全部生产产物。</p></div>
       <div class="page-title-actions"><button class="secondary-button" :disabled="loading" @click="load"><RefreshCw :size="16" /> 刷新</button><a v-if="finalVideo" class="primary-link" :href="projectOutputFileUrl(projectId, finalVideo.path)" target="_blank"><ExternalLink :size="16" /> 打开最终视频</a></div>
     </header>
-    <div v-if="error" class="alert alert-danger"><strong>交付状态异常</strong><span>{{ error }}</span></div>
 
     <section class="delivery-video-grid">
       <article class="panel final-video-card">

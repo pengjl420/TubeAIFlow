@@ -23,6 +23,7 @@ import {
 import { getProject, selectDirectory } from '../../api/projects'
 import { getStoryboard } from '../../api/storyboard'
 import { startVideoWorkflow } from '../../api/tasks'
+import { usePageFeedback } from '../../services/feedback'
 import type { LibraryRole, MediaAsset, SceneAssignment, SceneCandidate, SceneCoverage } from '../../types/media'
 import type { Project } from '../../types/project'
 import type { VisualScene } from '../../types/storyboard'
@@ -57,6 +58,7 @@ const uploadingSceneAsset = ref(false)
 const continuing = ref(false)
 const message = ref('')
 const error = ref('')
+usePageFeedback(error, message, { errorTitle: '素材操作未完成', messageTitle: '素材处理状态' })
 
 const selectedScene = computed(() => scenes.value.find((scene) => scene.id === selectedSceneId.value) || null)
 const indexedShotCount = computed(() => assets.value.flatMap((asset) => asset.shots).filter((shot) => shot.vector_id !== null).length)
@@ -509,8 +511,6 @@ onMounted(load)
       </div>
     </div>
 
-    <div v-if="error" class="alert alert-danger"><strong>操作未完成</strong><span>{{ error }}</span></div>
-    <div v-if="message" class="alert alert-success"><strong>当前状态</strong><span>{{ message }}</span></div>
 
     <article v-if="false" class="panel media-import-bar">
       <div>

@@ -30,8 +30,11 @@ From the project root, double-click:
 
 The start script uses the existing backend virtual environment without requiring a
 system-wide Python on `PATH`. If the environment does not exist, Python 3.12 is required
-once to create it. The launcher installs missing dependencies and opens separate terminal
-windows for the backend and frontend services.
+once to create it. The launcher installs missing dependencies, keeps one visible backend
+command window for runtime logs, and starts the frontend without another persistent window.
+It records both process IDs and writes frontend output to `backend/workspace/logs`. Restart
+uses the recorded process trees plus listener ports, so the previous instance is stopped
+before new processes are created.
 Backend runtime configuration is loaded from the local SQLite system settings table.
 
 ## Backend

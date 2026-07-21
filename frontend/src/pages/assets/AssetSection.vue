@@ -10,7 +10,7 @@ import {
 
 import { cleanupAssetCache, getAssetLibrary, importAssets, ingestAsset, type AssetLibrarySummary } from '../../api/assets'
 import { selectDirectory } from '../../api/projects'
-import { confirmAction, showToast } from '../../services/feedback'
+import { confirmAction, showToast, usePageFeedback } from '../../services/feedback'
 import type { LibraryRole, MediaAsset } from '../../types/media'
 
 type IndexStatus = 'running' | 'pending' | 'completed' | 'failed'
@@ -38,6 +38,7 @@ const processing = ref(false)
 const processingId = ref('')
 const error = ref('')
 const message = ref('')
+usePageFeedback(error, message, { errorTitle: '素材操作失败', messageTitle: '素材中心' })
 const indexQuery = ref('')
 const indexStatus = ref('all')
 const indexType = ref('all')
@@ -267,8 +268,6 @@ onMounted(load)
     </header>
 
     <nav class="asset-subnav"><RouterLink to="/assets">素材浏览</RouterLink><RouterLink to="/assets/import">扫描入库</RouterLink><RouterLink to="/assets/indexing">索引任务</RouterLink><RouterLink to="/assets/storage">存储与来源</RouterLink></nav>
-    <div v-if="error" class="alert alert-danger"><strong>素材操作失败</strong><span>{{ error }}</span></div>
-    <div v-if="message" class="alert alert-success"><strong>素材中心</strong><span>{{ message }}</span></div>
 
     <template v-if="section === 'import'">
       <div class="import-stepper panel"><span class="is-active"><i>1</i>选择目录</span><span><i>2</i>设定素材角色</span><span><i>3</i>扫描与去重</span><span><i>4</i>确认入库</span><span><i>5</i>生成索引</span></div>
@@ -314,7 +313,7 @@ onMounted(load)
           <footer class="index-pagination"><span>共 {{ indexTasks.length }} 条</span><div><button :disabled="indexPage === 1" @click="indexPage--"><ChevronLeft :size="14" /></button><button class="active">{{ indexPage }}</button><button :disabled="indexPage === indexPageCount" @click="indexPage++"><ChevronRight :size="14" /></button></div><select v-model="indexPageSize"><option :value="8">8 条/页</option><option :value="15">15 条/页</option><option :value="30">30 条/页</option></select></footer>
         </article>
 
-        <aside v-if="selectedAsset" class="ops-card index-detail">
+        <aside v-if="selectedAsset" v-click-outside="() => { selectedAsset = null }" class="ops-card index-detail">
           <header><div><h2>任务详情 · {{ selectedAsset.filename }}</h2><p>索引任务 <b class="index-status" :class="taskStatus(selectedAsset)">{{ statusLabel(taskStatus(selectedAsset)) }}</b></p></div><button @click="selectedAsset = null"><X :size="18" /></button></header>
           <div class="detail-top-grid"><section><small>当前模型</small><strong><Layers3 :size="20" /> {{ vectorModel || '未配置' }}</strong><div><button>模型详情</button><button>切换模型</button></div></section><section><small>GPU / 显存监控</small><strong>显存使用　13.2 GB / 24 GB　利用率 55%</strong><i><u></u></i></section></div>
           <dl><div><dt>任务 ID</dt><dd>{{ selectedAsset.id }}</dd></div><div><dt>素材范围</dt><dd>{{ selectedAsset.path }}</dd></div><div><dt>文件 / 镜头</dt><dd>{{ selectedAsset.shots.length || 1 }} / {{ selectedAsset.shots.length }}</dd></div><div><dt>开始时间</dt><dd>{{ formatDate(selectedAsset.created_at) }}</dd></div><div><dt>模型版本</dt><dd>{{ selectedAsset.shots.find((shot) => shot.vector_model)?.vector_model || vectorModel || '—' }}</dd></div><div><dt>状态</dt><dd>{{ statusLabel(taskStatus(selectedAsset)) }}</dd></div></dl>

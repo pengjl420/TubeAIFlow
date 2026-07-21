@@ -90,21 +90,25 @@ set "APP_PORT_OVERRIDE=%BACKEND_PORT%"
 set "VITE_API_PORT=%BACKEND_PORT%"
 
 if /I "%~1"=="--check" (
-  echo [OK] Backend Python, dependencies, Node.js, npm, and port selection are ready.
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ROOT%scripts\Start_TubeAIFlowServices.ps1" -BackendPort "%BACKEND_PORT%" -Check
+  if errorlevel 1 exit /b 1
+  echo [OK] Backend Python, dependencies, Node.js, npm, port selection, and background launcher are ready.
   exit /b 0
 )
 
 echo.
 echo Starting backend on http://127.0.0.1:%BACKEND_PORT% ...
-start "TubeAIFlow Backend" /D "%BACKEND_DIR%" cmd.exe /k ".venv\Scripts\python.exe -m app.run"
-
 echo Starting frontend: http://127.0.0.1:5173
-start "TubeAIFlow Frontend" /D "%FRONTEND_DIR%" cmd.exe /k "npm.cmd run dev"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ROOT%scripts\Start_TubeAIFlowServices.ps1" -BackendPort "%BACKEND_PORT%"
+if errorlevel 1 (
+  echo [ERROR] Failed to start TubeAIFlow services.
+  pause
+  exit /b 1
+)
 
 echo.
 echo TubeAIFlow is starting.
 echo Open http://127.0.0.1:5173 in your browser.
 timeout /t 3 /nobreak >nul
 start "" "http://127.0.0.1:5173"
-echo.
-pause
+exit /b 0

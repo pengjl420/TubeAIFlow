@@ -9,13 +9,14 @@ import {
 
 import { deleteProject, listProjects } from '../../api/projects'
 import { cancelProjectTask } from '../../api/tasks'
-import { confirmAction, showToast } from '../../services/feedback'
+import { confirmAction, showToast, usePageFeedback } from '../../services/feedback'
 import type { Project } from '../../types/project'
 import { formatDateTime, formatDuration } from '../../utils/time'
 
 const projects = ref<Project[]>([])
 const loading = ref(false)
 const error = ref('')
+usePageFeedback(error, undefined, { errorTitle: '项目列表未能更新' })
 const query = ref('')
 const statusFilter = ref('all')
 const modeFilter = ref('all')
@@ -223,7 +224,6 @@ onBeforeUnmount(() => { if (refreshTimer !== undefined) window.clearInterval(ref
           <span class="taf-filter-spacer"></span><button class="taf-filter-button" :disabled="loading" @click="loadProjects"><RefreshCw :size="15" /></button>
         </div>
 
-        <div v-if="error" class="alert alert-danger"><strong>项目列表未能更新</strong><span>{{ error }}</span></div>
         <div class="taf-project-table-head"><span><input type="checkbox" :checked="allSelected" @change="toggleAll" /></span><span>项目名称</span><span>生命周期状态</span><span>当前阶段</span><span>视频模式</span><span>音色</span><span>总时长</span><span>最近更新时间</span><span>主操作</span><span></span></div>
         <div v-if="loading && !projects.length" class="taf-empty-row">正在加载项目...</div>
         <div v-else-if="!filteredProjects.length" class="taf-empty-row">没有匹配的项目</div>

@@ -36,14 +36,14 @@ onBeforeUnmount(() => {
 
 <template>
   <Teleport to="body">
-    <div class="app-toast-region" aria-live="polite" aria-atomic="true">
+    <div class="app-toast-region" aria-live="polite" aria-atomic="false">
       <TransitionGroup name="app-toast">
         <article
           v-for="toast in feedbackState.toasts"
           :key="toast.id"
           class="app-toast"
           :class="`is-${toast.tone}`"
-          role="status"
+          :role="toast.tone === 'danger' ? 'alert' : 'status'"
         >
           <span class="app-toast-icon" aria-hidden="true">
             <svg v-if="toast.tone === 'success'" viewBox="0 0 24 24"><path d="m5 12.5 4.2 4.2L19 7" /></svg>

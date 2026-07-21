@@ -7,7 +7,7 @@ import {
 } from 'lucide-vue-next'
 
 import { deleteBatch, getBatch, pauseBatch, retryBatchItem, startBatch, type BatchItem, type BatchJob } from '../../api/batches'
-import { confirmAction, showToast } from '../../services/feedback'
+import { confirmAction, showToast, usePageFeedback } from '../../services/feedback'
 import { formatDateTime, formatDuration } from '../../utils/time'
 
 const route = useRoute()
@@ -17,6 +17,7 @@ const batch = ref<BatchJob | null>(null)
 const loading = ref(false)
 const acting = ref(false)
 const error = ref('')
+usePageFeedback(error, undefined, { errorTitle: '批次操作失败' })
 const page = ref(1)
 const pageSize = ref(10)
 let pollTimer: number | undefined
@@ -69,7 +70,6 @@ onBeforeUnmount(stopPolling)
       <article class="side-card"><h2>当前吞吐情况</h2><div class="throughput"><div><Gauge/><span><small>处理速度</small><strong>{{ batch.workflow_duration_seconds?((processedCount/(batch.workflow_duration_seconds/3600||1)).toFixed(1)):'-' }} 项/小时</strong></span></div><div><Users/><span><small>并发项目</small><strong>{{ Math.max(1,runningCount) }} 个</strong></span></div><div><Clock3/><span><small>平均耗时</small><strong>{{ formatDuration(processedCount?totalAudioDuration/processedCount:null,'-') }}</strong></span></div></div><div class="sparkline"><i v-for="height in [20,34,32,55,45,65,58,80,72,88,70,92]" :key="height" :style="{height:`${height}%`}"></i></div></article>
       <article class="side-card"><h2>批次事件记录</h2><ul class="event-list"><li><i class="blue"></i><span><strong>批次开始</strong><small>{{ formatDateTime(batch.started_at,'尚未开始') }}</small></span></li><li v-if="batch.status==='paused'"><i class="orange"></i><span><strong>批次已暂停</strong><small>{{ formatDateTime(batch.updated_at) }}</small></span></li><li v-for="item in (batch.items||[]).filter(i=>i.error_message).slice(0,3)" :key="item.id"><i class="red"></i><span><strong>项目失败</strong><small>第 {{ item.order_index }} 项 · {{ item.error_message }}</small></span></li><li v-if="batch.completed"><i class="green"></i><span><strong>项目完成</strong><small>已有 {{ batch.completed }} 个项目导出完成</small></span></li></ul></article>
     </aside></div>
-    <p v-if="error" class="detail-error">{{ error }}</p>
   </section>
   <section v-else class="detail-loading">{{ loading ? '正在加载批次详情…' : error }}</section>
 </template>

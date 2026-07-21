@@ -7,6 +7,7 @@ import { createSrt } from '../../api/narration'
 import { getProject, getProjectOutputs, projectOutputFileUrl, type ProjectOutputs } from '../../api/projects'
 import { importProjectSrt, listSubtitleCues } from '../../api/storyboard'
 import AudioPlayer from '../../components/common/AudioPlayer.vue'
+import { usePageFeedback } from '../../services/feedback'
 import type { Project } from '../../types/project'
 import type { SubtitleCue } from '../../types/storyboard'
 
@@ -25,6 +26,7 @@ const saving = ref(false)
 const confirmed = ref(false)
 const error = ref('')
 const message = ref('')
+usePageFeedback(error, message, { errorTitle: '字幕操作失败', messageTitle: '字幕状态' })
 const fileInput = ref<HTMLInputElement | null>(null)
 
 const selected = computed(() => cues.value.find((cue) => cue.id === selectedId.value) || null)
@@ -158,8 +160,6 @@ onMounted(load)
       <span><strong>{{ cues.length }}</strong><small>字幕 Cue</small></span><span><strong>{{ formatTime(totalDuration) }}</strong><small>完整时长</small></span><span><strong>{{ issues }}</strong><small>可读性问题</small></span><span><strong>{{ confirmed ? '已确认' : '编辑中' }}</strong><small>当前版本</small></span>
       <button class="text-button" @click="restoreAutomatic"><Undo2 :size="14" /> 恢复自动结果</button>
     </div>
-    <div v-if="error" class="alert alert-danger"><strong>字幕操作失败</strong><span>{{ error }}</span></div>
-    <div v-if="message" class="alert alert-success"><strong>字幕状态</strong><span>{{ message }}</span></div>
 
     <div class="subtitle-workspace">
       <aside class="panel subtitle-cue-list">

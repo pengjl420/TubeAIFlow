@@ -9,6 +9,7 @@ import {
 
 import { rememberApiAddress } from '../../api/client'
 import { selectDirectory } from '../../api/projects'
+import { usePageFeedback } from '../../services/feedback'
 import {
   clearSystemSecret, getFfmpegStatus, getMediaProviderStatuses, getSystemSettings, installFfmpeg,
   saveSystemSettings, type FfmpegStatus, type MediaProviderStatus, type StoryboardTransitionName,
@@ -25,6 +26,7 @@ const saving = ref(false)
 const testing = ref(false)
 const error = ref('')
 const message = ref('')
+usePageFeedback(error, message, { errorTitle: '系统设置操作失败', messageTitle: '系统设置' })
 const selectedTts = ref<'qwen' | 'cosy'>('qwen')
 const selectedVision = ref<'qwen' | 'siglip'>('qwen')
 
@@ -148,8 +150,6 @@ onMounted(load)
     <template v-else-if="settings">
       <div class="settings-page-head">
         <div><h2>{{ title }}</h2><p>{{ subtitle }}</p></div>
-        <span v-if="error" class="settings-toast error">{{ error }}</span>
-        <span v-else-if="message" class="settings-toast success"><Check :size="14" />{{ message }}</span>
       </div>
 
       <div v-if="section === 'general'" class="setting-stack">

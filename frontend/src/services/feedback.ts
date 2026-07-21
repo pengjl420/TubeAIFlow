@@ -1,4 +1,4 @@
-import { reactive } from 'vue'
+import { onBeforeUnmount, reactive, watch, type Ref } from 'vue'
 
 export type FeedbackTone = 'info' | 'success' | 'warning' | 'danger'
 
@@ -17,6 +17,11 @@ export interface ToastOptions {
   description?: string
   tone?: FeedbackTone
   duration?: number
+}
+
+export interface PageFeedbackOptions {
+  errorTitle?: string
+  messageTitle?: string
 }
 
 interface ConfirmRequest extends Required<Omit<ConfirmOptions, 'detail'>> {
@@ -80,7 +85,7 @@ export function showToast(options: ToastOptions) {
     title: options.title,
     description: options.description,
     tone: options.tone || 'info',
-    duration: options.duration ?? 3600,
+    duration: options.duration ?? (options.tone === 'danger' ? 0 : 3000),
   }
   feedbackState.toasts.push(toast)
 
@@ -88,4 +93,42 @@ export function showToast(options: ToastOptions) {
     toastTimers.set(id, setTimeout(() => dismissToast(id), toast.duration))
   }
   return id
+}
+
+/**
+ * Moves page-level operation feedback into the global toast region.
+ * Errors remain until dismissed; normal operation messages close after 3 seconds.
+ */
+export function usePageFeedback(
+  error: Ref<string>,
+  message?: Ref<string>,
+  options: PageFeedbackOptions = {},
+) {
+  let errorToastId: number | undefined
+
+  const stopError = watch(error, (value) => {
+    if (!value) return
+    if (errorToastId) dismissToast(errorToastId)
+    errorToastId = showToast({
+      title: options.errorTitle || '系统错误',
+      description: value,
+      tone: 'danger',
+    })
+  })
+
+  const stopMessage = message
+    ? watch(message, (value) => {
+        if (!value) return
+        showToast({
+          title: options.messageTitle || '操作成功',
+          description: value,
+          tone: 'success',
+        })
+      })
+    : undefined
+
+  onBeforeUnmount(() => {
+    stopError()
+    stopMessage?.()
+  })
 }

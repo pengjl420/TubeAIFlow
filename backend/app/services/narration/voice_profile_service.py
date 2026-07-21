@@ -16,6 +16,7 @@ from app.shared.time import utc_now_iso
 
 SUPPORTED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".m4a"}
 SUPPORTED_TTS_ENGINES = {"qwen3_tts", "cosyvoice"}
+SUPPORTED_VOICE_LANGUAGES = {"zh-CN", "en-US", "yue-HK"}
 WINDOWS_RESERVED_NAMES = {
     "CON",
     "PRN",
@@ -58,10 +59,11 @@ def create_profile(
     tags: list[str] | None = None,
     source: BinaryIO,
     original_filename: str,
+    language: str = "zh-CN",
 ) -> VoiceProfile:
     profile_id = uuid.uuid4().hex[:12]
     validated_name = _validate_name(name)
-    config = _validated_config(tts_engine, reference_audio_text, original_filename, cosyvoice_speed, tags)
+    config = _validated_config(tts_engine, reference_audio_text, original_filename, cosyvoice_speed, tags, language)
     audio_path = _save_audio(profile_id, validated_name, source, original_filename)
     now = utc_now_iso()
     profile = VoiceProfile(
@@ -92,6 +94,7 @@ def update_profile(
     tags: list[str] | None = None,
     source: BinaryIO | None = None,
     original_filename: str | None = None,
+    language: str | None = None,
 ) -> VoiceProfile:
     validated_name = _validate_name(name)
     current_config = load_profile_config(profile)
@@ -100,7 +103,9 @@ def update_profile(
         cosyvoice_speed = profile_cosyvoice_speed(current_config)
     if tags is None:
         tags = list(current_config.get("tags") or [])
-    config = _validated_config(tts_engine, reference_audio_text, filename, cosyvoice_speed, tags)
+    if language is None:
+        language = profile_language(current_config)
+    config = _validated_config(tts_engine, reference_audio_text, filename, cosyvoice_speed, tags, language)
     old_path = Path(profile.reference_audio_path)
     if source is not None:
         audio_path = _save_audio(
@@ -174,6 +179,7 @@ def duplicate_profile(session: Session, profile: VoiceProfile) -> VoiceProfile:
             tags=list(config.get("tags") or []),
             source=source,
             original_filename=str(config.get("original_filename") or source_path.name),
+            language=profile_language(config),
         )
 
 
@@ -183,6 +189,7 @@ def serialize_profile(profile: VoiceProfile) -> dict:
         "id": profile.id,
         "name": profile.name,
         "tts_engine": str(config.get("tts_engine") or "qwen3_tts"),
+        "language": profile_language(config),
         "reference_audio_text": str(config.get("reference_audio_text") or ""),
         "cosyvoice_speed": profile_cosyvoice_speed(config),
         "original_filename": str(config.get("original_filename") or Path(profile.reference_audio_path).name),
@@ -214,6 +221,7 @@ def apply_profile_to_project(session: Session, project: Project, profile_id: str
     config["voice_profile_id"] = profile.id
     config["voice_profile_name"] = profile.name
     config["tts_engine"] = str(profile_config.get("tts_engine") or "qwen3_tts")
+    config["voice_language"] = profile_language(profile_config)
     config["reference_audio_text"] = str(profile_config.get("reference_audio_text") or "")
     config["cosyvoice_speed"] = profile_cosyvoice_speed(profile_config)
     config["reference_audio_filename"] = str(profile_config.get("original_filename") or audio_path.name)
@@ -249,12 +257,14 @@ def _synchronize_projects(session: Session, profile: VoiceProfile, force_reset: 
             continue
         previous_tts_config = (
             str(config.get("tts_engine") or ""),
+            str(config.get("voice_language") or "zh-CN"),
             str(config.get("reference_audio_text") or ""),
             profile_cosyvoice_speed(config),
         )
         config = apply_profile_to_project(session, project, profile.id)
         current_tts_config = (
             str(config.get("tts_engine") or ""),
+            str(config.get("voice_language") or "zh-CN"),
             str(config.get("reference_audio_text") or ""),
             profile_cosyvoice_speed(config),
         )
@@ -351,10 +361,14 @@ def _validated_config(
     original_filename: str,
     cosyvoice_speed: float,
     tags: list[str] | None = None,
+    language: str = "zh-CN",
 ) -> dict:
     engine = tts_engine.strip().lower()
     if engine not in SUPPORTED_TTS_ENGINES:
         raise ValueError("不支持的 TTS 引擎")
+    normalized_language = language.strip()
+    if normalized_language not in SUPPORTED_VOICE_LANGUAGES:
+        raise ValueError("不支持的音色语言")
     transcript = reference_audio_text.strip()
     if engine == "cosyvoice" and not transcript:
         raise ValueError("CosyVoice 需要填写参考音频逐字稿")
@@ -368,6 +382,7 @@ def _validated_config(
             break
     return {
         "tts_engine": engine,
+        "language": normalized_language,
         "reference_audio_text": transcript,
         "cosyvoice_speed": speed,
         "original_filename": Path(original_filename).name,
@@ -390,3 +405,8 @@ def profile_cosyvoice_speed(config: dict) -> float:
         return _validate_cosyvoice_speed(config.get("cosyvoice_speed", 1.0))
     except ValueError:
         return 1.0
+
+
+def profile_language(config: dict) -> str:
+    value = str(config.get("language") or "zh-CN")
+    return value if value in SUPPORTED_VOICE_LANGUAGES else "zh-CN"

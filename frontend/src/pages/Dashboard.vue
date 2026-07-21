@@ -8,7 +8,7 @@ import {
 
 import { getProjectOutputs, listProjects, type ProjectOutputFile } from '../api/projects'
 import { cancelProjectTask, getProjectTaskStatus, type ProjectTaskStatus } from '../api/tasks'
-import { confirmAction, showToast } from '../services/feedback'
+import { confirmAction, showToast, usePageFeedback } from '../services/feedback'
 import type { Project } from '../types/project'
 import { formatDateTime } from '../utils/time'
 
@@ -20,6 +20,7 @@ const recentOutputs = ref<RecentOutput[]>([])
 const loading = ref(false)
 const stoppingId = ref('')
 const error = ref('')
+usePageFeedback(error, undefined, { errorTitle: '工作台未能刷新' })
 
 const running = computed(() => projects.value.filter((item) => item.task?.status === 'running' || item.task?.status === 'queued'))
 const review = computed(() => projects.value.filter((item) => item.status === 'review_required' || item.task?.status === 'review_required'))
@@ -109,7 +110,6 @@ onMounted(load)
       <RouterLink class="primary-link" to="/projects/new"><Plus :size="18" /> 新建项目</RouterLink>
     </header>
 
-    <div v-if="error" class="alert alert-danger"><strong>工作台未能刷新</strong><span>{{ error }}</span></div>
 
     <div class="taf-metric-row">
       <RouterLink class="taf-metric-card metric-blue" to="/projects?status=generating">

@@ -5,6 +5,7 @@ import { useRoute } from 'vue-router'
 import { getProject } from '../../api/projects'
 import { getIntelligentRenderStatus, type IntelligentRenderStatus } from '../../api/renders'
 import { getVideoWorkflowStatus, startVideoWorkflow, type ProjectTaskStatus } from '../../api/tasks'
+import { usePageFeedback } from '../../services/feedback'
 import type { Project } from '../../types/project'
 
 const route = useRoute()
@@ -16,6 +17,7 @@ const loading = ref(false)
 const starting = ref(false)
 const error = ref('')
 const message = ref('')
+usePageFeedback(error, message, { errorTitle: '渲染流程未继续', messageTitle: '渲染状态' })
 let timer: number | undefined
 
 const stageLabels: Record<string, string> = {
@@ -140,8 +142,6 @@ onBeforeUnmount(stopPolling)
       </div>
     </div>
 
-    <div v-if="error" class="alert alert-danger"><strong>流程未继续</strong><span>{{ error }}</span></div>
-    <div v-if="message" class="alert alert-success"><strong>当前状态</strong><span>{{ message }}</span></div>
     <div v-if="assetReviewBlocked" class="alert storyboard-warning">
       <strong>等待素材审核</strong>
       <span>还有 {{ missingAssignments }} 个场景未确认。完成全部选择后，在素材审核页继续流程。</span>

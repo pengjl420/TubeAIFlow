@@ -1,11 +1,13 @@
 import { apiClient, unwrap } from './client'
 
 export type VoiceTtsEngine = 'qwen3_tts' | 'cosyvoice'
+export type VoiceLanguage = 'zh-CN' | 'en-US' | 'yue-HK'
 
 export interface VoiceProfile {
   id: string
   name: string
   tts_engine: VoiceTtsEngine
+  language: VoiceLanguage
   reference_audio_text: string
   cosyvoice_speed: number
   original_filename: string
@@ -19,6 +21,7 @@ export interface VoiceProfile {
 export interface SaveVoiceInput {
   name: string
   tts_engine: VoiceTtsEngine
+  language: VoiceLanguage
   reference_audio_text: string
   cosyvoice_speed: number
   file?: File | null
@@ -52,6 +55,7 @@ function toFormData(input: SaveVoiceInput): FormData {
   const form = new FormData()
   form.append('name', input.name)
   form.append('tts_engine', input.tts_engine)
+  form.append('language', input.language)
   form.append('reference_audio_text', input.reference_audio_text)
   form.append('cosyvoice_speed', String(input.cosyvoice_speed))
   form.append('tags', JSON.stringify(input.tags))

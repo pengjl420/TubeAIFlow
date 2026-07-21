@@ -27,7 +27,6 @@ const projects = ref<Project[]>([])
 const search = ref('')
 const searchInput = ref<HTMLInputElement | null>(null)
 const createMenuOpen = ref(false)
-const sidebarCollapsed = ref(localStorage.getItem('tubeaiflow.sidebar-collapsed') === 'true')
 let refreshTimer: number | undefined
 
 const navigation = [
@@ -66,11 +65,6 @@ function selectCreate(path: string) {
   void router.push(path)
 }
 
-function toggleSidebar() {
-  sidebarCollapsed.value = !sidebarCollapsed.value
-  localStorage.setItem('tubeaiflow.sidebar-collapsed', String(sidebarCollapsed.value))
-}
-
 function handleShortcut(event: KeyboardEvent) {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
     event.preventDefault()
@@ -91,7 +85,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="app-shell taf-shell" :class="{ 'sidebar-is-collapsed': sidebarCollapsed }">
+  <div class="app-shell taf-shell">
     <aside class="sidebar taf-sidebar">
       <RouterLink class="brand taf-brand" to="/dashboard" aria-label="返回工作台">
         <span class="brand-mark taf-brand-mark"><span></span></span>
@@ -111,7 +105,6 @@ onBeforeUnmount(() => {
         <div><i></i><span>本地模式</span></div>
         <div><span>后端服务</span><b><i></i>运行中</b></div>
       </div>
-      <button class="taf-sidebar-collapse" type="button" :aria-label="sidebarCollapsed ? '展开侧栏' : '收起侧栏'" @click="toggleSidebar">{{ sidebarCollapsed ? '››' : '‹‹' }}</button>
     </aside>
 
     <div class="app-content taf-content">
@@ -141,7 +134,7 @@ onBeforeUnmount(() => {
           </RouterLink>
         </div>
 
-        <div class="create-menu">
+        <div v-click-outside="() => { createMenuOpen = false }" class="create-menu">
           <button class="primary-button taf-create-button" type="button" :aria-expanded="createMenuOpen" @click="createMenuOpen = !createMenuOpen">
             <Plus :size="20" /> 新建 <ChevronDown :size="15" />
           </button>

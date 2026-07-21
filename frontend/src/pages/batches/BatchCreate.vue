@@ -9,7 +9,7 @@ import {
 import { createBatch } from '../../api/batches'
 import { selectDirectory } from '../../api/projects'
 import { listVoices, type VoiceProfile } from '../../api/voices'
-import { showToast } from '../../services/feedback'
+import { showToast, usePageFeedback } from '../../services/feedback'
 import type { SegmentationMode, SemanticReviewMode, StoryboardMode, VideoGenerationMode } from '../../types/project'
 
 const router = useRouter()
@@ -28,6 +28,7 @@ const continueOnError = ref(true)
 const saving = ref(false)
 const selectingFolder = ref<'output' | 'video' | null>(null)
 const error = ref('')
+usePageFeedback(error, undefined, { errorTitle: '批次创建失败' })
 const dragging = ref(false)
 
 const duplicateNames = computed(() => {
@@ -126,7 +127,6 @@ onMounted(async () => {
 
       <article class="create-card confirm-card"><h2><i>3</i>确认和开始</h2><div class="summary-box"><h3>批次概要</h3><dl><dt>项目数量</dt><dd class="accent">{{ scripts.length }} 个</dd><dt>脚本文件</dt><dd>{{ scripts.length }} 个文件</dd><dt>总字符数（估算）</dt><dd>约 {{ estimatedCharacters.toLocaleString() }} 字</dd><dt>预计磁盘占用</dt><dd>约 {{ estimatedStorage }} GB</dd></dl><h3>配置摘要</h3><dl><dt>系统音色</dt><dd>{{ selectedVoice?.name || '未选择' }}</dd><dt>输出目录</dt><dd class="path">{{ outputDir || '未选择' }}</dd><dt>切段方式</dt><dd>{{ segmentationMode==='ai'?'AI 自动切段':'按换行切段' }}</dd><dt>视频模式</dt><dd>{{ videoMode==='none'?'仅配音与字幕':videoMode==='landscape'?'风景素材拼接':'AI 语义生产' }}</dd><dt>审核方式</dt><dd>{{ semanticReviewMode==='automatic'?'自动通过':'人工审核' }}</dd></dl><h3>预计磁盘占用 <b>约 {{ estimatedStorage }} GB</b></h3><div class="storage-bar"><i :style="{width: `${Math.min(100,Number(estimatedStorage))}%`}"></i></div><div class="ready-state" :class="{ ready }"><Check :size="17"/>{{ ready ? '已就绪，可以创建' : '请完成左侧必填配置' }}</div></div></article>
     </div>
-    <p v-if="error" class="create-error"><AlertCircle :size="17"/>{{ error }}</p>
     <footer class="create-actions"><RouterLink to="/batches">取消</RouterLink><button class="draft" @click="saveDraft">保存草稿</button><button class="submit" :disabled="saving || selectingFolder!==null" @click="submit"><Play :size="18"/>{{ saving?'正在创建项目…':'创建并开始' }}</button></footer>
   </section>
 </template>

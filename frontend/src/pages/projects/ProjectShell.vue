@@ -29,7 +29,7 @@ import {
   type ProjectTaskStatus,
 } from '../../api/tasks'
 import AudioPlayer from '../../components/common/AudioPlayer.vue'
-import { confirmAction } from '../../services/feedback'
+import { confirmAction, usePageFeedback } from '../../services/feedback'
 import type { Segment } from '../../types/narration'
 import type { Project } from '../../types/project'
 import { formatDateTime, formatDuration } from '../../utils/time'
@@ -58,6 +58,7 @@ const readingScriptFile = ref(false)
 const scriptDragActive = ref(false)
 const error = ref('')
 const message = ref('')
+usePageFeedback(error, message, { errorTitle: '项目操作未完成', messageTitle: '项目状态' })
 let pollTimer: number | undefined
 let videoPollTimer: number | undefined
 let oneClickTimer: number | undefined
@@ -862,8 +863,6 @@ onBeforeUnmount(() => {
         <div><span class="status-orb orange">◷</span><small>配音任务状态</small><strong>{{ ttsRunning ? '正在生成' : `${ttsStatus.completed} / ${ttsStatus.total || segments.length} 段` }}</strong></div>
       </section>
 
-      <div v-if="error" class="alert alert-danger"><strong>操作未完成</strong><span>{{ error }}</span></div>
-      <div v-if="message" class="alert alert-success"><strong>当前状态</strong><span>{{ message }}</span></div>
 
       <div class="narration-editor-grid">
         <section class="taf-card narration-script-card">
@@ -998,8 +997,6 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <div v-if="error" class="alert alert-danger"><strong>操作未完成</strong><span>{{ error }}</span></div>
-        <div v-if="message" class="alert alert-success"><strong>操作成功</strong><span>{{ message }}</span></div>
         <div v-if="oneClickStartedAt" class="generation-timing">
           <div>
             <span class="muted">当前阶段</span>

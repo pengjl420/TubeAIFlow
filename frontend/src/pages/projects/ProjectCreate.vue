@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 
 import { createProject, selectDirectory } from '../../api/projects'
 import { listVoices, type VoiceProfile } from '../../api/voices'
+import { usePageFeedback } from '../../services/feedback'
 import type { SegmentationMode, SemanticReviewMode, StoryboardMode, VideoGenerationMode, VideoOutputFormat } from '../../types/project'
 
 const router = useRouter()
@@ -22,6 +23,7 @@ const storyboardMode = ref<StoryboardMode>('ai')
 const saving = ref(false)
 const selectingFolder = ref<'output' | 'video' | null>(null)
 const error = ref('')
+usePageFeedback(error, undefined, { errorTitle: '还不能创建项目' })
 let outputFilenameEdited = false
 
 watch(name, (value) => {
@@ -239,7 +241,6 @@ onMounted(async () => {
         </label>
       </div>
     </div>
-    <div v-if="error" class="alert alert-danger"><strong>还不能创建项目</strong><span>{{ error }}</span></div>
     <div class="actions form-footer">
       <span class="muted">创建后仍可在项目设置中修改这些选项。</span>
       <button class="primary-button" :disabled="saving || selectingFolder !== null" @click="submit">

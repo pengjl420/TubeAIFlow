@@ -6,11 +6,13 @@ import {
 } from 'lucide-vue-next'
 
 import { listBatches, type BatchJob } from '../../api/batches'
+import { usePageFeedback } from '../../services/feedback'
 import { formatDateTime, formatDuration } from '../../utils/time'
 
 const batches = ref<BatchJob[]>([])
 const loading = ref(false)
 const error = ref('')
+usePageFeedback(error, undefined, { errorTitle: '批次列表加载失败' })
 const query = ref('')
 const statusFilter = ref('all')
 const attentionOnly = ref(false)
@@ -96,7 +98,6 @@ onMounted(load)
       <button class="icon-button" type="button" title="筛选设置"><Settings2 :size="18" /></button>
     </div>
 
-    <p v-if="error" class="batch-error">{{ error }}</p>
 
     <div class="batch-content-grid">
       <div class="batch-table-card">

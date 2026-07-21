@@ -217,15 +217,14 @@ onMounted(load)
   <section class="storyboard-page">
     <div class="project-hero storyboard-hero">
       <div>
-        <RouterLink class="breadcrumb-link" :to="`/projects/${projectId}`">← 返回项目</RouterLink>
         <span class="section-eyebrow">PROJECT STORYBOARD</span>
-        <h1>{{ project?.name || '项目分镜工作区' }}</h1>
-        <p>导入真实字幕时间轴，生成、检查并保存项目级视觉场景。</p>
+        <h1>视觉分镜</h1>
+        <p>将已确认字幕组织为视觉语义场景，并编辑画面与检索策略。</p>
       </div>
       <div class="page-title-actions">
         <span v-if="modelName" class="status-pill is-neutral">{{ modelName }}</span>
-        <RouterLink v-if="scenes.length" class="secondary-button" :to="`/projects/${projectId}/media`">进入素材审核</RouterLink>
-        <button class="primary-button" :disabled="loading || generating || !cues.length" @click="runStoryboard">
+        <RouterLink v-if="scenes.length" class="primary-link" :to="`/projects/${projectId}/media-review`">进入素材审核</RouterLink>
+        <button :class="scenes.length ? 'secondary-button' : 'primary-button'" :disabled="loading || generating || !cues.length" @click="runStoryboard">
           {{ generating ? '生成并保存中…' : scenes.length ? '重新生成分镜' : '生成项目分镜' }}
         </button>
       </div>

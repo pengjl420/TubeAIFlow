@@ -82,3 +82,11 @@ export async function getIntelligentRenderStatus(projectId: string) {
     await apiClient.get(`/projects/${projectId}/render/status`),
   )
 }
+
+export async function runQualityCheck(projectId: string): Promise<QaReport> {
+  return unwrap<QaReport>(await apiClient.post(`/projects/${projectId}/quality/check`, undefined, { timeout: 0 }))
+}
+
+export async function getQualityReport(projectId: string): Promise<QaReport> {
+  return unwrap<QaReport>(await apiClient.get(`/projects/${projectId}/quality/report`))
+}

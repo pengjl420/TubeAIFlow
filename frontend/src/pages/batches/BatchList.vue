@@ -86,7 +86,7 @@ onMounted(load)
     <div class="page-title batch-page-title">
       <div>
         <span class="page-kicker">BATCH PRODUCTION</span>
-        <h1>批量生产队列</h1>
+        <h1>批量生产</h1>
         <p class="muted">使用同一套声音和生成配置，连续处理多份逐字稿。</p>
       </div>
       <RouterLink class="primary-link" to="/batches/new">新建批次</RouterLink>

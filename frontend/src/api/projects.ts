@@ -60,6 +60,8 @@ export interface ProjectOutputs {
   final_srt_path?: string
   final_video_path?: string
   final_fcpxml_path?: string
+  final_audio_exists?: boolean
+  final_srt_exists?: boolean
   final_video_exists?: boolean
   final_fcpxml_exists?: boolean
   files: ProjectOutputFile[]
@@ -67,6 +69,11 @@ export interface ProjectOutputs {
 
 export async function getProjectOutputs(id: string): Promise<ProjectOutputs> {
   return unwrap<ProjectOutputs>(await apiClient.get(`/projects/${id}/outputs`))
+}
+
+export function projectOutputFileUrl(id: string, path: string, download = false): string {
+  const base = String(apiClient.defaults.baseURL || '/api').replace(/\/$/, '')
+  return `${base}/projects/${encodeURIComponent(id)}/outputs/file?path=${encodeURIComponent(path)}${download ? '&download=true' : ''}`
 }
 
 export async function selectDirectory(initialPath: string, title: string): Promise<string | null> {

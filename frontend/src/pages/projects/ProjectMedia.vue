@@ -492,10 +492,9 @@ onMounted(load)
   <section class="media-review-page">
     <div class="project-hero media-review-hero">
       <div>
-        <RouterLink class="breadcrumb-link" :to="`/projects/${projectId}`">← 返回项目</RouterLink>
         <span class="section-eyebrow">MEDIA REVIEW</span>
-        <h1>{{ project?.name || '素材审核' }}</h1>
-        <p>按视觉场景检索镜头，核对缩略图与关键帧，并持久化人工选择。</p>
+        <h1>素材审核</h1>
+        <p>逐场景审核候选、解释评分与风险，并编排覆盖完整的镜头轨道。</p>
       </div>
       <div class="media-review-metrics">
         <div><strong>{{ assets.length }}</strong><span>素材文件</span></div>
@@ -513,7 +512,7 @@ onMounted(load)
     <div v-if="error" class="alert alert-danger"><strong>操作未完成</strong><span>{{ error }}</span></div>
     <div v-if="message" class="alert alert-success"><strong>当前状态</strong><span>{{ message }}</span></div>
 
-    <article class="panel media-import-bar">
+    <article v-if="false" class="panel media-import-bar">
       <div>
         <span class="section-eyebrow">LOCAL LIBRARY</span>
         <h2>本地素材入库</h2>
@@ -589,7 +588,7 @@ onMounted(load)
         </button>
       </aside>
 
-      <main class="candidate-review-panel">
+      <div class="candidate-review-panel">
         <article v-if="selectedScene" class="panel selected-scene-query">
           <div class="section-head">
             <div><span class="section-eyebrow">VECTOR QUERY</span><h2>{{ selectedScene.storyboard?.visual_summary || '待生成视觉查询' }}</h2></div>
@@ -751,7 +750,7 @@ onMounted(load)
             </div>
           </article>
         </div>
-      </main>
+      </div>
     </div>
 
     <div class="section-toolbar compact-title media-library-title">

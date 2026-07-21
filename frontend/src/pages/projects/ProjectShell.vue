@@ -29,6 +29,7 @@ import {
   type ProjectTaskStatus,
 } from '../../api/tasks'
 import AudioPlayer from '../../components/common/AudioPlayer.vue'
+import { confirmAction } from '../../services/feedback'
 import type { Segment } from '../../types/narration'
 import type { Project } from '../../types/project'
 import { formatDateTime, formatDuration } from '../../utils/time'
@@ -627,6 +628,17 @@ async function submitScript() {
     error.value = '请先粘贴逐字稿'
     return
   }
+  if (segments.value.length) {
+    const confirmed = await confirmAction({
+      eyebrow: '修改影响提示',
+      title: '保存修改后的逐字稿？',
+      description: '当前项目已经生成了下游内容，修改逐字稿后需要重新确认生产结果。',
+      detail: '可能失效：配音分段、已生成音频、字幕时间轴、视觉分镜、已分配素材和已渲染场景。',
+      confirmText: '仅保存文本',
+      tone: 'warning',
+    })
+    if (!confirmed) return
+  }
   error.value = ''
   message.value = ''
   try {
@@ -804,18 +816,12 @@ onBeforeUnmount(() => {
   <section v-if="project">
     <div class="project-hero">
       <div>
-        <RouterLink class="breadcrumb-link" to="/">← 返回项目</RouterLink>
-        <div class="project-title-row">
-          <h1>{{ project.name }}</h1>
-          <span class="status-pill" :class="projectStatusTone"><i></i>{{ projectStatusLabel }}</span>
-        </div>
-        <p>在同一条生产线上编辑脚本、生成配音字幕并输出成片。</p>
+        <span class="section-eyebrow">SCRIPT & NARRATION</span>
+        <div class="project-title-row"><h1>逐字稿与配音</h1><span class="status-pill" :class="projectStatusTone"><i></i>{{ projectStatusLabel }}</span></div>
+        <p>编辑逐字稿、确认切段，并逐段生成可恢复的完整配音。</p>
       </div>
       <div class="page-title-actions">
-        <RouterLink v-if="usesAiSemanticVideo" class="secondary-button" :to="`/projects/${project.id}/storyboard`">分镜工作区</RouterLink>
-        <RouterLink v-if="usesAiSemanticVideo" class="secondary-button" :to="`/projects/${project.id}/media`">素材审核</RouterLink>
-        <RouterLink v-if="usesAiSemanticVideo" class="primary-button" :to="`/projects/${project.id}/render`">智能视频流程</RouterLink>
-        <RouterLink class="secondary-button" :to="`/projects/${project.id}/config`">项目设置</RouterLink>
+        <RouterLink v-if="finalSrtPath" class="primary-link" :to="`/projects/${project.id}/subtitles`">进入字幕校对</RouterLink>
       </div>
     </div>
 

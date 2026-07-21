@@ -168,16 +168,14 @@ onMounted(load)
         <p class="muted">管理项目输出、生成选项与声音克隆参考。</p>
       </div>
       <div class="page-title-actions">
-        <button class="secondary-button" @click="router.push(`/projects/${project.id}`)">返回项目</button>
-        <button class="primary-button" type="button" :disabled="saving || selectingFolder !== null" @click="save">
-          {{ saving ? '保存中…' : '保存项目设置' }}
-        </button>
+        <button class="secondary-button" @click="router.push(`/projects/${project.id}/overview`)">返回概览</button>
+        <span class="status-pill" :class="message ? 'is-success' : 'is-neutral'">{{ saving ? '正在保存' : message ? '已保存' : '按分组保存' }}</span>
       </div>
     </div>
 
     <div class="grid">
       <div class="panel">
-        <div class="section-head"><h2>基本信息</h2></div>
+        <div class="section-head"><div><h2>基本信息</h2><p>项目名称与生命周期内的基础标识。</p></div><button class="secondary-button" type="button" :disabled="saving" @click="save">保存本组</button></div>
         <label class="field reference-field">
           <span>项目名称</span>
           <input v-model="projectName" maxlength="120" placeholder="请输入项目名称" />
@@ -185,7 +183,7 @@ onMounted(load)
       </div>
 
       <div class="panel">
-        <div class="section-head"><h2>输出设置</h2></div>
+        <div class="section-head"><div><h2>视频输出</h2><p>输出根目录、文件名与交付位置。</p></div><button class="secondary-button" type="button" :disabled="saving || selectingFolder !== null" @click="save">保存本组</button></div>
         <label class="field reference-field">
           <span>输出根目录</span>
           <div class="inline-form">
@@ -209,7 +207,7 @@ onMounted(load)
       </div>
 
       <div class="panel">
-        <div class="section-head"><h2>一键生成选项</h2></div>
+        <div class="section-head"><div><h2>生产方式与审核</h2><p>修改这些配置可能需要重建下游分镜、素材或渲染结果。</p></div><button class="secondary-button" type="button" :disabled="saving || selectingFolder !== null" @click="save">保存本组</button></div>
         <label class="field reference-field">
           <span>逐字稿切段方式</span>
           <select v-model="segmentationMode">
@@ -283,7 +281,7 @@ onMounted(load)
       </div>
 
       <div class="panel">
-        <div class="section-head"><h2>参考音频</h2><RouterLink to="/voices">管理系统音色</RouterLink></div>
+        <div class="section-head"><div><h2>音色与配音</h2><p>切换音色后，现有分段会标记为待重新生成。</p></div><div class="actions"><RouterLink to="/voices">管理系统音色</RouterLink><button class="secondary-button" type="button" :disabled="saving" @click="save">保存本组</button></div></div>
         <label class="field reference-field">
           <span>系统音色</span>
           <select v-model="voiceProfileId">

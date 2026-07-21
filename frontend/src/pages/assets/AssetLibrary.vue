@@ -370,16 +370,16 @@ onMounted(loadAssets)
     <div class="page-header asset-library-hero">
       <div>
         <span class="section-eyebrow">GLOBAL MEDIA LIBRARY</span>
-        <h1>本地素材库</h1>
-        <p>统一管理语义素材、主题兜底和纯风景空镜；扫描入库与向量化是两个独立步骤。</p>
+        <h1>素材浏览</h1>
+        <p>统一浏览本地与远程素材，检查审核状态、来源、镜头与向量索引。</p>
       </div>
       <div class="page-title-actions">
         <button class="secondary-button" :disabled="loading" @click="loadAssets">刷新</button>
-        <button class="primary-button" :disabled="bulkProcessing || !pendingSemanticAssets.length" @click="processPendingSemanticAssets">
-          {{ bulkProcessing ? '批量向量化中…' : `向量化本页待处理素材（${pendingSemanticAssets.length}）` }}
-        </button>
+        <RouterLink class="primary-link" to="/assets/indexing">查看索引任务</RouterLink>
       </div>
     </div>
+
+    <nav class="asset-subnav"><RouterLink to="/assets">素材浏览</RouterLink><RouterLink to="/assets/import">扫描入库</RouterLink><RouterLink to="/assets/indexing">索引任务</RouterLink><RouterLink to="/assets/storage">存储与来源</RouterLink></nav>
 
     <div class="asset-library-metrics">
       <div><span>素材文件</span><strong>{{ summary.asset_count }}</strong></div>
@@ -391,7 +391,7 @@ onMounted(loadAssets)
     <div v-if="error" class="alert alert-danger"><strong>操作未完成</strong><span>{{ error }}</span></div>
     <div v-if="message" class="alert alert-success"><strong>素材库状态</strong><span>{{ message }}</span></div>
 
-    <article class="panel asset-import-panel">
+    <article v-if="false" class="panel asset-import-panel">
       <div class="section-head">
         <div>
           <span class="section-eyebrow">STEP 1 · INGEST</span>
@@ -436,7 +436,7 @@ onMounted(loadAssets)
       </div>
     </article>
 
-    <article class="panel vector-help-panel">
+    <article v-if="false" class="panel vector-help-panel">
       <div>
         <span class="section-eyebrow">STEP 2 · VECTOR INDEX</span>
         <h2>生成关键帧并向量化</h2>

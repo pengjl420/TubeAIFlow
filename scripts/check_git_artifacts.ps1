@@ -8,7 +8,9 @@ $forbiddenName = '(?i)(^|/)\.env(?:\..+)?$'
 $forbiddenExtension = '(?i)\.(db|sqlite|sqlite3|safetensors|ckpt|pt|pth|onnx|wav|mp3|flac|m4a|mp4|mov|mkv|avi)$'
 $errors = [System.Collections.Generic.List[string]]::new()
 
-$files = @(& git diff --cached --name-only --diff-filter=ACMR)
+# Disable Git's C-style path quoting so non-ASCII names are passed back as
+# their real filesystem/index paths (for example, "设计调整").
+$files = @(& git -c core.quotepath=false diff --cached --name-only --diff-filter=ACMR)
 foreach ($file in $files) {
     $normalized = $file -replace '\\', '/'
     if ($normalized -match $forbiddenPath -or $normalized -match $forbiddenName -or $normalized -match $forbiddenExtension) {

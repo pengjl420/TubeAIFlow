@@ -112,7 +112,7 @@ onMounted(async () => {
         <h1>创建视频项目</h1>
         <p class="muted">先准备声音和输出位置，创建后再进入工作台添加逐字稿。</p>
       </div>
-      <RouterLink class="secondary-button" to="/">取消并返回</RouterLink>
+      <RouterLink class="secondary-button" to="/projects">取消并返回</RouterLink>
     </div>
     <div class="setup-steps" aria-label="项目创建步骤">
       <span class="is-active"><i>1</i>项目信息</span>

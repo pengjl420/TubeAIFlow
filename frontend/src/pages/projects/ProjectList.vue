@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import { deleteProject, listProjects } from '../../api/projects'
 import { cancelProjectTask } from '../../api/tasks'
@@ -19,6 +19,7 @@ const selectedProjectIds = ref<Set<string>>(new Set())
 const message = ref('')
 const clockNow = ref(Date.now())
 const router = useRouter()
+const route = useRoute()
 let clockTimer: number | undefined
 
 const statusLabels: Record<string, string> = {
@@ -109,7 +110,24 @@ function projectWorkflowDuration(project: Project) {
 }
 
 function openProject(projectId: string) {
-  void router.push(`/projects/${projectId}`)
+  void router.push(`/projects/${projectId}/overview`)
+}
+
+function projectTarget(project: Project) {
+  if (project.status === 'completed') return `/projects/${project.id}/delivery`
+  if (project.status === 'review_required') return `/projects/${project.id}/media-review`
+  if (project.status === 'narration_ready') return `/projects/${project.id}/subtitles`
+  if (isGenerating(project)) return `/projects/${project.id}/overview`
+  return `/projects/${project.id}/narration`
+}
+
+function projectActionLabel(project: Project) {
+  if (project.status === 'completed') return '查看产物'
+  if (project.status === 'review_required') return '审核素材'
+  if (project.status === 'narration_ready') return '校对字幕'
+  if (isGenerating(project)) return '查看进度'
+  if (project.status === 'failed') return '查看错误'
+  return '编辑逐字稿'
 }
 
 async function locateWaitingProjects() {
@@ -293,6 +311,8 @@ async function loadProjects() {
 }
 
 onMounted(() => {
+  if (typeof route.query.q === 'string') query.value = route.query.q
+  if (typeof route.query.status === 'string') statusFilter.value = route.query.status
   void loadProjects()
   clockTimer = window.setInterval(() => {
     clockNow.value = Date.now()
@@ -307,7 +327,7 @@ onBeforeUnmount(() => {
 <template>
   <section>
     <div class="page-title dashboard-title">
-      <h1>项目工作台</h1>
+      <div><span class="section-eyebrow">PROJECTS</span><h1>项目</h1><p>管理所有单视频项目，并从当前生产阶段继续工作。</p></div>
       <RouterLink class="primary-link hero-action" to="/projects/new"><span>＋</span> 创建新项目</RouterLink>
     </div>
 
@@ -446,7 +466,8 @@ onBeforeUnmount(() => {
             <span>实际开始于 {{ formatDateTime(project.workflow_started_at, '尚未开始') }}</span>
           </div>
           <div class="project-card-actions">
-            <RouterLink v-if="isEditable(project)" class="text-button" :to="`/projects/${project.id}/config`" @click.stop>修改</RouterLink>
+            <RouterLink class="text-button" :to="projectTarget(project)" @click.stop>{{ projectActionLabel(project) }}</RouterLink>
+            <RouterLink v-if="isEditable(project)" class="text-button" :to="`/projects/${project.id}/settings`" @click.stop>设置</RouterLink>
             <button
               v-if="isGenerating(project)"
               class="danger-button"

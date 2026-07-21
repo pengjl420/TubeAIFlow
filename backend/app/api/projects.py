@@ -206,10 +206,39 @@ def get_project_outputs(project_id: str, session: Session = Depends(get_session)
         "final_srt_path": str(final_srt_path),
         "final_video_path": str(final_video_path),
         "final_fcpxml_path": str(final_fcpxml_path),
+        "final_audio_exists": final_audio_path.is_file(),
+        "final_srt_exists": final_srt_path.is_file(),
         "final_video_exists": final_video_path.is_file(),
         "final_fcpxml_exists": final_fcpxml_path.is_file(),
         "files": output_files,
     })
+
+
+@router.get("/projects/{project_id}/outputs/file")
+def get_project_output_file(
+    project_id: str,
+    path: str,
+    download: bool = False,
+    session: Session = Depends(get_session),
+) -> FileResponse:
+    """Preview or download a project artifact after validating its output boundary."""
+    project = project_service.get_project(session, project_id)
+    if not project:
+        fail("Project not found", 404)
+    requested = Path(path).expanduser().resolve()
+    output_root = get_project_output_dir(project, get_settings().workspace_dir).resolve()
+    work_dir = get_project_work_dir(project, get_settings().workspace_dir).resolve()
+    try:
+        ensure_inside_any(requested, [output_root, work_dir])
+    except ValueError:
+        fail("Requested file is outside the project output directory", 403)
+    if not requested.is_file():
+        fail("Output file not found", 404)
+    return FileResponse(
+        requested,
+        filename=requested.name if download else None,
+        content_disposition_type="attachment" if download else "inline",
+    )
 
 
 @router.post("/projects/{project_id}/output-settings")

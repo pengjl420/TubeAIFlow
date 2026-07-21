@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 
 import { rememberApiAddress } from '../../api/client'
 import { selectDirectory } from '../../api/projects'
@@ -15,6 +16,33 @@ import {
   type MediaProviderStatus,
   type SystemSettings,
 } from '../../api/settings'
+
+const route = useRoute()
+const settingsSection = computed(() => String(route.params.section || 'general'))
+const sectionCopy = computed(() => ({
+  general: ['基础与存储', '配置本地服务、工作目录、FFmpeg 与缓存路径。'],
+  'ai-services': ['AI 服务', '管理 DeepSeek 等系统通用 AI 服务与连接参数。'],
+  tts: ['配音引擎', '管理 Qwen3-TTS 与 CosyVoice 的运行环境和默认参数。'],
+  vision: ['视觉模型', '管理素材理解、关键帧和语义索引使用的视觉能力。'],
+  'image-generation': ['图片生成', '配置本地分镜图片模型、尺寸、候选数量与显存策略。'],
+  'media-platforms': ['素材平台', '管理 Pexels、Pixabay 的密钥、配额、缓存与下载目录。'],
+  render: ['渲染与编码', '管理 FFmpeg 环境与全局视频输出基础能力。'],
+  transitions: ['转场策略', '配置转场效果池、权重、持续时间和分组规则。'],
+  fallback: ['兜底策略', '配置主题兜底、风景兜底、审核与占比上限。'],
+  diagnostics: ['系统诊断', '检查本地服务、FFmpeg、工作目录和外部平台连接状态。'],
+}[settingsSection.value] || ['系统设置', '配置本地运行环境和生产默认值。']))
+
+function showSettingsGroup(group: string) {
+  const map: Record<string, string[]> = {
+    basic: ['general', 'render', 'diagnostics'],
+    transitions: ['transitions'],
+    image: ['image-generation', 'vision'],
+    tts: ['tts'],
+    ai: ['ai-services'],
+    media: ['media-platforms', 'fallback'],
+  }
+  return (map[group] || []).includes(settingsSection.value)
+}
 
 const settings = ref<SystemSettings | null>(null)
 const loading = ref(false)
@@ -232,8 +260,8 @@ onMounted(load)
     <div class="page-title settings-sticky-header">
       <div>
         <span class="page-kicker">LOCAL SYSTEM</span>
-        <h1>系统设置</h1>
-        <p class="muted">配置保存在本机 SQLite 数据库中，不会读取 .env 文件。</p>
+        <h1>{{ sectionCopy[0] }}</h1>
+        <p class="muted">{{ sectionCopy[1] }} 配置保存在本机 SQLite 数据库中。</p>
       </div>
       <div v-if="error || message" class="settings-save-status" aria-live="polite">
         <span v-if="error" class="error">{{ error }}</span>
@@ -244,7 +272,7 @@ onMounted(load)
 
     <p v-if="loading" class="muted">正在加载…</p>
     <div v-else-if="settings" class="grid settings-grid">
-      <details class="panel settings-disclosure">
+      <details v-show="showSettingsGroup('basic')" class="panel settings-disclosure" open>
         <summary>
           <span class="settings-disclosure-heading">
             <strong>基础设置</strong>
@@ -305,7 +333,7 @@ onMounted(load)
         </div>
       </details>
 
-      <details class="panel settings-disclosure">
+      <details v-show="showSettingsGroup('transitions')" class="panel settings-disclosure" open>
         <summary>
           <span class="settings-disclosure-heading">
             <strong>分镜头转场</strong>
@@ -416,7 +444,7 @@ onMounted(load)
         </div>
       </details>
 
-      <details class="panel settings-disclosure">
+      <details v-show="showSettingsGroup('image')" class="panel settings-disclosure" open>
         <summary>
           <span class="settings-disclosure-heading"><strong>本地分镜图片生成</strong><small>SDXL 单文件模型</small></span>
           <span class="settings-disclosure-icon" aria-hidden="true">⌄</span>
@@ -449,7 +477,7 @@ onMounted(load)
         </div>
       </details>
 
-      <details class="panel settings-disclosure">
+      <details v-show="showSettingsGroup('tts')" class="panel settings-disclosure" open>
         <summary>
           <span class="settings-disclosure-heading"><strong>Qwen3-TTS</strong><small>默认本地声音克隆引擎</small></span>
           <span class="settings-disclosure-icon" aria-hidden="true">⌄</span>
@@ -501,7 +529,7 @@ onMounted(load)
         </div>
       </details>
 
-      <details class="panel settings-disclosure">
+      <details v-show="showSettingsGroup('tts')" class="panel settings-disclosure" open>
         <summary>
           <span class="settings-disclosure-heading"><strong>CosyVoice</strong><small>Zero-shot 本地声音克隆引擎</small></span>
           <span class="settings-disclosure-icon" aria-hidden="true">⌄</span>
@@ -538,7 +566,7 @@ onMounted(load)
         </div>
       </details>
 
-      <details class="panel settings-disclosure">
+      <details v-show="showSettingsGroup('ai')" class="panel settings-disclosure" open>
         <summary>
           <span class="settings-disclosure-heading"><strong>DeepSeek</strong><small>系统 AI 能力平台</small></span>
           <span class="settings-disclosure-icon" aria-hidden="true">⌄</span>
@@ -587,7 +615,7 @@ onMounted(load)
         </div>
       </details>
 
-      <details class="panel settings-disclosure">
+      <details v-show="showSettingsGroup('media')" class="panel settings-disclosure" open>
         <summary>
           <span class="settings-disclosure-heading"><strong>在线素材平台</strong><small>Pexels 与 Pixabay 素材检索</small></span>
           <span class="settings-disclosure-icon" aria-hidden="true">⌄</span>

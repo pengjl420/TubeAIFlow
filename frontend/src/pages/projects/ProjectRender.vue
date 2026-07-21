@@ -128,14 +128,12 @@ onBeforeUnmount(stopPolling)
   <section class="pipeline-page">
     <div class="project-hero">
       <div>
-        <RouterLink class="breadcrumb-link" :to="`/projects/${projectId}`">← 返回项目</RouterLink>
-        <span class="section-eyebrow">VIDEO SYNTHESIS</span>
-        <h1>{{ project?.name || '智能视频流程' }}</h1>
-        <p>分镜生成、素材审核、场景渲染、最终合成和 QA 使用同一条可恢复任务链。</p>
+        <span class="section-eyebrow">VIDEO RENDERING</span>
+        <h1>视频渲染</h1>
+        <p>控制场景渲染、视觉轨道拼接和最终视频合成，失败场景可单独恢复。</p>
       </div>
       <div class="page-title-actions">
-        <RouterLink class="secondary-button" :to="`/projects/${projectId}/storyboard`">分镜工作区</RouterLink>
-        <RouterLink class="secondary-button" :to="`/projects/${projectId}/media`">素材审核</RouterLink>
+        <RouterLink v-if="assetReviewBlocked" class="secondary-button" :to="`/projects/${projectId}/media-review`">前往素材审核</RouterLink>
         <button class="primary-button" :disabled="loading || starting || active || assetReviewBlocked" @click="start">
           {{ starting ? '正在启动…' : needsQualityReview ? '重新渲染并复查' : needsAssetReview ? '审核完成，继续渲染' : task?.status === 'completed' ? '重新运行流程' : '启动 / 继续流程' }}
         </button>

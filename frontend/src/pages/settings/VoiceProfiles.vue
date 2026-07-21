@@ -147,7 +147,7 @@ onMounted(load)
     <div class="page-title">
       <div>
         <span class="page-kicker">VOICE LIBRARY</span>
-        <h1>参考音频</h1>
+        <h1>音色中心</h1>
         <p class="muted">统一维护声音克隆参考，项目和批量任务只需选择这里配置好的音色。</p>
       </div>
       <button v-if="editingId" class="secondary-button" type="button" @click="resetForm">取消编辑</button>

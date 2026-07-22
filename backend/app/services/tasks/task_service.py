@@ -72,10 +72,6 @@ def enqueue_project_task(
     return task
 
 
-def get_task(session: Session, task_id: str) -> TaskRun | None:
-    return session.get(TaskRun, task_id)
-
-
 def get_latest_project_task(session: Session, project_id: str) -> TaskRun | None:
     return session.exec(
         select(TaskRun)

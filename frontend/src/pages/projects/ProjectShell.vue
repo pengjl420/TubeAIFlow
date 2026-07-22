@@ -161,14 +161,7 @@ function handleEditorShortcut(event: KeyboardEvent) {
 }
 
 const projectConfig = computed(() => {
-  if (project.value?.config) return project.value.config
-  if (!project.value?.config_json) return {}
-  try {
-    const data = JSON.parse(project.value.config_json)
-    return data && typeof data === 'object' ? data : {}
-  } catch {
-    return {}
-  }
+  return project.value?.config || {}
 })
 
 const referenceAudioName = computed(() => {

@@ -16,7 +16,6 @@ from app.infrastructure.project_layout import (
     get_final_srt_path,
     get_final_video_path,
     get_legacy_project_work_dir,
-    get_output_stem,
     get_project_output_dir,
     get_project_work_dir,
 )

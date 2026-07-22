@@ -1,16 +1,6 @@
 from pydantic import BaseModel, Field, field_validator
 
 
-class SubtitleCueRead(BaseModel):
-    id: str
-    project_id: str
-    source_segment_id: str
-    cue_index: int
-    start_ms: int
-    end_ms: int
-    text: str
-
-
 class StoryboardContent(BaseModel):
     visual_summary: str = Field(min_length=1)
     visual_type: str = Field(min_length=1)
@@ -69,19 +59,6 @@ class StoryboardContent(BaseModel):
         if not isinstance(value, list):
             raise ValueError("Expected a list")
         return [str(item).strip() for item in value if str(item).strip()]
-
-
-class VisualSceneRead(BaseModel):
-    id: str
-    project_id: str
-    scene_index: int
-    start_ms: int
-    end_ms: int
-    narration: str
-    subtitle_ids: list[str]
-    storyboard: StoryboardContent | None = None
-    confidence: float | None = None
-    status: str
 
 
 class StoryboardSceneResult(StoryboardContent):

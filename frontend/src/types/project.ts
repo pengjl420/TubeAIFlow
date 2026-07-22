@@ -16,7 +16,6 @@ export interface Project {
     storyboard_mode?: StoryboardMode
     [key: string]: unknown
   }
-  config_json?: string
   created_at: string
   updated_at: string
   audio_duration_seconds?: number

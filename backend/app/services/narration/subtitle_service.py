@@ -1,8 +1,6 @@
 import math
 import re
 import unicodedata
-from pathlib import Path
-
 from sqlalchemy import delete
 from sqlmodel import Session, select
 
@@ -66,7 +64,7 @@ def build_segment_cues(
                 max_duration_ms=max_duration_ms,
             )
             for cue_index, (chunk, (cue_start, cue_end)) in enumerate(
-                zip(chunks, timings), start=1
+                zip(chunks, timings, strict=True), start=1
             ):
                 cue_values.append(
                     {
@@ -247,7 +245,7 @@ def _allocate_cue_times(
             boundary = min(max(boundary, lower_bound), upper_bound)
         boundaries.append(boundary)
     boundaries.append(end_ms)
-    return list(zip(boundaries, boundaries[1:]))
+    return list(zip(boundaries, boundaries[1:], strict=False))
 
 
 def parse_srt(content: str) -> list[dict]:

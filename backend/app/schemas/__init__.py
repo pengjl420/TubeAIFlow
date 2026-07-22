@@ -1,3 +1,3 @@
-from app.schemas.storyboard import StoryboardContent, SubtitleCueRead, VisualSceneRead
+from app.schemas.storyboard import StoryboardContent
 
-__all__ = ["StoryboardContent", "SubtitleCueRead", "VisualSceneRead"]
+__all__ = ["StoryboardContent"]

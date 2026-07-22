@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 def run_ffmpeg(args: list[str], project_id: str | None = None) -> None:
     settings = get_settings()
-    command = [_resolve_tool(settings.ffmpeg_path, "ffmpeg.exe"), *args]
+    command = [_resolve_tool(settings.ffmpeg_path), *args]
     try:
         if not project_id:
             result = subprocess.run(
@@ -52,7 +52,7 @@ def run_ffmpeg(args: list[str], project_id: str | None = None) -> None:
 def probe_duration(audio_path: Path) -> float:
     settings = get_settings()
     command = [
-        _resolve_tool(settings.ffprobe_path, "ffprobe.exe"),
+        _resolve_tool(settings.ffprobe_path),
         "-v",
         "error",
         "-show_entries",
@@ -83,7 +83,7 @@ def probe_media(media_path: Path) -> dict:
     """Read stable container and primary-video metadata with ffprobe."""
     settings = get_settings()
     command = [
-        _resolve_tool(settings.ffprobe_path, "ffprobe.exe"),
+        _resolve_tool(settings.ffprobe_path),
         "-v",
         "error",
         "-show_entries",
@@ -154,7 +154,7 @@ def _parse_optional_int(value: str | int | None) -> int | None:
         return None
 
 
-def _resolve_tool(configured: str, executable_name: str) -> str:
+def _resolve_tool(configured: str) -> str:
     configured_path = Path(configured)
     if configured_path.is_absolute():
         return str(configured_path)

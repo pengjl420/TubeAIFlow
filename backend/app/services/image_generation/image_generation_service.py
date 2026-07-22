@@ -47,27 +47,6 @@ def generate_project_images(session: Session, project: Project) -> dict:
     return _generate(session, project, scenes)
 
 
-def generate_scene_images(session: Session, project: Project, scene_id: str) -> dict:
-    scene = session.get(VisualScene, scene_id)
-    if not scene or scene.project_id != project.id:
-        raise ValueError("视觉场景不存在")
-    return _generate(session, project, [scene], force=True)
-
-
-def list_scene_variants(session: Session, project_id: str, scene_id: str) -> list[dict]:
-    return [
-        item.model_dump()
-        for item in session.exec(
-            select(GeneratedImageVariant)
-            .where(
-                GeneratedImageVariant.project_id == project_id,
-                GeneratedImageVariant.scene_id == scene_id,
-            )
-            .order_by(GeneratedImageVariant.variant_index)
-        ).all()
-    ]
-
-
 def _generate(
     session: Session,
     project: Project,

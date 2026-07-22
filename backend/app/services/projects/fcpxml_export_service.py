@@ -277,7 +277,7 @@ def _build_landscape_xml(
     spine = ET.SubElement(sequence, "spine")
     cursor_ms = 0
     primary_nodes: list[ET.Element] = []
-    for item, resource_id in zip(selected, clip_resource_ids):
+    for item, resource_id in zip(selected, clip_resource_ids, strict=True):
         remaining_ms = total_ms - cursor_ms
         if remaining_ms <= 0:
             break

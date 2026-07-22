@@ -55,6 +55,18 @@ npm install
 npm run dev
 ```
 
+## Checks
+
+```powershell
+cd backend
+pip install -r requirements-dev.txt
+pytest -q
+ruff check app tests
+
+cd ..\frontend
+npm run build
+```
+
 ## Notes
 
 - Runtime configuration is managed on the **System Settings** page and stored locally in SQLite.

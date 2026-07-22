@@ -18,7 +18,6 @@ from app.infrastructure.project_layout import (
     ensure_project_dirs,
     get_final_audio_path,
     get_final_video_path,
-    get_output_stem,
     get_project_work_dir,
 )
 

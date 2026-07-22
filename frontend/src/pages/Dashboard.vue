@@ -46,7 +46,7 @@ const stageProgress: Record<string, number> = {
 function projectStatus(project: DashboardProject) { return statusLabels[project.status] || '待开始' }
 function projectAction(project: DashboardProject) {
   if (project.status === 'failed') return { label: '查看错误', path: `/projects/${project.id}/overview` }
-  if (project.status === 'completed') return { label: '查看成片', path: `/projects/${project.id}/render` }
+  if (project.status === 'completed') return { label: '查看成片', path: `/projects/${project.id}/delivery` }
   if (project.status === 'review_required') return { label: '重新生成', path: `/projects/${project.id}/narration` }
   if (project.task?.running || project.task?.queued) return { label: '查看详情', path: `/projects/${project.id}/overview` }
   if (project.status === 'narration_ready') return { label: '继续生成', path: `/projects/${project.id}/narration` }

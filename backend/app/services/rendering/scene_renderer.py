@@ -25,7 +25,6 @@ RENDER_TIMING_VERSION = 3
 
 
 def render_all_scenes(session: Session, project: Project) -> dict:
-    settings = get_settings()
     scenes = list(
         session.exec(
             select(VisualScene)

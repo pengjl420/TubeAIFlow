@@ -68,11 +68,6 @@ def defer_cleanup(key: str, callback: Callable[[], None]) -> None:
     cleanups[str(key)] = callback
 
 
-def current_owner() -> str | None:
-    """Return the GPU owner in the current thread, primarily for diagnostics."""
-    return getattr(_LOCAL, "owner", None)
-
-
 def _run_cleanups(owner: str) -> None:
     cleanups = getattr(_LOCAL, "cleanups", {})
     for key, callback in reversed(list(cleanups.items())):

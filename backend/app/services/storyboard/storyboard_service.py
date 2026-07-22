@@ -61,7 +61,11 @@ def generate_storyboard(
         cue_groups, warnings = group_cues(cues, llm_client, full_script)
     scene_values = _build_scene_values(project.id, cue_groups)
     if storyboard_mode == project_service.STORYBOARD_MODE_SEGMENTS:
-        for scene, visual_hint in zip(scene_values, _load_segment_visual_hints(project)):
+        for scene, visual_hint in zip(
+            scene_values,
+            _load_segment_visual_hints(project),
+            strict=False,
+        ):
             if visual_hint:
                 scene["visual_hint"] = visual_hint
     storyboard_by_scene = _generate_storyboard_content(
@@ -104,28 +108,6 @@ def list_scenes(session: Session, project_id: str) -> list[dict]:
         .order_by(VisualScene.scene_index)
     ).all()
     return [_serialize_scene(scene) for scene in scenes]
-
-
-def update_scene_storyboard(
-    session: Session,
-    project: Project,
-    scene_id: str,
-    content: StoryboardContent,
-) -> dict:
-    scene = session.get(VisualScene, scene_id)
-    if not scene or scene.project_id != project.id:
-        raise ValueError("视觉场景不存在")
-    normalized = normalize_storyboard(content)
-    scene.storyboard_json = normalized.model_dump_json()
-    scene.confidence = normalized.confidence
-    scene.status = "edited"
-    scene.updated_at = utc_now_iso()
-    session.add(scene)
-    session.commit()
-    session.refresh(scene)
-    scenes = list_scenes(session, project.id)
-    _write_artifact(project, scenes, [])
-    return _serialize_scene(scene)
 
 
 def _load_narration_units(session: Session, project_id: str) -> list[dict]:

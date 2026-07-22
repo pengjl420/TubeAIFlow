@@ -31,7 +31,9 @@ usePageFeedback(error, undefined, { errorTitle: '项目概览未能更新' })
 
 const completedSegments = computed(() => segments.value.filter((item) => item.status === 'completed').length)
 const confirmedScenes = computed(() => render.value?.assignment_count || 0)
-const hasAudio = computed(() => outputs.value?.final_audio_exists === true || Boolean(outputs.value?.files.some((file) => /\.(wav|mp3)$/i.test(file.name))))
+// Segment audio files are also listed in `outputs.files`, so their presence does
+// not mean that the merged narration artifact has been generated.
+const hasAudio = computed(() => outputs.value?.final_audio_exists === true)
 const hasVideo = computed(() => Boolean(render.value?.final_video_exists || outputs.value?.final_video_exists))
 const statusLabel = computed(() => ({
   created: '待开始', narration_in_progress: '自动生成中', narration_ready: '配音已完成',

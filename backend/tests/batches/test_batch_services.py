@@ -84,6 +84,8 @@ class GenerationCheckpointTests(unittest.TestCase):
             patch.object(narration_generation.project_service, "create_segments") as create_segments,
             patch.object(narration_generation.tts_service, "generate_project_tts") as generate_tts,
             patch.object(narration_generation.audio_service, "merge_project_audio") as merge_audio,
+            patch.object(narration_generation.timeline_service, "build_timeline") as build_timeline,
+            patch.object(narration_generation.srt_service, "create_full_srt") as create_srt,
             patch.object(narration_generation.rough_cut_service, "compose_video") as compose_video,
         ):
             narration_generation.run_project_generation(
@@ -97,19 +99,27 @@ class GenerationCheckpointTests(unittest.TestCase):
         create_segments.assert_not_called()
         generate_tts.assert_not_called()
         merge_audio.assert_called_once_with(session, project)
+        build_timeline.assert_called_once_with(session, project)
+        create_srt.assert_called_once()
         compose_video.assert_not_called()
-        self.assertEqual(stages, ["completed"])
+        self.assertEqual(stages, ["subtitles", "completed"])
 
-    def test_workflow_completes_after_audio_merge_without_subtitles(self) -> None:
+    def test_workflow_generates_timeline_and_subtitles_after_audio_merge(self) -> None:
         session = MagicMock()
         project = Project(id="p1", name="Project")
         stages: list[str] = []
-        with patch.object(narration_generation.audio_service, "merge_project_audio"):
+        with (
+            patch.object(narration_generation.audio_service, "merge_project_audio"),
+            patch.object(narration_generation.timeline_service, "build_timeline") as build_timeline,
+            patch.object(narration_generation.srt_service, "create_full_srt") as create_srt,
+        ):
             narration_generation.run_project_generation(
                 session, project, "audio_merge", False, stages.append
             )
         self.assertEqual(project.status, "narration_ready")
-        self.assertEqual(stages, ["completed"])
+        build_timeline.assert_called_once_with(session, project)
+        create_srt.assert_called_once()
+        self.assertEqual(stages, ["subtitles", "completed"])
 
     def test_landscape_mode_branches_after_shared_subtitle_stage(self) -> None:
         session = MagicMock()
@@ -120,6 +130,8 @@ class GenerationCheckpointTests(unittest.TestCase):
         )
         stages: list[str] = []
         with (
+            patch.object(narration_generation.timeline_service, "build_timeline"),
+            patch.object(narration_generation.srt_service, "create_full_srt"),
             patch.object(narration_generation.rough_cut_service, "compose_video") as compose_video,
             patch.object(narration_generation.video_synthesis, "run_video_synthesis") as smart_video,
         ):
@@ -158,9 +170,13 @@ class GenerationCheckpointTests(unittest.TestCase):
         )
         stages: list[str] = []
 
-        with patch.object(
-            narration_generation.video_synthesis, "run_video_synthesis"
-        ) as video_workflow:
+        with (
+            patch.object(narration_generation.timeline_service, "build_timeline"),
+            patch.object(narration_generation.srt_service, "create_full_srt"),
+            patch.object(
+                narration_generation.video_synthesis, "run_video_synthesis"
+            ) as video_workflow,
+        ):
             narration_generation.run_project_generation(
                 session, project, "subtitles", False, stages.append
             )
@@ -184,6 +200,8 @@ class GenerationCheckpointTests(unittest.TestCase):
             on_stage_changed("completed")
 
         with (
+            patch.object(narration_generation.timeline_service, "build_timeline"),
+            patch.object(narration_generation.srt_service, "create_full_srt"),
             patch.object(narration_generation.rough_cut_service, "compose_video") as compose_video,
             patch.object(
                 narration_generation.video_synthesis,

@@ -1,14 +1,25 @@
 from collections.abc import Callable
+from pathlib import Path
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.models.project import Project
 from app.models.narration import Segment
+from app.models.storyboard import SubtitleCue
 from app.infrastructure import process_runner as task_control
 from app.config import get_settings
-from app.infrastructure.project_layout import get_final_audio_path
-from app.services.narration import audio_service, tts_service
+from app.infrastructure.project_layout import (
+    get_final_audio_path,
+    get_final_fcpxml_path,
+    get_final_prproj_path,
+    get_final_srt_path,
+    get_final_video_path,
+    get_output_stem,
+    get_project_work_dir,
+)
+from app.services.narration import audio_service, srt_service, timeline_service, tts_service
 from app.services.projects import project_service
+from app.services.quality import qa_service
 from app.services.rendering import rough_cut_service
 from app.workflows import video_synthesis
 
@@ -65,15 +76,21 @@ def run_project_generation(
     if stage == "audio_merge":
         with task_control.controlled(project.id, "audio_merge"):
             audio_service.merge_project_audio(session, project)
+        stage = "subtitles"
+        on_stage_changed(stage)
+
+    if stage == "subtitles":
+        with task_control.controlled(project.id, "subtitles"):
+            timeline_service.build_timeline(session, project)
+            segments = session.exec(
+                select(Segment)
+                .where(Segment.project_id == project.id)
+                .order_by(Segment.segment_index)
+            ).all()
+            srt_service.create_full_srt(project, list(segments), session=session)
         project.status = "narration_ready"
         session.add(project)
         session.commit()
-        stage = _stage_after_narration(project, include_video)
-        on_stage_changed(stage)
-
-    # Compatibility for tasks created by older versions. Subtitles and their
-    # public timeline are no longer production stages.
-    if stage == "subtitles":
         stage = _stage_after_narration(project, include_video)
         on_stage_changed(stage)
 
@@ -115,3 +132,78 @@ def _stage_after_narration(project: Project, include_video: bool) -> str:
     }:
         return "storyboard"
     return "completed"
+
+
+def initial_stage(session: Session, project: Project, include_video: bool) -> str:
+    """Return the earliest incomplete stage for a one-click continuation."""
+    segments = list(
+        session.exec(
+            select(Segment)
+            .where(Segment.project_id == project.id)
+            .order_by(Segment.segment_index)
+        ).all()
+    )
+    if not segments:
+        return "segmenting"
+    if any(
+        item.status != "completed"
+        or not item.audio_path
+        or not Path(item.audio_path).is_file()
+        for item in segments
+    ):
+        return "tts"
+
+    settings = get_settings()
+    if not get_final_audio_path(project, settings.workspace_dir).is_file():
+        return "audio_merge"
+    if not _narration_outputs_exist(session, project):
+        return "subtitles"
+
+    next_stage = _stage_after_narration(project, include_video)
+    if next_stage in video_synthesis.STAGES:
+        if _final_output_exists(project):
+            return _stage_after_existing_output(project)
+        return video_synthesis.initial_stage(session, project.id)
+    if next_stage == "video" and get_final_video_path(project, settings.workspace_dir).is_file():
+        return _stage_after_existing_output(project)
+    return next_stage
+
+
+def _narration_outputs_exist(session: Session, project: Project) -> bool:
+    settings = get_settings()
+    work_dir = get_project_work_dir(project, settings.workspace_dir)
+    stem = get_output_stem(project)
+    timeline_paths = (
+        work_dir / "timeline" / f"{stem}_timeline.json",
+        work_dir / "timeline" / "timeline.json",
+    )
+    has_cues = session.exec(
+        select(SubtitleCue.id).where(SubtitleCue.project_id == project.id).limit(1)
+    ).first() is not None
+    return (
+        get_final_srt_path(project, settings.workspace_dir).is_file()
+        and any(path.is_file() for path in timeline_paths)
+        and has_cues
+    )
+
+
+def _final_output_exists(project: Project) -> bool:
+    settings = get_settings()
+    output_format = project_service.get_video_output_format(project)
+    if output_format == project_service.VIDEO_OUTPUT_FCPXML:
+        return get_final_fcpxml_path(project, settings.workspace_dir).is_file()
+    if output_format == project_service.VIDEO_OUTPUT_PRPROJ:
+        return get_final_prproj_path(project, settings.workspace_dir).is_file()
+    if output_format == project_service.VIDEO_OUTPUT_EDITABLE_BOTH:
+        return (
+            get_final_fcpxml_path(project, settings.workspace_dir).is_file()
+            and get_final_prproj_path(project, settings.workspace_dir).is_file()
+        )
+    return get_final_video_path(project, settings.workspace_dir).is_file()
+
+
+def _stage_after_existing_output(project: Project) -> str:
+    if project_service.get_video_output_format(project) != project_service.VIDEO_OUTPUT_MP4:
+        return "completed"
+    report = qa_service.read_report(project)
+    return "completed" if report and report.get("passed") else "quality_check"

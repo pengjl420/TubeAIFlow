@@ -13,7 +13,7 @@ from app.models.task import TaskRun
 from app.services.projects import project_service
 from app.services.tasks import task_service, task_worker
 from app.shared.time import utc_now_iso
-from app.workflows import video_synthesis
+from app.workflows import narration_generation, video_synthesis
 
 
 router = APIRouter(tags=["tasks"])
@@ -112,16 +112,27 @@ def start_project_workflow(project_id: str, session: Session = Depends(get_sessi
         task_worker.wake_worker()
         return {"success": True, "data": task_service.serialize_task(session, latest)}
     try:
+        initial_stage = narration_generation.initial_stage(
+            session,
+            project,
+            include_video=bool(config.get("include_video", False)),
+        )
         task = task_service.enqueue_project_task(
             session,
             project,
             include_video=bool(config.get("include_video", False)),
-            current_stage="segmenting",
+            current_stage=initial_stage,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"success": False, "error": str(exc)}) from exc
     task_worker.wake_worker()
     return {"success": True, "data": task_service.serialize_task(session, task)}
+
+
+@router.post("/projects/{project_id}/workflows/continue")
+def continue_project_workflow(project_id: str, session: Session = Depends(get_session)) -> dict:
+    """Continue every remaining configured stage from the earliest missing artifact."""
+    return start_project_workflow(project_id, session)
 
 
 @router.post("/projects/{project_id}/workflows/video/start")

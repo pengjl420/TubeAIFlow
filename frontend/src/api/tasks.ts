@@ -43,6 +43,12 @@ export async function startProjectWorkflow(projectId: string) {
   )
 }
 
+export async function continueProjectWorkflow(projectId: string) {
+  return unwrap<ProjectTaskStatus>(
+    await apiClient.post(`/projects/${projectId}/workflows/continue`),
+  )
+}
+
 export async function startVideoWorkflow(projectId: string) {
   return unwrap<ProjectTaskStatus>(
     await apiClient.post(`/projects/${projectId}/workflows/video/start`),

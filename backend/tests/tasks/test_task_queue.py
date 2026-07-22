@@ -13,6 +13,7 @@ from app import database
 from app.api import tasks
 from app.database import get_session
 from app.models.batch import BatchItem, BatchJob
+from app.models.narration import Segment
 from app.models.project import Project
 from app.models.task import TaskRun
 from app.services.tasks import task_service, task_worker
@@ -346,6 +347,53 @@ class TaskApiTests(unittest.TestCase):
                 task = task_service.get_latest_project_task(session, "project")
                 self.assertEqual(task.status, "queued")
                 self.assertEqual(task.attempt_count, 0)
+            engine.dispose()
+
+    def test_continue_endpoint_starts_at_earliest_missing_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            engine = create_engine(
+                f"sqlite:///{root / 'continue.db'}",
+                connect_args={"check_same_thread": False},
+            )
+            SQLModel.metadata.create_all(engine)
+            segment_audio = root / "work" / "0001.wav"
+            segment_audio.parent.mkdir(parents=True)
+            segment_audio.write_bytes(b"audio")
+            with Session(engine) as session:
+                session.add(Project(
+                    id="project",
+                    name="Project",
+                    output_dir=str(root),
+                    script_clean_path=str(root / "script.txt"),
+                    config_json='{"output_filename":"project","include_video":false}',
+                ))
+                session.add(Segment(
+                    id="segment",
+                    segment_id="0001",
+                    project_id="project",
+                    segment_index=1,
+                    text="已生成的配音",
+                    audio_path=str(segment_audio),
+                    duration=1.0,
+                    status="completed",
+                ))
+                session.commit()
+
+            app = FastAPI()
+            app.include_router(tasks.router, prefix="/api")
+
+            def test_session():
+                with Session(engine) as session:
+                    yield session
+
+            app.dependency_overrides[get_session] = test_session
+            with patch.object(tasks.task_worker, "wake_worker"):
+                with TestClient(app) as client:
+                    response = client.post("/api/projects/project/workflows/continue")
+
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["data"]["stage"], "audio_merge")
             engine.dispose()
 
 

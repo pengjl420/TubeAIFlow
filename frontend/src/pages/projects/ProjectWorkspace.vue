@@ -5,6 +5,7 @@ import { Check } from 'lucide-vue-next'
 
 import { getProject } from '../../api/projects'
 import { getProjectTaskStatus, type ProjectTaskStatus } from '../../api/tasks'
+import ContinueWorkflowButton from '../../components/common/ContinueWorkflowButton.vue'
 import type { Project } from '../../types/project'
 
 const route = useRoute()
@@ -49,6 +50,9 @@ onBeforeUnmount(() => { if (timer !== undefined) window.clearInterval(timer) })
         </RouterLink>
       </nav>
     </aside>
-    <div class="taf-project-outlet"><RouterView /></div>
+    <div class="taf-project-outlet">
+      <ContinueWorkflowButton :project-id="projectId" />
+      <RouterView />
+    </div>
   </section>
 </template>

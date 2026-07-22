@@ -41,7 +41,7 @@ class IntelligentVideoPipelineTests(unittest.TestCase):
                         session, project, "asset_search", changed.append
                     )
 
-            self.assertIn("需要审核素材", str(raised.exception))
+            self.assertIn("缺少可用素材", str(raised.exception))
             self.assertEqual(changed, ["asset_review"])
             search.assert_called_once_with(session, project, scene.id)
 
@@ -101,7 +101,7 @@ class IntelligentVideoPipelineTests(unittest.TestCase):
             auto_assign.assert_called_once_with(
                 session, project, _scene.id, review_required=True
             )
-            self.assertIn("需要审核生成图片", str(raised.exception))
+            self.assertIn("缺少可用生成图片", str(raised.exception))
             self.assertEqual(changed, ["image_review"])
 
     def test_confirmed_assignments_continue_through_qa(self) -> None:
@@ -126,6 +126,11 @@ class IntelligentVideoPipelineTests(unittest.TestCase):
                     "compose_visual_track",
                 ) as compose_visual_track,
                 patch.object(video_synthesis.final_renderer, "compose_final_video") as render_final,
+                patch.object(
+                    video_synthesis.qa_service,
+                    "run_quality_check",
+                    return_value={"passed": True, "summary": {"error_count": 0}},
+                ) as run_qa,
             ):
                 video_synthesis.run_video_synthesis(
                     session, project, "asset_review", changed.append
@@ -133,11 +138,12 @@ class IntelligentVideoPipelineTests(unittest.TestCase):
 
             self.assertEqual(
                 changed,
-                ["scene_render", "visual_track", "final_render", "completed"],
+                ["scene_render", "visual_track", "final_render", "quality_check", "completed"],
             )
             render_scenes.assert_called_once_with(session, project)
             compose_visual_track.assert_called_once_with(session, project)
             render_final.assert_called_once_with(session, project)
+            run_qa.assert_called_once_with(session, project)
             self.assertEqual(media_file.id, "media-1")
 
     def test_fcpxml_setting_exports_without_rendering_mp4(self) -> None:
@@ -174,6 +180,21 @@ class IntelligentVideoPipelineTests(unittest.TestCase):
             render_scenes.assert_not_called()
             visual_track.assert_not_called()
             render_final.assert_not_called()
+
+    def test_quality_check_failure_stops_automatic_workflow(self) -> None:
+        with Session(self.engine) as session:
+            project, _ = self._project_with_scene(session)
+            changed = []
+            with patch.object(
+                video_synthesis.qa_service,
+                "run_quality_check",
+                return_value={"passed": False, "summary": {"error_count": 2}},
+            ):
+                with self.assertRaisesRegex(RuntimeError, "2 个错误"):
+                    video_synthesis.run_video_synthesis(
+                        session, project, "quality_check", changed.append
+                    )
+            self.assertEqual(changed, [])
 
     def test_scene_renderer_is_resumable_for_unchanged_assignment(self) -> None:
         source = self.root / "source.mp4"

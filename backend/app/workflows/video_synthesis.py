@@ -9,6 +9,7 @@ from app.services.media_library import ingestion_service, retrieval_service
 from app.services.image_generation import image_generation_service, image_selection_service
 from app.services.rendering import final_renderer, scene_renderer, visual_track_composer
 from app.services.rendering import timeline_composer
+from app.services.quality import qa_service
 from app.services.storyboard import storyboard_service
 from app.services.projects import fcpxml_export_service, prproj_export_service, project_service
 
@@ -76,7 +77,7 @@ def run_video_synthesis(
     if stage == "image_review":
         missing = assignment_gap(session, project.id)
         if missing:
-            raise ReviewRequired("image_review", f"仍有 {missing} 个分镜需要审核生成图片")
+            _raise_assignment_gap(project, "image_review", missing, "生成图片")
         stage = output_stage(project)
         on_stage_changed(stage)
 
@@ -99,7 +100,7 @@ def run_video_synthesis(
     if stage == "asset_review":
         missing = assignment_gap(session, project.id)
         if missing:
-            raise ReviewRequired("asset_review", f"仍有 {missing} 个分镜需要审核素材")
+            _raise_assignment_gap(project, "asset_review", missing, "素材")
         stage = output_stage(project)
         on_stage_changed(stage)
 
@@ -131,11 +132,14 @@ def run_video_synthesis(
 
     if stage == "final_render":
         final_renderer.compose_final_video(session, project)
-        on_stage_changed("completed")
-        return
+        stage = "quality_check"
+        on_stage_changed(stage)
 
     if stage in {"quality_check", "quality_review"}:
-        # Compatibility for tasks persisted before the QA stage was removed.
+        report = qa_service.run_quality_check(session, project)
+        if not report.get("passed"):
+            error_count = report.get("summary", {}).get("error_count", 0)
+            raise RuntimeError(f"自动质量检查未通过：{error_count} 个错误")
         on_stage_changed("completed")
 
 
@@ -206,3 +210,13 @@ def output_stage(project: Project) -> str:
     if output_format == project_service.VIDEO_OUTPUT_EDITABLE_BOTH:
         return "editable_export"
     return "scene_render"
+
+
+def _raise_assignment_gap(project: Project, stage: str, missing: int, label: str) -> None:
+    message = f"仍有 {missing} 个分镜缺少可用{label}"
+    if (
+        project_service.get_semantic_review_mode(project)
+        == project_service.SEMANTIC_REVIEW_MANUAL
+    ):
+        raise ReviewRequired(stage, f"{message}，需要人工审核")
+    raise RuntimeError(f"{message}，自动流程无法继续")

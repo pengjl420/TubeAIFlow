@@ -23,6 +23,7 @@ def auto_fill_scene(
     project: Project,
     scene: VisualScene,
     candidates: list[dict],
+    review_required: bool | None = None,
 ) -> dict:
     settings = get_settings()
     coverage = timeline_composer.scene_coverage(session, scene)
@@ -74,9 +75,12 @@ def auto_fill_scene(
         threshold_exceeded = (
             fallback_ratio * 100 > settings.auto_fallback_max_ratio_percent
         )
-        assignment.manual_confirmed = not (
+        requires_review = (
             settings.auto_fallback_review_required or threshold_exceeded
+            if review_required is None
+            else review_required
         )
+        assignment.manual_confirmed = not requires_review
         assignment.selection_reason = (
             f"{AUTO_REASON_PREFIX}：{candidate['selection_stage']}；"
             f"项目固定种子；兜底占比 {fallback_ratio * 100:.1f}%"

@@ -80,9 +80,17 @@ def search_scene_candidates(
                     "candidates": list_scene_candidates(session, project.id, scene.id),
                 }
                 from app.services.media_library import fallback_service
+                from app.services.projects import project_service
 
                 result["auto_fallback"] = fallback_service.auto_fill_scene(
-                    session, project, scene, result["candidates"]
+                    session,
+                    project,
+                    scene,
+                    result["candidates"],
+                    review_required=(
+                        project_service.get_semantic_review_mode(project)
+                        == project_service.SEMANTIC_REVIEW_MANUAL
+                    ),
                 )
         result["online_search"] = attempts
         return result

@@ -36,18 +36,18 @@ const showAllErrors = ref(false)
 let refreshTimer: number | undefined
 
 const stageLabels: Record<string, string> = {
-  segmenting: '脚本准备', tts: '配音生成', audio_merge: '音频合并', subtitles: '字幕生成',
-  storyboard: '分镜生成', asset_search: '素材检索', asset_review: '素材校验',
-  image_generation: '图片生成', image_review: '图片审核', scene_render: '场景渲染',
-  visual_track: '视频合成', final_render: '最终合成', quality_check: 'QA 检查',
-  quality_review: '质量复核', completed: '任务完成',
+  segmenting: '脚本准备', tts: '配音生成', audio_merge: '音频合并', subtitles: '准备视频（旧任务）',
+  storyboard: '分镜生成', asset_search: '素材检索', asset_review: '自动选材',
+  image_generation: '图片生成', image_review: '自动选图', scene_render: '场景渲染',
+  visual_track: '视频合成', final_render: '最终合成', quality_check: '完成生成（旧任务）',
+  quality_review: '完成生成（旧任务）', completed: '任务完成',
 }
 const statusLabels: Record<string, string> = {
   idle: '空闲', queued: '排队中', running: '运行中', paused: '已暂停',
-  review_required: '等待审核', completed: '已完成', failed: '失败', cancelled: '已取消',
+  review_required: '旧任务待恢复', completed: '已完成', failed: '失败', cancelled: '已取消',
 }
-const narrationStages = ['segmenting', 'tts', 'audio_merge', 'subtitles', 'completed']
-const videoStages = ['storyboard', 'asset_search', 'asset_review', 'scene_render', 'final_render', 'quality_check', 'completed']
+const narrationStages = ['segmenting', 'tts', 'audio_merge', 'completed']
+const videoStages = ['storyboard', 'asset_search', 'asset_review', 'image_generation', 'image_review', 'scene_render', 'visual_track', 'final_render', 'completed']
 
 const filtered = computed(() => tasks.value.filter((item) => {
   const keyword = query.value.trim().toLocaleLowerCase()
@@ -118,7 +118,7 @@ function eventLabel(event: StageEvent) {
   if (event.event === 'failed') return `${stageLabels[event.stage] || event.stage}失败`
   if (event.event === 'recovered' || event.event === 'resumed') return `从恢复点继续执行`
   if (event.event === 'completed' || event.event === 'stage_completed') return `${stageLabels[event.stage] || event.stage}完成`
-  if (event.event === 'review_required') return '任务进入人工审核'
+  if (event.event === 'review_required') return '旧版任务停在审核点，可重新执行以自动继续'
   return stageLabels[event.stage] || '任务状态更新'
 }
 function stageState(index: number) {

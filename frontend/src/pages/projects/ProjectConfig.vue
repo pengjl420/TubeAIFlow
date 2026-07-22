@@ -67,7 +67,10 @@ function fillForm() {
   semanticReviewMode.value = projectConfig.value.semantic_review_mode === 'automatic'
     ? 'automatic'
     : 'manual'
-  videoOutputFormat.value = projectConfig.value.video_output_format === 'fcpxml' ? 'fcpxml' : 'mp4'
+  const configuredOutput = projectConfig.value.video_output_format
+  videoOutputFormat.value = configuredOutput === 'fcpxml' || configuredOutput === 'prproj' || configuredOutput === 'editable_both'
+    ? configuredOutput
+    : 'mp4'
   storyboardTransitionEnabled.value = projectConfig.value.storyboard_transition_enabled !== false
   segmentationMode.value = projectConfig.value.segmentation_mode === 'ai' ? 'ai' : 'newline'
   storyboardMode.value = projectConfig.value.storyboard_mode === 'segments' ? 'segments' : 'ai'
@@ -254,8 +257,16 @@ onMounted(load)
               <input v-model="videoOutputFormat" type="radio" value="mp4" />
               <span><strong>{{ videoMode === 'none' ? '仅配音与原文 SRT' : '视频文件（MP4）' }}</strong><small>{{ videoMode === 'none' ? '不额外生成 FCPXML 时间线' : '直接渲染可播放的最终视频文件' }}</small></span>
             </label>
+            <label class="output-format-option" :class="{ 'is-selected': videoOutputFormat === 'prproj' }">
+              <input v-model="videoOutputFormat" type="radio" value="prproj" />
+              <span><strong>Premiere PRPROJ 工程</strong><small>供仅接受 .prproj 的剪映版本导入</small></span>
+            </label>
+            <label class="output-format-option" :class="{ 'is-selected': videoOutputFormat === 'editable_both' }">
+              <input v-model="videoOutputFormat" type="radio" value="editable_both" />
+              <span><strong>两种可编辑工程</strong><small>同时生成 FCPXML 和 PRPROJ</small></span>
+            </label>
           </div>
-          <span class="muted">{{ videoMode === 'none' ? 'FCPXML 将创建仅包含完整配音和字幕标题轨的时间线，方便导入剪映后继续铺设画面。' : 'FCPXML 模式跳过视频渲染，输出可继续深度剪辑的时间线工程，并保留 SRT 字幕兜底。' }}</span>
+          <span class="muted">可编辑工程模式跳过 MP4 渲染。PRPROJ 由本机 Premiere Pro 从 FCPXML 转换，素材移动后需要重新链接。</span>
         </div>
         <label v-if="videoMode === 'ai_semantic' || videoMode === 'ai_generated_images'" class="field reference-field">
           <span>分镜头视觉场景切分</span>

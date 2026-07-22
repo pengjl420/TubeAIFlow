@@ -259,6 +259,7 @@ def assign_candidate(
     scene_id: str,
     payload: SceneAssignmentRequest,
     auto_approved: bool = False,
+    review_required: bool = False,
 ) -> dict:
     scene = _require_scene(session, project.id, scene_id)
     candidate = session.get(SceneCandidate, payload.candidate_id)
@@ -321,10 +322,13 @@ def assign_candidate(
     assignment.pan_direction = payload.pan_direction
     assignment.crop_anchor = payload.crop_anchor
     assignment.transition = payload.transition
-    assignment.manual_confirmed = True
+    assignment.manual_confirmed = not review_required
     assignment.selection_stage = candidate.selection_stage
     conflicts = json.loads(candidate.conflicts_json)
     assignment.selection_reason = (
+        f"系统已按匹配度预选，等待人工复核（{candidate.total_score:.1%}）"
+        if review_required
+        else
         f"系统按匹配度自动审核通过（{candidate.total_score:.1%}）"
         if auto_approved
         else "人工确认接受候选冲突：" + "；".join(conflicts)
@@ -371,7 +375,10 @@ def assign_candidate(
 
 
 def auto_assign_qualified_candidates(
-    session: Session, project: Project, scene_id: str
+    session: Session,
+    project: Project,
+    scene_id: str,
+    review_required: bool = False,
 ) -> dict:
     """Fill one scene with qualified candidates in descending match-score order."""
     scene = _require_scene(session, project.id, scene_id)
@@ -380,9 +387,11 @@ def auto_assign_qualified_candidates(
     for assignment in existing_assignments:
         candidate = session.get(SceneCandidate, assignment.candidate_id) if assignment.candidate_id else None
         if candidate and candidate.status == "QUALIFIED" and not assignment.manual_confirmed:
-            assignment.manual_confirmed = True
+            assignment.manual_confirmed = not review_required
             assignment.selection_reason = (
-                f"系统按匹配度自动审核通过（{candidate.total_score:.1%}）"
+                f"系统已按匹配度预选，等待人工复核（{candidate.total_score:.1%}）"
+                if review_required
+                else f"系统按匹配度自动审核通过（{candidate.total_score:.1%}）"
             )
             session.add(assignment)
             selected_assignment_ids.append(assignment.id)
@@ -406,7 +415,8 @@ def auto_assign_qualified_candidates(
                 project,
                 scene.id,
                 SceneAssignmentRequest(candidate_id=candidate.id, append=True),
-                auto_approved=True,
+                auto_approved=not review_required,
+                review_required=review_required,
             )
         except ValueError as exc:
             if "相同的素材内容" in str(exc) or "已经在当前场景" in str(exc):
@@ -549,22 +559,35 @@ def update_scene_assignment_render(
     return list_scene_assignments(session, project_id, scene_id)
 
 
-def confirm_scene_fallback_assignments(
+def confirm_scene_assignments(
     session: Session, project_id: str, scene_id: str
 ) -> dict:
     scene = _require_scene(session, project_id, scene_id)
     assignments = timeline_composer.scene_assignments(session, scene.id)
+    coverage = timeline_composer.scene_coverage(session, scene)
+    if not coverage["complete"]:
+        raise ValueError("当前分镜的素材轨道尚未覆盖完整，不能确认审核")
     confirmed = 0
     for assignment in assignments:
-        if assignment.selection_reason.startswith("系统自动兜底") and not assignment.manual_confirmed:
+        if not assignment.manual_confirmed:
             assignment.manual_confirmed = True
-            assignment.selection_reason += "；人工复核通过"
+            assignment.selection_reason = (
+                f"{assignment.selection_reason}；人工复核通过".strip("；")
+            )
+            assignment.updated_at = utc_now_iso()
             session.add(assignment)
             confirmed += 1
     if not confirmed:
-        raise ValueError("当前场景没有等待确认的自动兜底镜头")
+        raise ValueError("当前分镜没有等待确认的素材")
     session.commit()
     return list_scene_assignments(session, project_id, scene_id)
+
+
+def confirm_scene_fallback_assignments(
+    session: Session, project_id: str, scene_id: str
+) -> dict:
+    """Compatibility alias for clients using the old fallback-only action."""
+    return confirm_scene_assignments(session, project_id, scene_id)
 
 
 def _append_fallback_candidates(

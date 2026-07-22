@@ -14,6 +14,7 @@ export interface SystemSettings {
   workspace_dir: string
   ffmpeg_path: string
   ffprobe_path: string
+  premiere_pro_path: string | null
   storyboard_transition_effects: StoryboardTransitionEffect[]
   storyboard_transition_group_min_clips: number
   storyboard_transition_group_max_clips: number

@@ -14,6 +14,7 @@ from app.infrastructure.project_layout import (
     get_project_work_dir,
 )
 from app.integrations.llm.deepseek import DeepSeekClient
+from app.models.narration import Segment
 from app.models.project import Project
 from app.models.storyboard import SubtitleCue, VisualScene
 from app.schemas.storyboard import StoryboardBatchResult, StoryboardContent
@@ -47,9 +48,9 @@ def generate_storyboard(
     project: Project,
     client: DeepSeekClient | None = None,
 ) -> dict:
-    cues = _load_cues(session, project.id)
+    cues = _load_narration_units(session, project.id)
     if not cues:
-        raise ValueError("请先导入或生成 SRT 字幕")
+        raise ValueError("请先完成分段配音")
     llm_client = client or DeepSeekClient()
     storyboard_mode = project_service.get_storyboard_mode(project)
     full_script = "\n".join(cue["text"] for cue in cues)
@@ -127,22 +128,52 @@ def update_scene_storyboard(
     return _serialize_scene(scene)
 
 
-def _load_cues(session: Session, project_id: str) -> list[dict]:
-    cues = session.exec(
-        select(SubtitleCue)
-        .where(SubtitleCue.project_id == project_id)
-        .order_by(SubtitleCue.start_ms, SubtitleCue.cue_index)
+def _load_narration_units(session: Session, project_id: str) -> list[dict]:
+    """Build private scene timing directly from real narration durations.
+
+    These units are workflow inputs only; no subtitle cues or public timeline
+    artifact is created.
+    """
+    segments = session.exec(
+        select(Segment)
+        .where(Segment.project_id == project_id)
+        .order_by(Segment.segment_index)
     ).all()
-    return [
-        {
-            "id": cue.id,
-            "start_ms": cue.start_ms,
-            "end_ms": cue.end_ms,
-            "text": cue.text,
-            "source_segment_id": cue.source_segment_id,
-        }
-        for cue in cues
-    ]
+    if not segments:
+        # Read-only compatibility for projects created before subtitle/timeline
+        # generation was removed. New projects never create these rows.
+        legacy_cues = session.exec(
+            select(SubtitleCue)
+            .where(SubtitleCue.project_id == project_id)
+            .order_by(SubtitleCue.start_ms, SubtitleCue.cue_index)
+        ).all()
+        return [
+            {
+                "id": cue.id,
+                "start_ms": cue.start_ms,
+                "end_ms": cue.end_ms,
+                "text": cue.text,
+                "source_segment_id": cue.source_segment_id,
+            }
+            for cue in legacy_cues
+        ]
+    units: list[dict] = []
+    cursor_ms = 0
+    for segment in segments:
+        duration_ms = round(float(segment.duration or 0) * 1000)
+        if duration_ms <= 0:
+            raise ValueError(f"配音分段 {segment.segment_id} 缺少有效音频时长")
+        units.append(
+            {
+                "id": segment.id,
+                "start_ms": cursor_ms,
+                "end_ms": cursor_ms + duration_ms,
+                "text": segment.text,
+                "source_segment_id": segment.id,
+            }
+        )
+        cursor_ms += duration_ms
+    return units
 
 
 def _group_cues_by_segment(cues: list[dict]) -> list[list[dict]]:

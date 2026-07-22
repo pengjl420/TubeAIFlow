@@ -11,7 +11,7 @@ from sqlmodel import Session, SQLModel, create_engine
 from app.models.media import MediaFile, MediaShot, SceneAssignment
 from app.models.project import Project
 from app.models.storyboard import SubtitleCue, VisualScene
-from app.services.projects import fcpxml_export_service, project_service
+from app.services.projects import fcpxml_export_service, prproj_export_service, project_service
 from app.services.rendering import rough_cut_service
 
 
@@ -92,6 +92,53 @@ class FcpxmlExportTests(unittest.TestCase):
     def test_unknown_output_format_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "Unsupported video output format"):
             project_service.normalize_video_output_format("mov")
+
+    def test_prproj_and_dual_output_formats_are_supported(self) -> None:
+        self.assertEqual(project_service.normalize_video_output_format("prproj"), "prproj")
+        self.assertEqual(project_service.normalize_video_output_format("editable_both"), "editable_both")
+
+    def test_prproj_export_uses_premiere_conversion_boundary(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output_dir = root / "output"
+            output_dir.mkdir()
+            fcpxml_path = output_dir / "Story.fcpxml"
+            fcpxml_path.write_text("<fcpxml version=\"1.10\"/>", encoding="utf-8")
+            executable = root / "Adobe Premiere Pro.exe"
+            executable.write_bytes(b"exe")
+            settings = SimpleNamespace(workspace_dir=root / "workspace")
+            project = Project(
+                id="prproj-project", name="Story", output_dir=str(output_dir),
+                config_json='{"output_filename":"Story","project_directory_name":"Story","video_mode":"none"}',
+            )
+            engine = create_engine(f"sqlite:///{root / 'prproj.db'}")
+            SQLModel.metadata.create_all(engine)
+            with Session(engine) as session:
+                session.add(project)
+                session.commit()
+
+                def create_output(_executable, _script, marker, output, _timeout):
+                    output.write_bytes(b"native-prproj")
+                    marker.write_text('{"success":true}', encoding="utf-8")
+
+                with (
+                    patch.object(prproj_export_service, "get_settings", return_value=settings),
+                    patch.object(
+                        prproj_export_service.fcpxml_export_service,
+                        "export_project_fcpxml",
+                        return_value={"path": str(fcpxml_path), "format": "fcpxml"},
+                    ),
+                    patch.object(prproj_export_service, "_run_premiere_conversion", side_effect=create_output),
+                ):
+                    report = prproj_export_service.export_project_prproj(
+                        session, project, premiere_executable=executable
+                    )
+
+            self.assertEqual(Path(report["path"]), output_dir / "Story.prproj")
+            self.assertEqual((output_dir / "Story.prproj").read_bytes(), b"native-prproj")
+            self.assertEqual(report["format"], "prproj")
+            self.assertEqual(report["source_fcpxml_path"], str(fcpxml_path.resolve()))
+            engine.dispose()
 
     def test_landscape_mode_exports_selected_sources_without_rendering_mp4(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

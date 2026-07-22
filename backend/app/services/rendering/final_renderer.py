@@ -1,4 +1,3 @@
-import json
 import shutil
 
 from sqlmodel import Session, select
@@ -8,7 +7,6 @@ from app.infrastructure.ffmpeg import probe_duration, run_ffmpeg
 from app.infrastructure.project_layout import (
     ensure_project_dirs,
     get_final_audio_path,
-    get_final_srt_path,
     get_final_video_path,
     get_project_work_dir,
 )
@@ -79,13 +77,9 @@ def compose_final_video(session: Session, project: Project) -> dict:
     report = {
         "path": str(output_path),
         "preview_path": str(preview_path),
-        "subtitle_path": str(get_final_srt_path(project, get_settings().workspace_dir)),
         "visual_track_path": str(visual_track_path),
         "scene_count": scene_count,
         "audio_duration_seconds": audio_duration,
         "video_duration_seconds": video_duration,
     }
-    report_path = base_dir / "reports" / "render_report.json"
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     return report

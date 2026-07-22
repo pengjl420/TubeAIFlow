@@ -363,6 +363,20 @@ def confirm_scene_fallback_assignments(
     return {"success": True, "data": data}
 
 
+@router.post("/projects/{project_id}/storyboard/scenes/{scene_id}/assignments/confirm")
+def confirm_scene_assignments(
+    project_id: str,
+    scene_id: str,
+    session: Session = Depends(get_session),
+) -> dict:
+    _require_project(session, project_id)
+    try:
+        data = retrieval_service.confirm_scene_assignments(session, project_id, scene_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"success": False, "error": str(exc)}) from exc
+    return {"success": True, "data": data}
+
+
 @router.post("/projects/{project_id}/storyboard/scenes/{scene_id}/upload")
 def upload_scene_asset(
     project_id: str,

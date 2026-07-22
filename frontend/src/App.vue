@@ -44,7 +44,7 @@ const runningCount = computed(() => projects.value.filter((project) => (
   || project.status.includes('progress')
   || ['tts', 'tts_running', 'rendering', 'video_composing'].includes(project.status)
 )).length)
-const reviewCount = computed(() => projects.value.filter((project) => project.status === 'review_required').length)
+const failedCount = computed(() => projects.value.filter((project) => project.status === 'failed').length)
 const currentProject = computed(() => {
   const id = typeof route.params.id === 'string' ? route.params.id : ''
   return projects.value.find((project) => project.id === id)
@@ -123,8 +123,8 @@ onBeforeUnmount(() => {
           <RouterLink to="/tasks?status=running" class="taf-status-item blue">
             <span class="taf-status-icon"><Layers3 :size="19" /></span><span>运行中任务<strong>{{ runningCount }}</strong></span>
           </RouterLink>
-          <RouterLink to="/tasks?status=review" class="taf-status-item orange">
-            <span class="taf-status-icon"><WandSparkles :size="19" /></span><span>待人工审核<strong>{{ reviewCount }}</strong></span>
+          <RouterLink to="/tasks?status=failed" class="taf-status-item orange">
+            <span class="taf-status-icon"><WandSparkles :size="19" /></span><span>需要处理<strong>{{ failedCount }}</strong></span>
           </RouterLink>
           <RouterLink to="/tasks" class="taf-status-item green">
             <span class="taf-status-icon"><Cpu :size="19" /></span><span>GPU<strong>2/2 <i></i></strong></span>

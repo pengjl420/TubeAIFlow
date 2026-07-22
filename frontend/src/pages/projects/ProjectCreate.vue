@@ -14,9 +14,9 @@ const voiceProfileId = ref('')
 const outputDir = ref('D:\\video_darft')
 const outputFilename = ref('')
 const mediaVideoDir = ref('')
-const videoMode = ref<VideoGenerationMode>('none')
-const semanticReviewMode = ref<SemanticReviewMode>('manual')
-const videoOutputFormat = ref<VideoOutputFormat>('fcpxml')
+const videoMode = ref<VideoGenerationMode>('ai_semantic')
+const semanticReviewMode = ref<SemanticReviewMode>('automatic')
+const videoOutputFormat = ref<VideoOutputFormat>('mp4')
 const storyboardTransitionEnabled = ref(true)
 const segmentationMode = ref<SegmentationMode>('newline')
 const storyboardMode = ref<StoryboardMode>('ai')
@@ -31,7 +31,7 @@ watch(name, (value) => {
 })
 
 watch(videoMode, (value) => {
-  if (value === 'none') videoOutputFormat.value = 'fcpxml'
+  if (value === 'none' && videoOutputFormat.value === 'mp4') videoOutputFormat.value = 'fcpxml'
 })
 
 function markOutputFilenameEdited() {
@@ -180,12 +180,12 @@ onMounted(async () => {
         <label class="field reference-field">
           <span>视频生成方式</span>
           <select v-model="videoMode">
-            <option value="none">不生成视频（仅配音与原文 SRT）</option>
+            <option value="none">不生成视频（仅生成完整配音）</option>
             <option value="landscape">纯风景素材拼接</option>
             <option value="ai_semantic">AI 语义视频拼接</option>
             <option value="ai_generated_images">本地 AI 分镜图片视频</option>
           </select>
-          <span class="muted">三种方式共用切段、TTS、音频合并和 SRT 生成，只在字幕完成后分流。</span>
+          <span class="muted">选择后，一键生成会自动完成配音、素材匹配与最终 MP4 合成。</span>
         </label>
         <label v-if="videoMode === 'landscape'" class="field reference-field">
           <span>原始素材文件夹</span>
@@ -204,17 +204,13 @@ onMounted(async () => {
         </label>
         <div class="field reference-field">
           <span>最终交付格式</span>
-          <div class="output-format-options" role="radiogroup" aria-label="最终交付格式">
-            <label class="output-format-option" :class="{ 'is-selected': videoOutputFormat === 'fcpxml' }">
-              <input v-model="videoOutputFormat" type="radio" value="fcpxml" />
-              <span><strong>FCPXML 可编辑工程</strong><small>默认选项，可导入桌面版剪映继续深度剪辑</small></span>
-            </label>
-            <label class="output-format-option" :class="{ 'is-selected': videoOutputFormat === 'mp4' }">
-              <input v-model="videoOutputFormat" type="radio" value="mp4" />
-              <span><strong>{{ videoMode === 'none' ? '仅配音与原文 SRT' : '视频文件（MP4）' }}</strong><small>{{ videoMode === 'none' ? '不额外生成 FCPXML 时间线' : '直接渲染可播放的最终视频文件' }}</small></span>
-            </label>
-          </div>
-          <span class="muted">{{ videoMode === 'none' ? 'FCPXML 将创建仅包含完整配音和字幕标题轨的时间线，方便导入剪映后继续铺设画面。' : 'FCPXML 保留镜头裁剪、时间线、配音和字幕并引用原始素材，不渲染最终 MP4。' }}</span>
+          <select v-model="videoOutputFormat">
+            <option value="mp4">视频文件（MP4）</option>
+            <option value="fcpxml">FCPXML 可编辑工程</option>
+            <option value="prproj">Premiere PRPROJ 工程</option>
+            <option value="editable_both">同时生成 FCPXML 与 PRPROJ</option>
+          </select>
+          <span class="muted">PRPROJ 由本机 Adobe Premiere Pro 转换生成；没有安装 Premiere 时仍会保留 FCPXML。</span>
         </div>
         <label v-if="videoMode === 'ai_semantic' || videoMode === 'ai_generated_images'" class="field reference-field">
           <span>分镜头视觉场景切分</span>
@@ -223,14 +219,6 @@ onMounted(async () => {
             <option value="segments">按逐字稿切段生成分镜头</option>
           </select>
           <span class="muted">按切段模式严格沿用最终切段结果；上方切段方式变化时，分镜边界也会随之变化。</span>
-        </label>
-        <label v-if="videoMode === 'ai_semantic' || videoMode === 'ai_generated_images'" class="field reference-field">
-          <span>素材审核方式</span>
-          <select v-model="semanticReviewMode">
-            <option value="manual">人工审核拼接</option>
-            <option value="automatic">自动审核拼接</option>
-          </select>
-          <span class="muted">人工模式保持现有逐分镜确认流程；自动模式按匹配度从高到低选用合格且不重复的素材。</span>
         </label>
         <label class="checkbox-field">
           <input v-model="storyboardTransitionEnabled" type="checkbox" :disabled="videoMode === 'none'" />
@@ -242,7 +230,7 @@ onMounted(async () => {
       </div>
     </div>
     <div class="actions form-footer">
-      <span class="muted">创建后仍可在项目设置中修改这些选项。</span>
+      <span class="muted">创建后进入项目即可粘贴逐字稿并开始一键生成。</span>
       <button class="primary-button" :disabled="saving || selectingFolder !== null" @click="submit">
         {{ saving ? '正在创建…' : '创建并进入工作台 →' }}
       </button>

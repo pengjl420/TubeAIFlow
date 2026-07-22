@@ -12,6 +12,7 @@ from app.integrations.tts.cosyvoice_runner import (
     cosyvoice_prompt_text,
     duration_quality,
     segment_attempt_seed,
+    spoken_character_count,
 )
 
 
@@ -249,6 +250,43 @@ class TtsEngineTests(unittest.TestCase):
         self.assertFalse(suspicious)
         self.assertIsNone(reason)
         self.assertGreater(ratio, 0)
+
+    def test_cosyvoice_spoken_length_expands_ascii_digits(self) -> None:
+        text = "His first marriage ended in the early 1950s."
+
+        self.assertEqual(spoken_character_count(text), 48)
+
+    def test_cosyvoice_duration_quality_accepts_normal_year_audio(self) -> None:
+        text = "His first marriage ended in the early 1950s."
+        recent_ratio = 3.08 / 36
+
+        suspicious, reason, _ = duration_quality(
+            text,
+            5.6,
+            [recent_ratio] * 5,
+            min_chars_per_second=2.8,
+            duration_slack_seconds=2.0,
+            duration_outlier_ratio=1.45,
+        )
+
+        self.assertFalse(suspicious)
+        self.assertIsNone(reason)
+
+    def test_cosyvoice_duration_quality_still_rejects_numeric_hallucination(self) -> None:
+        text = "His first marriage ended in the early 1950s."
+        recent_ratio = 3.08 / 36
+
+        suspicious, reason, _ = duration_quality(
+            text,
+            12.0,
+            [recent_ratio] * 5,
+            min_chars_per_second=2.8,
+            duration_slack_seconds=2.0,
+            duration_outlier_ratio=1.45,
+        )
+
+        self.assertTrue(suspicious)
+        self.assertIn("outlier", reason)
 
     def test_cosyvoice3_prompt_includes_instruction_separator(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

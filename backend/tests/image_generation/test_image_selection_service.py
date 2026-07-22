@@ -62,7 +62,7 @@ class ImageSelectionServiceTests(unittest.TestCase):
             self.assertEqual(assignment.candidate_id, first[0].id)
             self.assertIn("系统综合评分自动选图", assignment.selection_reason)
 
-    def test_close_scores_require_manual_review(self) -> None:
+    def test_close_scores_still_choose_best_candidate_automatically(self) -> None:
         with Session(self.engine) as session:
             project, scene = self._project_scene(session)
             image = self._texture(33)
@@ -76,9 +76,24 @@ class ImageSelectionServiceTests(unittest.TestCase):
                 image_selection_service.score_scene_images(session, project, scene.id)
                 selected = image_selection_service.auto_assign_best_image(session, project, scene.id)
 
-            self.assertFalse(selected["complete"])
-            self.assertIn("前两名分差", selected["reason"])
-            self.assertEqual(session.exec(select(SceneAssignment)).all(), [])
+            self.assertTrue(selected["complete"])
+            assignment = session.exec(select(SceneAssignment)).one()
+            self.assertEqual(assignment.candidate_id, first[0].id)
+
+    def test_manual_review_mode_keeps_generated_image_pending(self) -> None:
+        with Session(self.engine) as session:
+            project, scene = self._project_scene(session)
+            candidate, media = self._candidate(session, project, scene, 1, self._texture(44))
+            with self._patched_runtime({Path(media.path): (0.82, 0.05)}):
+                image_selection_service.score_scene_images(session, project, scene.id)
+                image_selection_service.auto_assign_best_image(
+                    session, project, scene.id, review_required=True
+                )
+
+            assignment = session.exec(select(SceneAssignment)).one()
+            self.assertEqual(assignment.candidate_id, candidate.id)
+            self.assertFalse(assignment.manual_confirmed)
+            self.assertIn("等待人工复核", assignment.selection_reason)
 
     def test_low_quality_image_is_not_qualified(self) -> None:
         with Session(self.engine) as session:

@@ -62,6 +62,7 @@ class Settings(BaseModel):
     workspace_dir: Path = DEFAULT_WORKSPACE_DIR
     ffmpeg_path: str = "ffmpeg"
     ffprobe_path: str = "ffprobe"
+    premiere_pro_path: Path | None = None
     storyboard_transition_effects: list[StoryboardTransitionEffect] = Field(
         default_factory=default_storyboard_transition_effects
     )
@@ -153,6 +154,7 @@ class Settings(BaseModel):
         "image_generation_python",
         "pexels_storage_dir",
         "pixabay_storage_dir",
+        "premiere_pro_path",
         mode="before",
     )
     @classmethod

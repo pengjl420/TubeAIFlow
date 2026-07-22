@@ -198,22 +198,22 @@ class ProjectSettingsTests(unittest.TestCase):
             project_service.VIDEO_MODE_LANDSCAPE,
         )
 
-    def test_new_output_selection_defaults_to_fcpxml_but_legacy_projects_stay_mp4(self) -> None:
+    def test_output_defaults_to_mp4(self) -> None:
         legacy = Project(id="legacy", name="Legacy", config_json="{}")
         self.assertEqual(
             project_service.normalize_video_output_format(None),
-            project_service.VIDEO_OUTPUT_FCPXML,
+            project_service.VIDEO_OUTPUT_MP4,
         )
         self.assertEqual(
             project_service.get_video_output_format(legacy),
             project_service.VIDEO_OUTPUT_MP4,
         )
 
-    def test_semantic_review_mode_defaults_to_manual_and_persists_automatic(self) -> None:
+    def test_semantic_review_mode_defaults_to_automatic(self) -> None:
         legacy = Project(id="legacy", name="Legacy", config_json="{}")
         self.assertEqual(
             project_service.get_semantic_review_mode(legacy),
-            project_service.SEMANTIC_REVIEW_MANUAL,
+            project_service.SEMANTIC_REVIEW_AUTO,
         )
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -1,14 +1,14 @@
 from collections.abc import Callable
 
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 from app.models.project import Project
 from app.models.narration import Segment
 from app.infrastructure import process_runner as task_control
 from app.config import get_settings
 from app.infrastructure.project_layout import get_final_audio_path
-from app.services.narration import audio_service, srt_service, timeline_service, tts_service
-from app.services.projects import fcpxml_export_service, project_service
+from app.services.narration import audio_service, tts_service
+from app.services.projects import project_service
 from app.services.rendering import rough_cut_service
 from app.workflows import video_synthesis
 
@@ -27,10 +27,8 @@ def regenerate_segment_and_refresh_outputs(
 
     regenerated = tts_service.regenerate_segment_tts(session, project, segment)
     if refresh_completed_outputs:
-        # Rebuild in dependency order. merge_project_audio atomically replaces the
-        # prior WAV, so a failed FFmpeg run cannot destroy the last valid output.
+        # Keep the merged narration consistent after a single segment changes.
         audio_service.merge_project_audio(session, project)
-        _create_subtitles(session, project)
     return regenerated
 
 
@@ -67,37 +65,22 @@ def run_project_generation(
     if stage == "audio_merge":
         with task_control.controlled(project.id, "audio_merge"):
             audio_service.merge_project_audio(session, project)
-        stage = "subtitles"
+        project.status = "narration_ready"
+        session.add(project)
+        session.commit()
+        stage = _stage_after_narration(project, include_video)
         on_stage_changed(stage)
 
+    # Compatibility for tasks created by older versions. Subtitles and their
+    # public timeline are no longer production stages.
     if stage == "subtitles":
-        with task_control.controlled(project.id, "subtitles"):
-            _create_subtitles(session, project)
-        video_mode = (
-            project_service.get_project_video_mode(project)
-            if include_video
-            else project_service.VIDEO_MODE_NONE
-        )
-        if video_mode == project_service.VIDEO_MODE_LANDSCAPE:
-            stage = "video"
-        elif video_mode in {
-            project_service.VIDEO_MODE_AI_SEMANTIC,
-            project_service.VIDEO_MODE_AI_GENERATED_IMAGES,
-        }:
-            stage = "storyboard"
-        elif project_service.get_video_output_format(project) == project_service.VIDEO_OUTPUT_FCPXML:
-            stage = "fcpxml_export"
-        else:
-            stage = "completed"
+        stage = _stage_after_narration(project, include_video)
         on_stage_changed(stage)
 
     if stage == "video":
         try:
             with task_control.controlled(project.id, "video"):
-                if project_service.get_video_output_format(project) == project_service.VIDEO_OUTPUT_FCPXML:
-                    fcpxml_export_service.export_project_fcpxml(session, project)
-                else:
-                    rough_cut_service.compose_video(session, project)
+                rough_cut_service.compose_video(session, project)
         except task_control.TaskCancelledError:
             raise
         except (OSError, RuntimeError, ValueError) as exc:
@@ -108,20 +91,27 @@ def run_project_generation(
             raise
         on_stage_changed("completed")
 
-    if stage in video_synthesis.STAGES - {"completed"}:
+    if stage in {"storyboard", "asset_search", "asset_review", "image_generation", "image_review", "scene_render", "visual_track", "final_render", "quality_check", "quality_review", "fcpxml_export", "prproj_export", "editable_export"}:
         video_synthesis.run_video_synthesis(session, project, stage, on_stage_changed)
 
 
-def _create_subtitles(session: Session, project: Project) -> None:
-    timeline_service.build_timeline(session, project)
-    segments = list(
-        session.exec(
-            select(Segment)
-            .where(Segment.project_id == project.id)
-            .order_by(Segment.segment_index)
-        ).all()
+def _stage_after_narration(project: Project, include_video: bool) -> str:
+    video_mode = (
+        project_service.get_project_video_mode(project)
+        if include_video
+        else project_service.VIDEO_MODE_NONE
     )
-    srt_service.create_full_srt(project, segments, session=session)
-    project.status = "narration_ready"
-    session.add(project)
-    session.commit()
+    output_format = project_service.get_video_output_format(project)
+    if (
+        video_mode in {project_service.VIDEO_MODE_NONE, project_service.VIDEO_MODE_LANDSCAPE}
+        and output_format != project_service.VIDEO_OUTPUT_MP4
+    ):
+        return video_synthesis.output_stage(project)
+    if video_mode == project_service.VIDEO_MODE_LANDSCAPE:
+        return "video"
+    if video_mode in {
+        project_service.VIDEO_MODE_AI_SEMANTIC,
+        project_service.VIDEO_MODE_AI_GENERATED_IMAGES,
+    }:
+        return "storyboard"
+    return "completed"

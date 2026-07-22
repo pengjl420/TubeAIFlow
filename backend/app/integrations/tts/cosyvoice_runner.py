@@ -47,8 +47,18 @@ def segment_attempt_seed(segment_id: str, text: str, attempt: int) -> int:
 
 
 def spoken_character_count(text: str) -> int:
-    """Count letters and numbers while ignoring punctuation and whitespace."""
-    return sum(1 for char in text if unicodedata.category(char)[0] in {"L", "N"})
+    """Estimate spoken length while ignoring punctuation and whitespace.
+
+    ASCII digits expand into words when spoken (for example, ``1950s`` becomes
+    roughly "nineteen fifties"). Counting every digit as one character makes
+    otherwise normal audio look abnormally long, so use a conservative spoken
+    weight for digits while retaining the existing behavior for other scripts.
+    """
+    return sum(
+        4 if char.isascii() and char.isdigit() else 1
+        for char in text
+        if unicodedata.category(char)[0] in {"L", "N"}
+    )
 
 
 def duration_quality(

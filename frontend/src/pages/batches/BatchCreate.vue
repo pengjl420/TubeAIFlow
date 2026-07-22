@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   AlertCircle, Check, ChevronDown, FileText, Folder, GripVertical, Headphones,
-  Image, Monitor, Play, Scissors, Sparkles, UploadCloud, UserCheck, X,
+  Image, Monitor, Play, Scissors, Sparkles, UploadCloud, X,
 } from 'lucide-vue-next'
 
 import { createBatch } from '../../api/batches'
@@ -95,7 +95,7 @@ onMounted(async () => {
     const raw = localStorage.getItem('tubeaiflow-batch-draft')
     if (raw) {
       const draft = JSON.parse(raw)
-      name.value = draft.name || name.value; voiceProfileId.value = draft.voiceProfileId || ''; outputDir.value = draft.outputDir || ''; mediaVideoDir.value = draft.mediaVideoDir || ''; videoMode.value = draft.videoMode || videoMode.value; semanticReviewMode.value = draft.semanticReviewMode || semanticReviewMode.value; segmentationMode.value = draft.segmentationMode || segmentationMode.value; storyboardMode.value = draft.storyboardMode || storyboardMode.value; continueOnError.value = draft.continueOnError ?? true
+      name.value = draft.name || name.value; voiceProfileId.value = draft.voiceProfileId || ''; outputDir.value = draft.outputDir || ''; mediaVideoDir.value = draft.mediaVideoDir || ''; videoMode.value = draft.videoMode || videoMode.value; semanticReviewMode.value = 'automatic'; segmentationMode.value = draft.segmentationMode || segmentationMode.value; storyboardMode.value = draft.storyboardMode || storyboardMode.value; continueOnError.value = draft.continueOnError ?? true
     }
     if (!voiceProfileId.value && voices.value.length === 1) voiceProfileId.value = voices.value[0].id
   } catch (err) { error.value = err instanceof Error ? err.message : '系统音色加载失败' }
@@ -118,14 +118,13 @@ onMounted(async () => {
         <label class="setting"><span><Headphones/>系统音色 <b>*</b></span><select v-model="voiceProfileId"><option value="">请选择系统音色</option><option v-for="voice in voices" :key="voice.id" :value="voice.id">{{ voice.name }} · {{ voice.tts_engine }}</option></select></label>
         <div class="setting"><span><Folder/>输出目录 <b>*</b></span><div class="path-input"><input v-model="outputDir" readonly placeholder="请选择输出文件夹"/><button @click="chooseFolder('output')"><Folder :size="16"/></button></div></div>
         <label class="setting"><span><Scissors/>切段方式 <b>*</b></span><select v-model="segmentationMode"><option value="ai">AI 自动切段（推荐）</option><option value="newline">按换行切段</option></select></label>
-        <label class="setting"><span><Monitor/>视频模式 <b>*</b></span><select v-model="videoMode"><option value="ai_semantic">AI 语义视频拼接</option><option value="ai_generated_images">本地 AI 分镜图片视频</option><option value="landscape">风景素材拼接</option><option value="none">仅配音与字幕</option></select></label>
+        <label class="setting"><span><Monitor/>视频模式 <b>*</b></span><select v-model="videoMode"><option value="ai_semantic">AI 语义视频拼接</option><option value="ai_generated_images">本地 AI 分镜图片视频</option><option value="landscape">风景素材拼接</option><option value="none">仅生成完整配音</option></select></label>
         <label class="setting" v-if="videoMode==='ai_semantic'||videoMode==='ai_generated_images'"><span><Sparkles/>分镜方式 <b>*</b></span><select v-model="storyboardMode"><option value="ai">AI 自动分镜（推荐）</option><option value="segments">按逐字稿切段生成</option></select></label>
-        <label class="setting" v-if="videoMode==='ai_semantic'||videoMode==='ai_generated_images'"><span><UserCheck/>审核方式 <b>*</b></span><select v-model="semanticReviewMode"><option value="automatic">自动通过（无需人工审核）</option><option value="manual">人工审核</option></select></label>
         <div class="setting wide" v-if="videoMode==='landscape'"><span><Image/>风景素材目录 <b>*</b></span><div class="path-input"><input v-model="mediaVideoDir" readonly placeholder="请选择素材文件夹"/><button @click="chooseFolder('video')"><Folder :size="16"/></button></div></div>
         <label class="setting continue"><span><AlertCircle/>失败后是否继续 <b>*</b></span><select v-model="continueOnError"><option :value="true">继续处理后续项目</option><option :value="false">立即暂停批次</option></select></label>
       </div><div class="config-tip"><AlertCircle :size="17"/><span><strong>配置提示</strong>以上配置将应用于本批次的所有项目，创建后不可修改。请确保输出目录拥有足够的可用空间。</span></div></article>
 
-      <article class="create-card confirm-card"><h2><i>3</i>确认和开始</h2><div class="summary-box"><h3>批次概要</h3><dl><dt>项目数量</dt><dd class="accent">{{ scripts.length }} 个</dd><dt>脚本文件</dt><dd>{{ scripts.length }} 个文件</dd><dt>总字符数（估算）</dt><dd>约 {{ estimatedCharacters.toLocaleString() }} 字</dd><dt>预计磁盘占用</dt><dd>约 {{ estimatedStorage }} GB</dd></dl><h3>配置摘要</h3><dl><dt>系统音色</dt><dd>{{ selectedVoice?.name || '未选择' }}</dd><dt>输出目录</dt><dd class="path">{{ outputDir || '未选择' }}</dd><dt>切段方式</dt><dd>{{ segmentationMode==='ai'?'AI 自动切段':'按换行切段' }}</dd><dt>视频模式</dt><dd>{{ videoMode==='none'?'仅配音与字幕':videoMode==='landscape'?'风景素材拼接':'AI 语义生产' }}</dd><dt>审核方式</dt><dd>{{ semanticReviewMode==='automatic'?'自动通过':'人工审核' }}</dd></dl><h3>预计磁盘占用 <b>约 {{ estimatedStorage }} GB</b></h3><div class="storage-bar"><i :style="{width: `${Math.min(100,Number(estimatedStorage))}%`}"></i></div><div class="ready-state" :class="{ ready }"><Check :size="17"/>{{ ready ? '已就绪，可以创建' : '请完成左侧必填配置' }}</div></div></article>
+      <article class="create-card confirm-card"><h2><i>3</i>确认和开始</h2><div class="summary-box"><h3>批次概要</h3><dl><dt>项目数量</dt><dd class="accent">{{ scripts.length }} 个</dd><dt>脚本文件</dt><dd>{{ scripts.length }} 个文件</dd><dt>总字符数（估算）</dt><dd>约 {{ estimatedCharacters.toLocaleString() }} 字</dd><dt>预计磁盘占用</dt><dd>约 {{ estimatedStorage }} GB</dd></dl><h3>配置摘要</h3><dl><dt>系统音色</dt><dd>{{ selectedVoice?.name || '未选择' }}</dd><dt>输出目录</dt><dd class="path">{{ outputDir || '未选择' }}</dd><dt>切段方式</dt><dd>{{ segmentationMode==='ai'?'AI 自动切段':'按换行切段' }}</dd><dt>视频模式</dt><dd>{{ videoMode==='none'?'仅生成完整配音':videoMode==='landscape'?'风景素材拼接':'AI 语义生产' }}</dd><dt>执行方式</dt><dd>全自动，无人工审核</dd></dl><h3>预计磁盘占用 <b>约 {{ estimatedStorage }} GB</b></h3><div class="storage-bar"><i :style="{width: `${Math.min(100,Number(estimatedStorage))}%`}"></i></div><div class="ready-state" :class="{ ready }"><Check :size="17"/>{{ ready ? '已就绪，可以创建' : '请完成左侧必填配置' }}</div></div></article>
     </div>
     <footer class="create-actions"><RouterLink to="/batches">取消</RouterLink><button class="draft" @click="saveDraft">保存草稿</button><button class="submit" :disabled="saving || selectingFolder!==null" @click="submit"><Play :size="18"/>{{ saving?'正在创建项目…':'创建并开始' }}</button></footer>
   </section>

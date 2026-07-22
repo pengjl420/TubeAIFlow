@@ -5,7 +5,6 @@ import { useRoute } from 'vue-router'
 import { API_BASE_URL } from '../../api/client'
 import { mergeProjectAudio } from '../../api/exports'
 import {
-  createSrt,
   getTtsStatus,
   listSegments,
   regenerateSegmentTts,
@@ -49,7 +48,6 @@ const loading = ref(false)
 const ttsRunning = ref(false)
 const ttsRequestActive = ref(false)
 const mergingAudio = ref(false)
-const generatingSubtitles = ref(false)
 const composingVideo = ref(false)
 const oneClickGenerating = ref(false)
 const savingFilename = ref(false)
@@ -88,7 +86,7 @@ const filteredSegments = computed(() => {
 const videoProgress = ref<VideoProgress | null>(null)
 const projectTask = ref<ProjectTaskStatus | null>(null)
 const hasRunningGeneration = computed(() => (
-  ttsRunning.value || mergingAudio.value || generatingSubtitles.value
+  ttsRunning.value || mergingAudio.value
   || composingVideo.value || oneClickGenerating.value
 ))
 
@@ -232,13 +230,6 @@ const finalAudioPath = computed(() => {
   return outputs.value?.final_audio_path || fallbackFinalAudioPath()
 })
 
-const finalSrtPath = computed(() => {
-  if (!hasOutputFilename.value) return ''
-  const dir = outputs.value?.output_dir || project.value?.output_dir || ''
-  if (!dir || !outputFilename.value.trim()) return outputs.value?.final_srt_path || ''
-  return outputs.value?.final_srt_path || `${dir.replace(/[\\/]$/, '')}\\${outputFilename.value.trim()}.srt`
-})
-
 const mediaVideoDir = computed(() => {
   const value = projectConfig.value.media_video_dir
   return typeof value === 'string' ? value : ''
@@ -252,21 +243,12 @@ const videoMode = computed(() => {
 const includeVideo = computed(() => videoMode.value !== 'none')
 const usesAiSemanticVideo = computed(() => videoMode.value === 'ai_semantic' || videoMode.value === 'ai_generated_images')
 const usesLandscapeVideo = computed(() => videoMode.value === 'landscape')
-const usesFcpxml = computed(() => projectConfig.value.video_output_format === 'fcpxml')
-const hasTimelineOutput = computed(() => includeVideo.value || usesFcpxml.value)
 
 const finalVideoPath = computed(() => {
   if (!hasOutputFilename.value) return ''
   const dir = outputs.value?.output_dir || project.value?.output_dir || ''
   if (!dir || !outputFilename.value.trim()) return outputs.value?.final_video_path || ''
   return outputs.value?.final_video_path || `${dir.replace(/[\\/]$/, '')}\\${outputFilename.value.trim()}.mp4`
-})
-
-const finalFcpxmlPath = computed(() => {
-  if (!hasOutputFilename.value) return ''
-  const dir = outputs.value?.output_dir || project.value?.output_dir || ''
-  if (!dir || !outputFilename.value.trim()) return outputs.value?.final_fcpxml_path || ''
-  return outputs.value?.final_fcpxml_path || `${dir.replace(/[\\/]$/, '')}\\${outputFilename.value.trim()}.fcpxml`
 })
 
 const projectStatusLabel = computed(() => {
@@ -295,19 +277,17 @@ const workflowSteps = computed(() => {
   const scriptReady = scriptCharacterCount.value > 0 || segmentReady
   const voiceReady = ttsStatus.value.total > 0 && ttsStatus.value.completed >= ttsStatus.value.total
   const audioReady = Boolean(finalAudioPath.value && outputs.value?.final_audio_path)
-  const videoReady = usesFcpxml.value
-    ? outputs.value?.final_fcpxml_exists === true
-    : outputs.value?.final_video_exists === true
+  const videoReady = outputs.value?.final_video_exists === true
   const videoActive = composingVideo.value || Boolean(
     projectTask.value?.status === 'running'
-    && ['storyboard', 'asset_search', 'asset_review', 'image_generation', 'image_review', 'scene_render', 'final_render', 'quality_check', 'quality_review', 'fcpxml_export'].includes(projectTask.value.stage || ''),
+    && ['storyboard', 'asset_search', 'asset_review', 'image_generation', 'image_review', 'scene_render', 'final_render', 'quality_check', 'quality_review', 'fcpxml_export', 'prproj_export', 'editable_export'].includes(projectTask.value.stage || ''),
   )
   return [
     { label: '脚本', caption: scriptCharacterCount.value ? `${scriptCharacterCount.value} 字` : scriptReady ? '已保存' : '等待输入', state: scriptReady ? 'done' : 'current' },
     { label: '切段', caption: segmentReady ? `${segments.value.length} 段` : '尚未生成', state: segmentReady ? 'done' : scriptCharacterCount.value ? 'current' : 'pending' },
     { label: '配音', caption: voiceReady ? '音频已就绪' : ttsRunning.value ? '正在生成' : '等待生成', state: voiceReady ? 'done' : ttsRunning.value ? 'current' : 'pending' },
-    { label: '字幕', caption: audioReady ? '已生成' : '等待合并', state: audioReady ? 'done' : mergingAudio.value || generatingSubtitles.value ? 'current' : 'pending' },
-    { label: usesFcpxml.value ? 'FCPXML' : '成片', caption: hasTimelineOutput.value ? (videoReady ? '已输出' : '等待生成') : '未启用', state: videoReady ? 'done' : videoActive ? 'current' : 'pending' },
+    { label: '完整配音', caption: audioReady ? '已生成' : '等待合并', state: audioReady ? 'done' : mergingAudio.value ? 'current' : 'pending' },
+    { label: '成片', caption: includeVideo.value ? (videoReady ? '已输出' : '等待生成') : '未启用', state: videoReady ? 'done' : videoActive ? 'current' : 'pending' },
   ]
 })
 
@@ -442,18 +422,20 @@ function taskStageLabel(task: ProjectTaskStatus) {
     segmenting: '生成切段',
     tts: '生成分段音频',
     audio_merge: '合并完整音频',
-    subtitles: '生成字幕',
+    subtitles: '准备视频（兼容旧任务）',
     video: '生成视频',
     storyboard: '生成视觉分镜',
     asset_search: '检索语义素材',
-    asset_review: '等待素材审核',
+    asset_review: '自动选择素材',
     image_generation: '本地生成分镜图片',
-    image_review: '等待图片审核',
+    image_review: '自动选择图片',
     scene_render: '渲染场景视频',
     final_render: '合成最终视频',
-    quality_check: '执行质量检查',
-    quality_review: '等待质量复核',
+    quality_check: '完成生成（兼容旧任务）',
+    quality_review: '完成生成（兼容旧任务）',
     fcpxml_export: '生成 FCPXML 工程',
+    prproj_export: '生成 PRPROJ 工程',
+    editable_export: '生成双格式可编辑工程',
     completed: '生成完成',
   }
   return labels[task.stage || ''] || task.stage || '准备执行'
@@ -465,7 +447,6 @@ function applyProjectTaskStatus(task: ProjectTaskStatus) {
   oneClickGenerating.value = active
   ttsRunning.value = task.status === 'running' && task.stage === 'tts'
   mergingAudio.value = task.status === 'running' && task.stage === 'audio_merge'
-  generatingSubtitles.value = task.status === 'running' && task.stage === 'subtitles'
   composingVideo.value = task.status === 'running' && task.stage === 'video'
 
   if (active) {
@@ -498,7 +479,7 @@ function applyProjectTaskStatus(task: ProjectTaskStatus) {
   if (task.status === 'failed') error.value = task.error_message || '一键生成失败'
   if (task.status === 'cancelled') message.value = '任务已取消'
   if (task.status === 'paused') message.value = '任务已暂停；如果它属于批次，请从批次详情页恢复执行。'
-  if (task.status === 'review_required') message.value = task.error_message || 'AI 语义视频正在等待人工复核。'
+  if (task.status === 'review_required') error.value = task.error_message || '旧版任务停在人工复核阶段，请重新启动一键生成。'
 }
 
 async function refreshProjectTaskStatus() {
@@ -654,7 +635,7 @@ async function submitScript() {
       eyebrow: '修改影响提示',
       title: '保存修改后的逐字稿？',
       description: '当前项目已经生成了下游内容，修改逐字稿后需要重新确认生产结果。',
-      detail: '可能失效：配音分段、已生成音频、字幕时间轴、视觉分镜、已分配素材和已渲染场景。',
+      detail: '可能失效：配音分段、已生成音频、视觉分镜、已分配素材和已渲染场景。',
       confirmText: '仅保存文本',
       tone: 'warning',
     })
@@ -717,17 +698,12 @@ async function mergeAudio() {
   try {
     await ensureFilenameSaved()
     const result = await mergeProjectAudio(projectId)
-    message.value = '正在生成字幕...'
-    mergingAudio.value = false
-    generatingSubtitles.value = true
-    await createSrt(projectId)
     await refreshAfterChange()
-    message.value = `完整音频和字幕已生成：${result.path}`
+    message.value = `完整音频已生成：${result.path}`
   } catch (err) {
     error.value = err instanceof Error ? err.message : '完整音频合并失败'
   } finally {
     mergingAudio.value = false
-    generatingSubtitles.value = false
   }
 }
 
@@ -735,7 +711,7 @@ async function composeVideo() {
   error.value = ''
   message.value = ''
   if (!mediaVideoDir.value) {
-    error.value = '请先在项目设置中选择素材视频目录'
+    error.value = '当前项目缺少风景素材目录，请重新创建项目并选择素材目录'
     return
   }
   composingVideo.value = true
@@ -767,7 +743,7 @@ async function oneClickGenerate() {
     return
   }
   if (usesLandscapeVideo.value && !mediaVideoDir.value) {
-    error.value = '请先在项目设置中选择素材视频目录后再一键生成'
+    error.value = '当前项目缺少风景素材目录，请重新创建项目并选择素材目录'
     return
   }
 
@@ -892,7 +868,7 @@ onBeforeUnmount(() => {
         </section>
       </div>
 
-      <div class="narration-impact-note">⚠ 修改逐字稿后会影响配音、字幕、分镜、素材与渲染等下游环节，请确认无误后再生成。</div>
+      <div class="narration-impact-note">⚠ 修改逐字稿后会影响配音、分镜、素材与渲染等下游环节，请确认无误后再生成。</div>
 
       <section class="taf-card narration-segments-card">
         <header>
@@ -916,17 +892,14 @@ onBeforeUnmount(() => {
       <section class="taf-card narration-audio-dock">
         <div><strong>完整音频区</strong><span>总时长 {{ formatDuration(audioDurationSeconds || 0) }}</span></div>
         <AudioPlayer v-if="finalAudioPath" :src="`${API_BASE_URL}/projects/${projectId}/outputs/file?path=${encodeURIComponent(finalAudioPath)}`" />
-        <div class="audio-dock-actions"><button class="secondary-button" :disabled="mergingAudio" @click="mergeAudio">重新合并</button><RouterLink class="primary-link" :to="`/projects/${projectId}/subtitles`">进入字幕校对 →</RouterLink></div>
+        <div class="audio-dock-actions"><button class="secondary-button" :disabled="mergingAudio" @click="mergeAudio">重新合并</button></div>
       </section>
     </div>
     <div class="project-hero">
       <div>
         <span class="section-eyebrow">SCRIPT & NARRATION</span>
-        <div class="project-title-row"><h1>逐字稿与配音</h1><span class="status-pill" :class="projectStatusTone"><i></i>{{ projectStatusLabel }}</span></div>
-        <p>编辑逐字稿、确认切段，并逐段生成可恢复的完整配音。</p>
-      </div>
-      <div class="page-title-actions">
-        <RouterLink v-if="finalSrtPath" class="primary-link" :to="`/projects/${project.id}/subtitles`">进入字幕校对</RouterLink>
+        <div class="project-title-row"><h1>一键生成</h1><span class="status-pill" :class="projectStatusTone"><i></i>{{ projectStatusLabel }}</span></div>
+        <p>输入逐字稿后自动完成配音、视觉素材与最终成片；仅在流程无法继续时提示处理。</p>
       </div>
     </div>
 
@@ -985,7 +958,7 @@ onBeforeUnmount(() => {
           <button class="text-button" :disabled="oneClickGenerating" @click="submitScript">保存脚本</button>
           <button class="text-button" :disabled="oneClickGenerating" @click="splitSegments">生成切段</button>
           <button class="text-button" :disabled="ttsRunning || oneClickGenerating" @click="runTts">{{ ttsRunning ? 'TTS 生成中' : '开始 TTS' }}</button>
-          <button class="text-button" :disabled="mergingAudio || generatingSubtitles || oneClickGenerating" @click="mergeAudio">{{ generatingSubtitles ? '字幕生成中' : mergingAudio ? '合并中' : '合并音频字幕' }}</button>
+          <button class="text-button" :disabled="mergingAudio || oneClickGenerating" @click="mergeAudio">{{ mergingAudio ? '合并中' : '合并完整音频' }}</button>
           <button v-if="usesLandscapeVideo" class="text-button" :disabled="composingVideo || oneClickGenerating" @click="composeVideo">{{ composingVideo ? '视频生成中' : '单独生成纯风景视频' }}</button>
           <button
             v-if="hasRunningGeneration"
@@ -1032,9 +1005,9 @@ onBeforeUnmount(() => {
         <div class="execution-intro">
           <span class="section-eyebrow">PRODUCTION</span>
           <h2>{{ hasRunningGeneration ? '正在执行生产任务' : '准备开始生成' }}</h2>
-          <p v-if="usesAiSemanticVideo">将依次完成切段、配音、字幕与 AI 语义视频流程，并在素材审核阶段等待确认。</p>
-          <p v-else-if="usesLandscapeVideo">将依次完成切段、配音、字幕与纯风景素材拼接。</p>
-          <p v-else>将依次完成切段、配音与字幕生成。</p>
+          <p v-if="usesAiSemanticVideo">将自动完成切段、配音、视觉分镜、素材选择和最终视频合成。</p>
+          <p v-else-if="usesLandscapeVideo">将自动完成切段、配音与纯风景素材视频合成。</p>
+          <p v-else>将自动完成切段、配音和完整音频合并。</p>
           <button class="primary-button primary-action" :disabled="oneClickGenerating || readingScriptFile" @click="oneClickGenerate">
             <span>{{ oneClickGenerating ? '●' : '▶' }}</span>
             {{ oneClickGenerating ? '正在一键生成' : '开始一键生成' }}
@@ -1100,8 +1073,7 @@ onBeforeUnmount(() => {
           <dl class="output-path-list">
             <div><dt>项目文件夹</dt><dd>{{ outputs?.work_dir || outputs?.output_dir || project.output_dir || '暂无输出目录' }}</dd></div>
             <div><dt>完整音频</dt><dd>{{ finalAudioPath || '生成后自动创建' }}</dd></div>
-            <div><dt>字幕</dt><dd>{{ finalSrtPath || '生成后自动创建' }}</dd></div>
-            <div v-if="hasTimelineOutput"><dt>{{ usesFcpxml ? 'FCPXML 工程' : '最终视频' }}</dt><dd>{{ usesFcpxml ? (finalFcpxmlPath || '生成后自动创建') : (finalVideoPath || '生成后自动创建') }}</dd></div>
+            <div v-if="includeVideo"><dt>最终视频</dt><dd>{{ finalVideoPath || '生成后自动创建' }}</dd></div>
           </dl>
         </div>
       </aside>

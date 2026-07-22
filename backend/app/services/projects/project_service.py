@@ -17,6 +17,8 @@ from app.infrastructure.recycle_bin import move_existing_to_recycle_bin
 from app.infrastructure.project_layout import (
     ensure_project_dirs,
     get_final_audio_path,
+    get_final_fcpxml_path,
+    get_final_prproj_path,
     get_final_srt_path,
     get_final_video_path,
     get_legacy_project_work_dir,
@@ -47,7 +49,14 @@ SEMANTIC_REVIEW_MANUAL = "manual"
 SEMANTIC_REVIEW_AUTO = "automatic"
 VIDEO_OUTPUT_MP4 = "mp4"
 VIDEO_OUTPUT_FCPXML = "fcpxml"
-SUPPORTED_VIDEO_OUTPUT_FORMATS = {VIDEO_OUTPUT_MP4, VIDEO_OUTPUT_FCPXML}
+VIDEO_OUTPUT_PRPROJ = "prproj"
+VIDEO_OUTPUT_EDITABLE_BOTH = "editable_both"
+SUPPORTED_VIDEO_OUTPUT_FORMATS = {
+    VIDEO_OUTPUT_MP4,
+    VIDEO_OUTPUT_FCPXML,
+    VIDEO_OUTPUT_PRPROJ,
+    VIDEO_OUTPUT_EDITABLE_BOTH,
+}
 SUPPORTED_SEMANTIC_REVIEW_MODES = {
     SEMANTIC_REVIEW_MANUAL,
     SEMANTIC_REVIEW_AUTO,
@@ -187,7 +196,7 @@ def get_project_video_mode(project: Project) -> str:
 
 
 def normalize_semantic_review_mode(mode: str | None) -> str:
-    normalized = str(mode or SEMANTIC_REVIEW_MANUAL).strip().lower()
+    normalized = str(mode or SEMANTIC_REVIEW_AUTO).strip().lower()
     if normalized not in SUPPORTED_SEMANTIC_REVIEW_MODES:
         raise ValueError("Unsupported semantic video review mode")
     return normalized
@@ -222,7 +231,7 @@ def get_storyboard_mode(project: Project) -> str:
 
 
 def normalize_video_output_format(value: str | None) -> str:
-    normalized = str(value or VIDEO_OUTPUT_FCPXML).strip().lower()
+    normalized = str(value or VIDEO_OUTPUT_MP4).strip().lower()
     if normalized not in SUPPORTED_VIDEO_OUTPUT_FORMATS:
         raise ValueError(f"Unsupported video output format: {value}")
     return normalized
@@ -230,8 +239,7 @@ def normalize_video_output_format(value: str | None) -> str:
 
 def get_video_output_format(project: Project) -> str:
     configured = load_project_config(project).get("video_output_format")
-    # Projects created before output selection existed rendered MP4. Preserve
-    # that behavior while making newly saved projects default to FCPXML.
+    # The simplified flow always delivers a rendered MP4.
     if configured is None:
         return VIDEO_OUTPUT_MP4
     return normalize_video_output_format(configured)
@@ -322,6 +330,8 @@ def _project_artifact_paths(project: Project) -> list[Path]:
         output_root / f"{stem}.mp3",
         get_final_srt_path(project, settings.workspace_dir),
         get_final_video_path(project, settings.workspace_dir),
+        get_final_fcpxml_path(project, settings.workspace_dir),
+        get_final_prproj_path(project, settings.workspace_dir),
     ]
     return list(dict.fromkeys(paths))
 

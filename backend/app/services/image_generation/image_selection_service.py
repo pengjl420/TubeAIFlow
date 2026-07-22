@@ -149,7 +149,12 @@ def score_scene_images(
     }
 
 
-def auto_assign_best_image(session: Session, project: Project, scene_id: str) -> dict:
+def auto_assign_best_image(
+    session: Session,
+    project: Project,
+    scene_id: str,
+    review_required: bool = False,
+) -> dict:
     scene = session.get(VisualScene, scene_id)
     if not scene or scene.project_id != project.id:
         raise ValueError("视觉场景不存在")
@@ -183,33 +188,22 @@ def auto_assign_best_image(session: Session, project: Project, scene_id: str) ->
     if not candidates:
         return {"selected_assignment_ids": [], **coverage, "reason": "没有通过质量检查的候选图"}
 
-    settings = get_settings()
     best = candidates[0]
     runner_up = candidates[1] if len(candidates) > 1 else None
     margin = best.total_score - runner_up.total_score if runner_up else 1.0
-    if best.total_score < settings.image_selection_min_total_score:
-        return {"selected_assignment_ids": [], **coverage, "reason": "最高综合评分未达自动选图阈值"}
-    if runner_up and margin < settings.image_selection_min_score_margin:
-        return {
-            "selected_assignment_ids": [],
-            **coverage,
-            "reason": (
-                f"前两名分差仅 {margin:.1%}，低于自动选择阈值 "
-                f"{settings.image_selection_min_score_margin:.1%}"
-            ),
-        }
-
     result = retrieval_service.assign_candidate(
         session,
         project,
         scene.id,
         SceneAssignmentRequest(candidate_id=best.id),
-        auto_approved=True,
+        auto_approved=not review_required,
+        review_required=review_required,
     )
     assignment = session.get(SceneAssignment, result["id"])
     if assignment:
+        review_label = "，等待人工复核" if review_required else "，自动审核通过"
         assignment.selection_reason = (
-            f"系统综合评分自动选图：总分 {best.total_score:.1%}，"
+            f"系统综合评分自动选图{review_label}：总分 {best.total_score:.1%}，"
             f"语义 {best.semantic_score:.1%}，技术质量 {best.technical_score:.1%}，"
             f"领先候选 {margin:.1%}"
         )

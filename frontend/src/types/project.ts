@@ -29,6 +29,6 @@ export interface Project {
 
 export type VideoGenerationMode = 'none' | 'landscape' | 'ai_semantic' | 'ai_generated_images'
 export type SemanticReviewMode = 'manual' | 'automatic'
-export type VideoOutputFormat = 'mp4' | 'fcpxml'
+export type VideoOutputFormat = 'mp4' | 'fcpxml' | 'prproj' | 'editable_both'
 export type SegmentationMode = 'newline' | 'ai'
 export type StoryboardMode = 'ai' | 'segments'

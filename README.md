@@ -14,7 +14,7 @@ Current scope:
 - Turn approved images into deterministic FFmpeg motion shots
 - Render resumable scene videos and a video-only `visual_track.mp4`
 - Mix the visual track with narration and run project-level QA
-- Export project manifests, render reports, and quality reports
+- Export FCPXML editable timelines and Premiere PRPROJ projects, plus manifests and reports
 
 ## Local URLs
 
@@ -63,6 +63,7 @@ npm run dev
 - API keys are never returned to the frontend after they are saved.
 - Generated project files live under `backend/workspace/projects/{project_id}` by default.
 - FFmpeg, ffprobe, Qwen3-TTS, CosyVoice, DeepSeek, workspace, host, and port are configured on the System Settings page.
+- PRPROJ export first creates FCPXML and then uses Adobe Premiere Pro's `openFCPXML()` conversion API. Configure the Premiere executable under **System Settings → Basic & Storage** when it is not detected automatically. FCPXML export does not require Premiere.
 - AI image assignments support stable automatic motion or explicit zoom, pan, portrait, environment, breathing, and static presets. Updating one assignment only invalidates the affected scene render cache.
 - Every intermediate scene and `renders/visual_track.mp4` is validated with ffprobe and must contain exactly one H.264 video stream, 30 FPS CFR, yuv420p, and no audio stream under the default render profile.
 - Project render settings may be stored in `config.render.video` and `config.render.policy`; missing values use the validated 1920×1080, 30 FPS defaults.

@@ -12,6 +12,7 @@ from app.infrastructure.file_storage import ensure_inside_any, project_dir
 from app.infrastructure.project_layout import (
     get_final_audio_path,
     get_final_fcpxml_path,
+    get_final_prproj_path,
     get_final_srt_path,
     get_final_video_path,
     get_legacy_project_work_dir,
@@ -43,7 +44,7 @@ class ProjectSettingsRequest(BaseModel):
     include_video: bool = False
     video_mode: str | None = None
     semantic_review_mode: str | None = None
-    video_output_format: str | None = project_service.VIDEO_OUTPUT_FCPXML
+    video_output_format: str | None = project_service.VIDEO_OUTPUT_MP4
     tts_engine: str = project_service.DEFAULT_TTS_ENGINE
     reference_audio_text: str = ""
     voice_profile_id: str = ""
@@ -79,8 +80,8 @@ def create_project(
     media_video_dir: str = Form(""),
     include_video: bool = Form(False),
     video_mode: str | None = Form(None),
-    semantic_review_mode: str | None = Form(None),
-    video_output_format: str | None = Form(project_service.VIDEO_OUTPUT_FCPXML),
+    semantic_review_mode: str | None = Form(project_service.SEMANTIC_REVIEW_AUTO),
+    video_output_format: str | None = Form(project_service.VIDEO_OUTPUT_MP4),
     tts_engine: str = Form(project_service.DEFAULT_TTS_ENGINE),
     reference_audio_text: str = Form(""),
     voice_profile_id: str = Form(""),
@@ -169,6 +170,7 @@ def get_project_outputs(project_id: str, session: Session = Depends(get_session)
     final_srt_path = get_final_srt_path(project, get_settings().workspace_dir)
     final_video_path = get_final_video_path(project, get_settings().workspace_dir)
     final_fcpxml_path = get_final_fcpxml_path(project, get_settings().workspace_dir)
+    final_prproj_path = get_final_prproj_path(project, get_settings().workspace_dir)
     output_files = []
     seen_paths: set[Path] = set()
     if work_dir.is_dir():
@@ -186,7 +188,7 @@ def get_project_outputs(project_id: str, session: Session = Depends(get_session)
                     "modified_at": stat.st_mtime,
                 }
             )
-    for final_path in (final_audio_path, final_video_path, final_fcpxml_path, final_srt_path):
+    for final_path in (final_audio_path, final_video_path, final_fcpxml_path, final_prproj_path, final_srt_path):
         if not final_path.is_file() or final_path.resolve() in seen_paths:
             continue
         stat = final_path.stat()
@@ -206,10 +208,12 @@ def get_project_outputs(project_id: str, session: Session = Depends(get_session)
         "final_srt_path": str(final_srt_path),
         "final_video_path": str(final_video_path),
         "final_fcpxml_path": str(final_fcpxml_path),
+        "final_prproj_path": str(final_prproj_path),
         "final_audio_exists": final_audio_path.is_file(),
         "final_srt_exists": final_srt_path.is_file(),
         "final_video_exists": final_video_path.is_file(),
         "final_fcpxml_exists": final_fcpxml_path.is_file(),
+        "final_prproj_exists": final_prproj_path.is_file(),
         "files": output_files,
     })
 

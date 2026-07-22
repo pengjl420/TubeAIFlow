@@ -53,6 +53,7 @@ const diagnostics = computed(() => [
   ['Python 环境', true, '运行正常'],
   ['FFmpeg', !!ffmpegStatus.value?.installed, ffmpegStatus.value?.version || '未检测到'],
   ['ffprobe', !!ffmpegStatus.value?.ffprobe_path, ffmpegStatus.value?.ffprobe_path || '未检测到'],
+  ['Premiere Pro', !!settings.value?.premiere_pro_path, settings.value?.premiere_pro_path || '未配置；PRPROJ 导出不可用'],
   ['GPU 驱动', true, 'CUDA 可用'],
   ['网络访问', providerStatuses.value.some(p => p.configured), providerStatuses.value.some(p => p.configured) ? '已配置' : '待配置'],
   ['存储读写', !!settings.value?.workspace_dir, settings.value?.workspace_dir || '未配置'],
@@ -169,6 +170,7 @@ onMounted(load)
             <label><span>工作目录</span><div class="input-action"><input v-model="settings.workspace_dir" /><button @click="chooseWorkspace">浏览</button></div></label>
             <label><span>FFmpeg 路径</span><input v-model="settings.ffmpeg_path" /></label>
             <label><span>ffprobe 路径</span><input v-model="settings.ffprobe_path" /></label>
+            <label><span>Premiere Pro 路径</span><input v-model="settings.premiere_pro_path" placeholder="例如 C:\Program Files\Adobe\Adobe Premiere Pro 2025\Adobe Premiere Pro.exe" /><small>生成真实 PRPROJ 工程时使用；留空会尝试自动检测。</small></label>
           </div></article>
           <article class="setting-card compact"><h3><RotateCcw /> 空间与清理策略</h3><div class="inline-settings"><label>缓存最长保留 <input type="number" value="120" /> GB</label><label class="switch-row">临时文件自动清理 <input type="checkbox" checked /></label><label class="switch-row">启动时清理残留任务 <input type="checkbox" checked /></label></div></article>
           <article class="setting-card compact"><h3><ShieldCheck /> 健康检查</h3><div class="health-list"><p><span>FFmpeg</span><b :class="ffmpegStatus?.installed ? 'ok' : 'bad'">{{ ffmpegStatus?.installed ? '可用' : '不可用' }}</b><em>{{ ffmpegStatus?.version || '--' }}</em></p><p><span>工作目录读写</span><b class="ok">正常</b><em>读写正常</em></p><p><span>剩余空间</span><b class="ok">1.26 TB</b><em>共 2.00 TB</em></p></div></article>

@@ -5,7 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   assetPreviewUrl,
   assignSceneCandidate,
-  confirmSceneFallbackAssignments,
+  confirmSceneAssignments,
   deleteSceneAssignment,
   getProjectAssignmentCoverage,
   generateSceneImages,
@@ -52,7 +52,7 @@ const updatingId = ref('')
 const assigningId = ref('')
 const editingTrack = ref(false)
 const savingMotionId = ref('')
-const confirmingFallback = ref(false)
+const confirmingScene = ref(false)
 const uploadInput = ref<HTMLInputElement | null>(null)
 const uploadingSceneAsset = ref(false)
 const continuing = ref(false)
@@ -407,23 +407,23 @@ async function moveTrackItem(index: number, direction: -1 | 1) {
   }
 }
 
-async function confirmFallbackTrack() {
+async function confirmSceneTrack() {
   if (!selectedScene.value) return
-  confirmingFallback.value = true
+  confirmingScene.value = true
   error.value = ''
   try {
-    const track = await confirmSceneFallbackAssignments(projectId, selectedScene.value.id)
+    const track = await confirmSceneAssignments(projectId, selectedScene.value.id)
     assignments.value = track.assignments
     coverageByScene.value = { ...coverageByScene.value, [selectedScene.value.id]: track.coverage }
     selectedScene.value.status = track.coverage.complete ? 'assigned' : 'partially_assigned'
-    message.value = '本场景的自动兜底镜头已通过人工复核'
+    message.value = '本分镜的全部待审核素材已通过人工复核'
     if (track.coverage.complete && !track.coverage.review_required) {
       await advanceAfterSceneCompleted(selectedScene.value.id, message.value)
     }
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '自动兜底确认失败'
+    error.value = err instanceof Error ? err.message : '分镜素材确认失败'
   } finally {
-    confirmingFallback.value = false
+    confirmingScene.value = false
   }
 }
 
@@ -630,11 +630,11 @@ onMounted(load)
           </div>
           <div v-if="selectedCoverage.review_required" class="auto-fallback-review">
             <p>
-              系统已自动添加兜底镜头。请检查内容相关性、重复情况与画面质量，再确认通过。
+              系统已为本分镜预选素材。请逐个检查语义相关性、人物/品牌/年代冲突、重复情况与画面质量，再确认通过。
               <template v-if="!selectedCoverage.complete">当前还缺 {{ formatMilliseconds(selectedCoverage.remaining_ms) }}。</template>
             </p>
-            <button class="primary-button" :disabled="confirmingFallback" @click="confirmFallbackTrack">
-              {{ confirmingFallback ? '确认中…' : '确认本场景自动兜底' }}
+            <button class="primary-button" :disabled="confirmingScene || !selectedCoverage.complete" @click="confirmSceneTrack">
+              {{ confirmingScene ? '确认中…' : '审核通过本分镜全部素材' }}
             </button>
           </div>
           <p v-else-if="!selectedCoverage.complete" class="track-guidance">
@@ -647,8 +647,8 @@ onMounted(load)
               <div class="shot-track-index">{{ index + 1 }}</div>
               <div class="shot-track-copy">
                 <strong>{{ assignment.media.filename }} · #{{ assignment.shot.shot_index }}</strong>
-                <span v-if="assignment.is_fallback && assignment.selection_reason.startsWith('系统自动兜底')" class="auto-fallback-badge">
-                  自动兜底{{ assignment.manual_confirmed ? ' · 已复核' : ' · 待复核' }}
+                <span v-if="!assignment.manual_confirmed || assignment.is_fallback" class="auto-fallback-badge">
+                  {{ assignment.is_fallback ? '自动兜底' : '系统预选' }}{{ assignment.manual_confirmed ? ' · 已复核' : ' · 待复核' }}
                 </span>
                 <small>
                   {{ formatMilliseconds(assignment.scene_offset_start_ms) }}—{{ formatMilliseconds(assignment.scene_offset_end_ms) }}

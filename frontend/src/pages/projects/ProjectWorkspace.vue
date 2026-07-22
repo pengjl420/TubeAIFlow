@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { Check, Settings2 } from 'lucide-vue-next'
+import { Check } from 'lucide-vue-next'
 
 import { getProject } from '../../api/projects'
 import { getProjectTaskStatus, type ProjectTaskStatus } from '../../api/tasks'
@@ -17,17 +17,16 @@ const items = computed(() => {
   const stage = task.value?.stage || ''
   const status = project.value?.status || ''
   const narrationDone = ['narration_ready', 'video_in_progress', 'review_required', 'completed'].includes(status)
-  const storyboardDone = ['asset_search', 'asset_review', 'scene_render', 'final_render', 'quality_check', 'quality_review', 'completed'].includes(stage) || ['review_required', 'completed'].includes(status)
-  const mediaDone = ['scene_render', 'final_render', 'quality_check', 'quality_review', 'completed'].includes(stage) || status === 'completed'
-  const renderDone = status === 'completed' || ['quality_check', 'quality_review', 'completed'].includes(stage)
+  const storyboardDone = ['asset_search', 'asset_review', 'scene_render', 'final_render', 'completed'].includes(stage) || status === 'completed'
+  const reviewDone = ['scene_render', 'visual_track', 'final_render', 'completed'].includes(stage) || status === 'completed'
+  const renderDone = status === 'completed'
   return [
-    { path: 'overview', label: '项目概览', hint: '全局状态与下一步', done: true },
-    { path: 'narration', label: '逐字稿与配音', hint: '脚本生成与配音合成', done: narrationDone },
-    { path: 'subtitles', label: '字幕与时间轴', hint: '字幕校对与时间轴', done: narrationDone },
-    { path: 'storyboard', label: '视觉分镜', hint: '镜头设计与分镜', done: storyboardDone },
-    { path: 'media-review', label: '素材审核', hint: '素材筛选与合规审核', done: mediaDone },
-    { path: 'render', label: '视频渲染', hint: '视频合成与渲染输出', done: renderDone },
-    { path: 'delivery', label: '质量与交付', hint: 'QA 检测与交付', done: status === 'completed' },
+    { path: 'overview', label: '项目概览', hint: '生成状态与结果', done: true },
+    { path: 'narration', label: '一键生成', hint: '脚本、配音与成片', done: narrationDone },
+    { path: 'storyboard', label: '视觉分镜', hint: '自动生成的镜头方案', done: storyboardDone },
+    { path: 'media-review', label: '素材审核', hint: '逐分镜确认图片与视频', done: reviewDone },
+    { path: 'render', label: '成片预览', hint: '查看最终视频', done: renderDone },
+    { path: 'delivery', label: '质量与交付', hint: '质量检查与工程导出', done: renderDone },
   ]
 })
 
@@ -47,9 +46,6 @@ onBeforeUnmount(() => { if (timer !== undefined) window.clearInterval(timer) })
         <RouterLink v-for="(item, index) in items" :key="item.path" :to="`/projects/${projectId}/${item.path}`" active-class="is-active">
           <span class="taf-step-number"><Check v-if="item.done && index > 0" :size="14" /> <template v-else>{{ index + 1 }}</template></span>
           <span><strong>{{ item.label }}</strong><small>{{ item.hint }}</small></span>
-        </RouterLink>
-        <RouterLink :to="`/projects/${projectId}/settings`" active-class="is-active">
-          <span class="taf-step-number">8</span><span><strong>项目设置</strong><small>项目信息与成员权限</small></span>
         </RouterLink>
       </nav>
     </aside>

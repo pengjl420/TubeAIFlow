@@ -28,7 +28,7 @@ class IntelligentVideoPipelineTests(unittest.TestCase):
         self.engine.dispose()
         self.temp.cleanup()
 
-    def test_asset_search_stops_at_manual_review_gate(self) -> None:
+    def test_asset_search_fails_only_when_no_automatic_assignment_is_possible(self) -> None:
         with Session(self.engine) as session:
             project, scene = self._project_with_scene(session)
             changed = []
@@ -36,12 +36,12 @@ class IntelligentVideoPipelineTests(unittest.TestCase):
                 patch.object(video_synthesis, "_ingest_configured_assets"),
                 patch.object(video_synthesis.retrieval_service, "search_scene_candidates") as search,
             ):
-                with self.assertRaises(video_synthesis.ReviewRequired) as raised:
+                with self.assertRaises(RuntimeError) as raised:
                     video_synthesis.run_video_synthesis(
                         session, project, "asset_search", changed.append
                     )
 
-            self.assertEqual(raised.exception.stage, "asset_review")
+            self.assertIn("需要审核素材", str(raised.exception))
             self.assertEqual(changed, ["asset_review"])
             search.assert_called_once_with(session, project, scene.id)
 
@@ -60,15 +60,17 @@ class IntelligentVideoPipelineTests(unittest.TestCase):
                     "auto_assign_qualified_candidates",
                 ) as auto_assign,
             ):
-                with self.assertRaises(video_synthesis.ReviewRequired):
+                with self.assertRaises(RuntimeError):
                     video_synthesis.run_video_synthesis(
                         session, project, "asset_search", changed.append
                     )
 
-            auto_assign.assert_called_once_with(session, project, scene.id)
+            auto_assign.assert_called_once_with(
+                session, project, scene.id, review_required=False
+            )
             self.assertEqual(changed, ["asset_review"])
 
-    def test_generated_image_mode_uses_image_generation_review_gate(self) -> None:
+    def test_generated_image_mode_auto_selects_before_failing_without_an_image(self) -> None:
         with Session(self.engine) as session:
             project, _scene = self._project_with_scene(session)
             project.config_json = '{"video_mode":"ai_generated_images","semantic_review_mode":"manual"}'
@@ -84,15 +86,22 @@ class IntelligentVideoPipelineTests(unittest.TestCase):
                     video_synthesis.image_selection_service,
                     "score_project_images",
                 ) as score,
+                patch.object(
+                    video_synthesis.image_selection_service,
+                    "auto_assign_best_image",
+                ) as auto_assign,
             ):
-                with self.assertRaises(video_synthesis.ReviewRequired) as raised:
+                with self.assertRaises(RuntimeError) as raised:
                     video_synthesis.run_video_synthesis(
                         session, project, "image_generation", changed.append
                     )
 
             generate.assert_called_once_with(session, project)
             score.assert_called_once_with(session, project)
-            self.assertEqual(raised.exception.stage, "image_review")
+            auto_assign.assert_called_once_with(
+                session, project, _scene.id, review_required=True
+            )
+            self.assertIn("需要审核生成图片", str(raised.exception))
             self.assertEqual(changed, ["image_review"])
 
     def test_confirmed_assignments_continue_through_qa(self) -> None:
@@ -117,11 +126,6 @@ class IntelligentVideoPipelineTests(unittest.TestCase):
                     "compose_visual_track",
                 ) as compose_visual_track,
                 patch.object(video_synthesis.final_renderer, "compose_final_video") as render_final,
-                patch.object(
-                    video_synthesis.qa_service,
-                    "run_quality_check",
-                    return_value={"passed": True, "summary": {"error_count": 0}},
-                ) as qa,
             ):
                 video_synthesis.run_video_synthesis(
                     session, project, "asset_review", changed.append
@@ -129,15 +133,14 @@ class IntelligentVideoPipelineTests(unittest.TestCase):
 
             self.assertEqual(
                 changed,
-                ["scene_render", "visual_track", "final_render", "quality_check", "completed"],
+                ["scene_render", "visual_track", "final_render", "completed"],
             )
             render_scenes.assert_called_once_with(session, project)
             compose_visual_track.assert_called_once_with(session, project)
             render_final.assert_called_once_with(session, project)
-            qa.assert_called_once_with(session, project)
             self.assertEqual(media_file.id, "media-1")
 
-    def test_fcpxml_output_skips_scene_and_final_video_rendering(self) -> None:
+    def test_fcpxml_setting_exports_without_rendering_mp4(self) -> None:
         with Session(self.engine) as session:
             project, scene = self._project_with_scene(session)
             project.config_json = '{"video_mode":"ai_semantic","video_output_format":"fcpxml"}'
@@ -157,8 +160,9 @@ class IntelligentVideoPipelineTests(unittest.TestCase):
             session.commit()
             changed = []
             with (
-                patch.object(video_synthesis.fcpxml_export_service, "export_project_fcpxml") as export,
+                patch.object(video_synthesis.fcpxml_export_service, "export_project_fcpxml") as export_fcpxml,
                 patch.object(video_synthesis.scene_renderer, "render_all_scenes") as render_scenes,
+                patch.object(video_synthesis.visual_track_composer, "compose_visual_track") as visual_track,
                 patch.object(video_synthesis.final_renderer, "compose_final_video") as render_final,
             ):
                 video_synthesis.run_video_synthesis(
@@ -166,8 +170,9 @@ class IntelligentVideoPipelineTests(unittest.TestCase):
                 )
 
             self.assertEqual(changed, ["fcpxml_export", "completed"])
-            export.assert_called_once_with(session, project)
+            export_fcpxml.assert_called_once_with(session, project)
             render_scenes.assert_not_called()
+            visual_track.assert_not_called()
             render_final.assert_not_called()
 
     def test_scene_renderer_is_resumable_for_unchanged_assignment(self) -> None:

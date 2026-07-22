@@ -210,14 +210,16 @@ export async function updateSceneAssignmentRender(
   ))
 }
 
-export async function confirmSceneFallbackAssignments(
+export async function confirmSceneAssignments(
   projectId: string,
   sceneId: string,
 ): Promise<SceneAssignmentTrack> {
   return unwrap(await apiClient.post(
-    `/projects/${projectId}/storyboard/scenes/${encodeURIComponent(sceneId)}/assignments/confirm-fallback`,
+    `/projects/${projectId}/storyboard/scenes/${encodeURIComponent(sceneId)}/assignments/confirm`,
   ))
 }
+
+export const confirmSceneFallbackAssignments = confirmSceneAssignments
 
 export async function uploadSceneAsset(
   projectId: string,

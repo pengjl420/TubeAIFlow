@@ -6,7 +6,6 @@ const BatchCreate = () => import('./pages/batches/BatchCreate.vue')
 const BatchDetail = () => import('./pages/batches/BatchDetail.vue')
 const BatchList = () => import('./pages/batches/BatchList.vue')
 const Dashboard = () => import('./pages/Dashboard.vue')
-const ProjectConfig = () => import('./pages/projects/ProjectConfig.vue')
 const ProjectCreate = () => import('./pages/projects/ProjectCreate.vue')
 const ProjectDelivery = () => import('./pages/projects/ProjectDelivery.vue')
 const ProjectList = () => import('./pages/projects/ProjectList.vue')
@@ -15,7 +14,6 @@ const ProjectOverview = () => import('./pages/projects/ProjectOverview.vue')
 const ProjectRender = () => import('./pages/projects/ProjectRender.vue')
 const ProjectShell = () => import('./pages/projects/ProjectShell.vue')
 const ProjectStoryboardWorkspace = () => import('./pages/projects/ProjectStoryboardWorkspace.vue')
-const ProjectSubtitles = () => import('./pages/projects/ProjectSubtitles.vue')
 const ProjectWorkspace = () => import('./pages/projects/ProjectWorkspace.vue')
 const SettingsLayout = () => import('./pages/settings/SettingsLayout.vue')
 const SystemSettings = () => import('./pages/settings/SystemSettings.vue')
@@ -37,14 +35,14 @@ const router = createRouter({
         { path: '', redirect: (to) => `/projects/${String(to.params.id)}/overview` },
         { path: 'overview', component: ProjectOverview },
         { path: 'narration', component: ProjectShell },
-        { path: 'subtitles', component: ProjectSubtitles },
+        { path: 'subtitles', redirect: (to) => `/projects/${String(to.params.id)}/narration` },
         { path: 'storyboard', component: ProjectStoryboardWorkspace },
         { path: 'media-review', component: ProjectMedia },
-        { path: 'media', redirect: (to) => `/projects/${String(to.params.id)}/media-review` },
+        { path: 'media', redirect: (to) => `/projects/${String(to.params.id)}/render` },
         { path: 'render', component: ProjectRender },
         { path: 'delivery', component: ProjectDelivery },
-        { path: 'settings', component: ProjectConfig },
-        { path: 'config', redirect: (to) => `/projects/${String(to.params.id)}/settings` },
+        { path: 'settings', redirect: (to) => `/projects/${String(to.params.id)}/overview` },
+        { path: 'config', redirect: (to) => `/projects/${String(to.params.id)}/overview` },
       ],
     },
     { path: '/batches', component: BatchList },

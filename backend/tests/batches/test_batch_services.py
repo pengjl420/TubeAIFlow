@@ -84,7 +84,6 @@ class GenerationCheckpointTests(unittest.TestCase):
             patch.object(narration_generation.project_service, "create_segments") as create_segments,
             patch.object(narration_generation.tts_service, "generate_project_tts") as generate_tts,
             patch.object(narration_generation.audio_service, "merge_project_audio") as merge_audio,
-            patch.object(narration_generation, "_create_subtitles") as create_subtitles,
             patch.object(narration_generation.rough_cut_service, "compose_video") as compose_video,
         ):
             narration_generation.run_project_generation(
@@ -98,26 +97,19 @@ class GenerationCheckpointTests(unittest.TestCase):
         create_segments.assert_not_called()
         generate_tts.assert_not_called()
         merge_audio.assert_called_once_with(session, project)
-        create_subtitles.assert_called_once_with(session, project)
         compose_video.assert_not_called()
-        self.assertEqual(stages, ["subtitles", "completed"])
+        self.assertEqual(stages, ["completed"])
 
-    def test_workflow_creates_source_subtitles(self) -> None:
+    def test_workflow_completes_after_audio_merge_without_subtitles(self) -> None:
         session = MagicMock()
-        session.exec.return_value.all.return_value = []
         project = Project(id="p1", name="Project")
-        with (
-            patch.object(narration_generation.timeline_service, "build_timeline"),
-            patch.object(
-                narration_generation.srt_service,
-                "create_full_srt",
-                return_value=Path("subtitles.srt"),
-            ) as create_srt,
-        ):
-            narration_generation._create_subtitles(session, project)
-
-        create_srt.assert_called_once()
+        stages: list[str] = []
+        with patch.object(narration_generation.audio_service, "merge_project_audio"):
+            narration_generation.run_project_generation(
+                session, project, "audio_merge", False, stages.append
+            )
         self.assertEqual(project.status, "narration_ready")
+        self.assertEqual(stages, ["completed"])
 
     def test_landscape_mode_branches_after_shared_subtitle_stage(self) -> None:
         session = MagicMock()
@@ -128,7 +120,6 @@ class GenerationCheckpointTests(unittest.TestCase):
         )
         stages: list[str] = []
         with (
-            patch.object(narration_generation, "_create_subtitles") as create_subtitles,
             patch.object(narration_generation.rough_cut_service, "compose_video") as compose_video,
             patch.object(narration_generation.video_synthesis, "run_video_synthesis") as smart_video,
         ):
@@ -136,12 +127,11 @@ class GenerationCheckpointTests(unittest.TestCase):
                 session, project, "subtitles", True, stages.append
             )
 
-        create_subtitles.assert_called_once_with(session, project)
         compose_video.assert_called_once_with(session, project)
         smart_video.assert_not_called()
         self.assertEqual(stages, ["video", "completed"])
 
-    def test_landscape_fcpxml_mode_skips_mp4_composition(self) -> None:
+    def test_landscape_legacy_fcpxml_setting_renders_mp4(self) -> None:
         session = MagicMock()
         project = Project(
             id="p1",
@@ -151,20 +141,15 @@ class GenerationCheckpointTests(unittest.TestCase):
         stages: list[str] = []
         with (
             patch.object(narration_generation.rough_cut_service, "compose_video") as compose_video,
-            patch.object(
-                narration_generation.fcpxml_export_service,
-                "export_project_fcpxml",
-            ) as export_fcpxml,
         ):
             narration_generation.run_project_generation(
                 session, project, "video", True, stages.append
             )
 
-        export_fcpxml.assert_called_once_with(session, project)
-        compose_video.assert_not_called()
+        compose_video.assert_called_once_with(session, project)
         self.assertEqual(stages, ["completed"])
 
-    def test_audio_only_fcpxml_branches_to_export_after_subtitles(self) -> None:
+    def test_audio_only_fcpxml_exports_after_audio(self) -> None:
         session = MagicMock()
         project = Project(
             id="p1",
@@ -173,24 +158,17 @@ class GenerationCheckpointTests(unittest.TestCase):
         )
         stages: list[str] = []
 
-        def finish_fcpxml(_session, _project, stage, on_stage_changed):
-            self.assertEqual(stage, "fcpxml_export")
-            on_stage_changed("completed")
-
-        with (
-            patch.object(narration_generation, "_create_subtitles"),
-            patch.object(
-                narration_generation.video_synthesis,
-                "run_video_synthesis",
-                side_effect=finish_fcpxml,
-            ) as export_workflow,
-        ):
+        with patch.object(
+            narration_generation.video_synthesis, "run_video_synthesis"
+        ) as video_workflow:
             narration_generation.run_project_generation(
                 session, project, "subtitles", False, stages.append
             )
 
-        export_workflow.assert_called_once()
-        self.assertEqual(stages, ["fcpxml_export", "completed"])
+        video_workflow.assert_called_once_with(
+            session, project, "fcpxml_export", stages.append
+        )
+        self.assertEqual(stages, ["fcpxml_export"])
 
     def test_ai_semantic_mode_branches_after_shared_subtitle_stage(self) -> None:
         session = MagicMock()
@@ -206,7 +184,6 @@ class GenerationCheckpointTests(unittest.TestCase):
             on_stage_changed("completed")
 
         with (
-            patch.object(narration_generation, "_create_subtitles") as create_subtitles,
             patch.object(narration_generation.rough_cut_service, "compose_video") as compose_video,
             patch.object(
                 narration_generation.video_synthesis,
@@ -218,7 +195,6 @@ class GenerationCheckpointTests(unittest.TestCase):
                 session, project, "subtitles", True, stages.append
             )
 
-        create_subtitles.assert_called_once_with(session, project)
         compose_video.assert_not_called()
         smart_video.assert_called_once()
         self.assertEqual(stages, ["storyboard", "completed"])

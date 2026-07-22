@@ -11,7 +11,7 @@ from app.workflows import narration_generation
 
 
 class SegmentOutputRefreshTests(unittest.TestCase):
-    def test_existing_full_audio_is_rebuilt_with_timeline_and_subtitles(self) -> None:
+    def test_existing_full_audio_is_rebuilt_without_subtitle_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             full_audio = Path(directory) / "full.wav"
             full_audio.touch()
@@ -30,7 +30,6 @@ class SegmentOutputRefreshTests(unittest.TestCase):
                 patch.object(narration_generation, "get_final_audio_path", return_value=full_audio),
                 patch.object(narration_generation.tts_service, "regenerate_segment_tts", return_value=segment) as regenerate,
                 patch.object(narration_generation.audio_service, "merge_project_audio") as merge,
-                patch.object(narration_generation, "_create_subtitles") as create_subtitles,
             ):
                 result = narration_generation.regenerate_segment_and_refresh_outputs(
                     session, project, segment
@@ -39,7 +38,6 @@ class SegmentOutputRefreshTests(unittest.TestCase):
             self.assertIs(result, segment)
             regenerate.assert_called_once_with(session, project, segment)
             merge.assert_called_once_with(session, project)
-            create_subtitles.assert_called_once_with(session, project)
 
     def test_outputs_are_not_created_when_full_audio_did_not_exist(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -59,14 +57,12 @@ class SegmentOutputRefreshTests(unittest.TestCase):
                 patch.object(narration_generation, "get_final_audio_path", return_value=full_audio),
                 patch.object(narration_generation.tts_service, "regenerate_segment_tts", return_value=segment),
                 patch.object(narration_generation.audio_service, "merge_project_audio") as merge,
-                patch.object(narration_generation, "_create_subtitles") as create_subtitles,
             ):
                 narration_generation.regenerate_segment_and_refresh_outputs(
                     session, project, segment
                 )
 
             merge.assert_not_called()
-            create_subtitles.assert_not_called()
 
 
 class AtomicAudioMergeTests(unittest.TestCase):

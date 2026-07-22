@@ -6,6 +6,7 @@ import { Check, Download, FileUp, Merge, RefreshCw, Scissors, Undo2, ZoomIn, Zoo
 import { createSrt } from '../../api/narration'
 import { getProject, getProjectOutputs, projectOutputFileUrl, type ProjectOutputs } from '../../api/projects'
 import { importProjectSrt, listSubtitleCues } from '../../api/storyboard'
+import { getSystemSettings } from '../../api/settings'
 import AudioPlayer from '../../components/common/AudioPlayer.vue'
 import { usePageFeedback } from '../../services/feedback'
 import type { Project } from '../../types/project'
@@ -24,6 +25,8 @@ const zoom = ref(1)
 const loading = ref(false)
 const saving = ref(false)
 const confirmed = ref(false)
+const subtitleMaxDisplayUnits = ref(22)
+const subtitleMinCueDurationMs = ref(1000)
 const error = ref('')
 const message = ref('')
 usePageFeedback(error, message, { errorTitle: '字幕操作失败', messageTitle: '字幕状态' })
@@ -36,8 +39,21 @@ const srtDownloadUrl = computed(() => outputs.value?.final_srt_exists && outputs
 const timelineWidth = computed(() => Math.max(900, totalDuration.value / 30 * zoom.value))
 const issues = computed(() => cues.value.reduce((count, cue, index) => {
   const previous = cues.value[index - 1]
-  return count + (cue.text.length > 42 ? 1 : 0) + (cue.end_ms - cue.start_ms < 800 ? 1 : 0) + (previous && cue.start_ms < previous.end_ms ? 1 : 0)
+  return count + (cueHasIssue(cue) ? 1 : 0) + (previous && cue.start_ms < previous.end_ms ? 1 : 0)
 }, 0))
+
+function displayUnits(text: string) {
+  return Array.from(text).reduce((total, character) => {
+    if (/\s/u.test(character)) return total + 0.25
+    if (/^[\x00-\x7F]$/u.test(character)) return total + 0.5
+    return total + 1
+  }, 0)
+}
+
+function cueHasIssue(cue: SubtitleCue) {
+  return displayUnits(cue.text) > subtitleMaxDisplayUnits.value
+    || cue.end_ms - cue.start_ms < subtitleMinCueDurationMs.value
+}
 
 function formatTime(milliseconds: number) {
   const totalSeconds = Math.max(0, milliseconds) / 1000
@@ -134,8 +150,10 @@ async function importSrt(event: Event) {
 async function load() {
   loading.value = true; error.value = ''
   try {
-    const [p, o, loadedCues] = await Promise.all([getProject(projectId), getProjectOutputs(projectId), listSubtitleCues(projectId)])
+    const [p, o, loadedCues, systemSettings] = await Promise.all([getProject(projectId), getProjectOutputs(projectId), listSubtitleCues(projectId), getSystemSettings()])
     project.value = p; outputs.value = o; cues.value = loadedCues
+    subtitleMaxDisplayUnits.value = systemSettings.subtitle_max_display_units
+    subtitleMinCueDurationMs.value = systemSettings.subtitle_min_cue_duration_ms
     if (cues.value.length) selectCue(cues.value[0])
   } catch (err) { error.value = err instanceof Error ? err.message : '字幕时间轴加载失败' }
   finally { loading.value = false }
@@ -166,7 +184,7 @@ onMounted(load)
         <div class="section-head"><div><span class="section-eyebrow">CUES</span><h2>字幕列表</h2></div><span class="status-pill is-neutral">{{ cues.length }}</span></div>
         <div class="cue-scroll">
           <button v-for="cue in cues" :key="cue.id" :class="{ 'is-active': cue.id === selectedId }" @click="selectCue(cue)">
-            <span>{{ String(Math.floor(cue.cue_index)).padStart(3, '0') }}</span><div><strong>{{ cue.text }}</strong><small>{{ formatTime(cue.start_ms) }} — {{ formatTime(cue.end_ms) }}</small></div><i v-if="cue.text.length > 42 || cue.end_ms - cue.start_ms < 800"></i>
+            <span>{{ String(Math.floor(cue.cue_index)).padStart(3, '0') }}</span><div><strong>{{ cue.text }}</strong><small>{{ formatTime(cue.start_ms) }} — {{ formatTime(cue.end_ms) }}</small></div><i v-if="cueHasIssue(cue)"></i>
           </button>
         </div>
       </aside>
@@ -187,9 +205,9 @@ onMounted(load)
       <aside class="panel subtitle-properties">
         <div class="section-head"><div><span class="section-eyebrow">PROPERTIES</span><h2>字幕属性</h2></div></div>
         <template v-if="selected">
-          <label class="field"><span>字幕原文</span><textarea v-model="draftText" rows="7" @blur="applyDraft"></textarea><small>{{ draftText.length }} 字 · 建议不超过 42 字</small></label>
+          <label class="field"><span>字幕原文</span><textarea v-model="draftText" rows="7" @blur="applyDraft"></textarea><small>{{ displayUnits(draftText).toFixed(1) }} 显示单位 · 建议不超过 {{ subtitleMaxDisplayUnits }}</small></label>
           <div class="subtitle-time-fields"><label class="field"><span>开始时间（ms）</span><input v-model.number="draftStart" type="number" @change="applyDraft" /></label><label class="field"><span>结束时间（ms）</span><input v-model.number="draftEnd" type="number" @change="applyDraft" /></label></div>
-          <dl class="output-path-list"><div><dt>显示时长</dt><dd>{{ ((draftEnd - draftStart) / 1000).toFixed(2) }} 秒</dd></div><div><dt>来源配音段</dt><dd>{{ selected.source_segment_id }}</dd></div><div><dt>检查结果</dt><dd>{{ draftText.length > 42 ? '字幕过长' : draftEnd - draftStart < 800 ? '显示时间过短' : '正常' }}</dd></div></dl>
+          <dl class="output-path-list"><div><dt>显示时长</dt><dd>{{ ((draftEnd - draftStart) / 1000).toFixed(2) }} 秒</dd></div><div><dt>来源配音段</dt><dd>{{ selected.source_segment_id }}</dd></div><div><dt>检查结果</dt><dd>{{ displayUnits(draftText) > subtitleMaxDisplayUnits ? '字幕过长' : draftEnd - draftStart < subtitleMinCueDurationMs ? '显示时间过短' : '正常' }}</dd></div></dl>
           <div class="subtitle-edit-actions"><button class="secondary-button" :disabled="cues.findIndex((cue) => cue.id === selectedId) >= cues.length - 1" @click="mergeNext"><Merge :size="15" /> 与下一条合并</button><button class="secondary-button" @click="splitCue"><Scissors :size="15" /> 拆分字幕</button></div>
         </template>
         <div v-else class="empty-state compact-empty"><p>{{ loading ? '正在加载字幕…' : '请选择一条字幕进行校对。' }}</p></div>

@@ -9,6 +9,10 @@ export interface StoryboardTransitionEffect {
 }
 
 export interface SystemSettings {
+  subtitle_max_display_units: number
+  subtitle_min_cue_duration_ms: number
+  subtitle_max_cue_duration_ms: number
+  subtitle_target_characters_per_second: number
   app_host: string
   app_port: number
   workspace_dir: string

@@ -16,6 +16,7 @@ from app.models.project import Project
 from app.models.storyboard import SubtitleCue, VisualScene
 from app.services.rendering.scene_renderer import scene_output_path
 from app.services.rendering import timeline_composer
+from app.services.narration.subtitle_service import display_units, spoken_weight
 
 
 MAX_DURATION_ERROR_SECONDS = 0.1
@@ -76,6 +77,7 @@ def run_quality_check(session: Session, project: Project) -> dict:
                     subtitle_id=cue.id,
                     suggestion="重新生成字幕时间轴",
                 )
+    _check_subtitles(cues, issues, get_settings())
     if not get_final_srt_path(project, get_settings().workspace_dir).is_file():
         _issue(issues, "subtitle_missing", "error", "项目 SRT 字幕文件不存在")
     if not visual_track_path.is_file():
@@ -184,6 +186,73 @@ def _check_timeline(scenes: list[VisualScene], issues: list[dict]) -> None:
         if scene.start_ms != previous_end:
             _issue(issues, "timeline_gap", "error", "视觉场景之间存在空洞或重叠", scene_id=scene.id)
         previous_end = scene.end_ms
+
+
+def _check_subtitles(cues: list[SubtitleCue], issues: list[dict], settings) -> None:
+    max_units = getattr(settings, "subtitle_max_display_units", 22)
+    min_duration_ms = getattr(settings, "subtitle_min_cue_duration_ms", 1000)
+    max_duration_ms = getattr(settings, "subtitle_max_cue_duration_ms", 6000)
+    target_cps = getattr(settings, "subtitle_target_characters_per_second", 7.0)
+    previous_end: int | None = None
+    for cue in cues:
+        duration_ms = cue.end_ms - cue.start_ms
+        if duration_ms <= 0:
+            _issue(
+                issues,
+                "subtitle_duration_invalid",
+                "error",
+                "字幕结束时间必须晚于开始时间",
+                subtitle_id=cue.id,
+                suggestion="重新生成字幕时间轴",
+            )
+            continue
+        if previous_end is not None and cue.start_ms < previous_end:
+            _issue(
+                issues,
+                "subtitle_overlap",
+                "error",
+                "字幕时间段存在重叠",
+                subtitle_id=cue.id,
+                suggestion="调整当前字幕的开始时间",
+            )
+        if display_units(cue.text) > max_units + 0.001:
+            _issue(
+                issues,
+                "subtitle_too_wide",
+                "warning",
+                f"字幕显示宽度超过 {max_units} 个单位",
+                subtitle_id=cue.id,
+                suggestion="按自然标点进一步拆分字幕",
+            )
+        if duration_ms < min_duration_ms:
+            _issue(
+                issues,
+                "subtitle_too_short",
+                "warning",
+                f"字幕显示时间短于 {min_duration_ms / 1000:.1f} 秒",
+                subtitle_id=cue.id,
+                suggestion="与相邻字幕合并或调整时间边界",
+            )
+        if duration_ms > max_duration_ms:
+            _issue(
+                issues,
+                "subtitle_too_long",
+                "warning",
+                f"字幕显示时间长于 {max_duration_ms / 1000:.1f} 秒",
+                subtitle_id=cue.id,
+                suggestion="在不改变原文的前提下进一步拆分字幕",
+            )
+        characters_per_second = spoken_weight(cue.text) / (duration_ms / 1000)
+        if characters_per_second > target_cps:
+            _issue(
+                issues,
+                "subtitle_too_fast",
+                "warning",
+                f"字幕阅读速度为 {characters_per_second:.1f} 字/秒，超过目标 {target_cps:.1f}",
+                subtitle_id=cue.id,
+                suggestion="缩短字幕文字或延长显示时间",
+            )
+        previous_end = cue.end_ms
 
 
 def _duration_or_issue(path: Path, issue_type: str, message: str, issues: list[dict]) -> float | None:

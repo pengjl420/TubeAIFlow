@@ -21,44 +21,28 @@ def create_full_srt(
     base_dir = get_project_work_dir(project, get_settings().workspace_dir)
     ensure_project_dirs(base_dir)
 
-    cues = build_source_subtitle_cues(segments)
+    settings = get_settings()
+    cues = subtitle_service.build_segment_cues(
+        project.id,
+        segments,
+        max_display_units=settings.subtitle_max_display_units,
+        min_duration_ms=settings.subtitle_min_cue_duration_ms,
+        max_duration_ms=settings.subtitle_max_cue_duration_ms,
+    )
     if session is not None:
-        subtitle_service.sync_segment_cues(session, project, segments)
+        subtitle_service.replace_project_cues(session, project.id, cues)
 
     stem = get_output_stem(project)
     work_path = base_dir / "subtitles" / f"{stem}.srt"
     _write_srt(
         work_path,
-        [(item["start"], item["end"], item["text"]) for item in cues],
+        [(item["start_ms"] / 1000, item["end_ms"] / 1000, item["text"]) for item in cues],
     )
 
     final_path = get_final_srt_path(project, get_settings().workspace_dir)
     final_path.parent.mkdir(parents=True, exist_ok=True)
     final_path.write_text(work_path.read_text(encoding="utf-8"), encoding="utf-8")
     return final_path
-
-
-def build_source_subtitle_cues(segments: list[Segment]) -> list[dict]:
-    current = 0.0
-    cues = []
-    for segment in segments:
-        if segment.duration is None:
-            raise ValueError(f"Segment {segment.segment_id} has no audio duration")
-        start = current
-        end = start + float(segment.duration)
-        clean_text = _clean_srt_text(segment.text)
-        if clean_text:
-            cues.append(
-                {
-                    "cue_id": segment.segment_id,
-                    "segment_id": segment.segment_id,
-                    "start": round(start, 3),
-                    "end": round(end, 3),
-                    "text": clean_text,
-                }
-            )
-        current = end
-    return cues
 
 
 def _write_srt(path: Path, cues: list[tuple[float, float, str]]) -> None:

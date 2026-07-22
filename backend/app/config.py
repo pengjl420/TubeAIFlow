@@ -140,6 +140,10 @@ class Settings(BaseModel):
     cosyvoice_min_chars_per_second: float = Field(default=2.8, gt=0, le=10)
     cosyvoice_duration_slack_seconds: float = Field(default=2.0, ge=0, le=10)
     cosyvoice_duration_outlier_ratio: float = Field(default=1.45, gt=1, le=3)
+    subtitle_max_display_units: int = Field(default=22, ge=8, le=80)
+    subtitle_min_cue_duration_ms: int = Field(default=1000, ge=300, le=5000)
+    subtitle_max_cue_duration_ms: int = Field(default=6000, ge=1000, le=15000)
+    subtitle_target_characters_per_second: float = Field(default=7.0, ge=1, le=20)
 
     @field_validator(
         "qwen_tts_root",
@@ -209,6 +213,8 @@ class Settings(BaseModel):
             raise ValueError("Minimum clips per transition group cannot exceed maximum clips")
         if self.storyboard_transition_min_per_group > self.storyboard_transition_max_per_group:
             raise ValueError("Minimum transitions per group cannot exceed maximum transitions")
+        if self.subtitle_min_cue_duration_ms >= self.subtitle_max_cue_duration_ms:
+            raise ValueError("Minimum subtitle cue duration must be shorter than maximum duration")
         return self
 
     @field_validator("qwen_tts_device", "qwen_tts_language")

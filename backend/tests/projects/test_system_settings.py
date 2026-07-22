@@ -48,6 +48,13 @@ class SettingsModelTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             Settings(media_search_cache_hours=23)
 
+    def test_subtitle_duration_range_is_validated(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Minimum subtitle cue duration"):
+            Settings(
+                subtitle_min_cue_duration_ms=5000,
+                subtitle_max_cue_duration_ms=5000,
+            )
+
     def test_empty_provider_storage_paths_use_defaults(self) -> None:
         settings = Settings(pexels_storage_dir="", pixabay_storage_dir="  ")
 

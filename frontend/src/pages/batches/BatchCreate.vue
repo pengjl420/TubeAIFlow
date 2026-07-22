@@ -10,7 +10,7 @@ import { createBatch } from '../../api/batches'
 import { selectDirectory } from '../../api/projects'
 import { listVoices, type VoiceProfile } from '../../api/voices'
 import { showToast, usePageFeedback } from '../../services/feedback'
-import type { SegmentationMode, SemanticReviewMode, StoryboardMode, VideoGenerationMode } from '../../types/project'
+import type { SegmentationMode, StoryboardMode, VideoGenerationMode } from '../../types/project'
 
 const router = useRouter()
 const today = new Date().toISOString().slice(0, 10).replace(/-/g, '')
@@ -20,10 +20,9 @@ const voices = ref<VoiceProfile[]>([])
 const voiceProfileId = ref('')
 const outputDir = ref('')
 const mediaVideoDir = ref('')
-const videoMode = ref<VideoGenerationMode>('ai_semantic')
-const semanticReviewMode = ref<SemanticReviewMode>('automatic')
+const videoMode = ref<VideoGenerationMode>('ai_generated_images')
 const segmentationMode = ref<SegmentationMode>('ai')
-const storyboardMode = ref<StoryboardMode>('ai')
+const storyboardMode = ref<StoryboardMode>('segments')
 const continueOnError = ref(true)
 const saving = ref(false)
 const selectingFolder = ref<'output' | 'video' | null>(null)
@@ -70,7 +69,7 @@ async function chooseFolder(target: 'output' | 'video') {
 }
 
 function saveDraft() {
-  localStorage.setItem('tubeaiflow-batch-draft', JSON.stringify({ name: name.value, voiceProfileId: voiceProfileId.value, outputDir: outputDir.value, mediaVideoDir: mediaVideoDir.value, videoMode: videoMode.value, semanticReviewMode: semanticReviewMode.value, segmentationMode: segmentationMode.value, storyboardMode: storyboardMode.value, continueOnError: continueOnError.value }))
+  localStorage.setItem('tubeaiflow-batch-draft', JSON.stringify({ name: name.value, voiceProfileId: voiceProfileId.value, outputDir: outputDir.value, mediaVideoDir: mediaVideoDir.value, videoMode: videoMode.value, segmentationMode: segmentationMode.value, storyboardMode: storyboardMode.value, continueOnError: continueOnError.value }))
   showToast({ title: '批次配置草稿已保存', description: '文件列表受浏览器安全限制，请下次重新选择。', tone: 'success' })
 }
 
@@ -82,7 +81,7 @@ async function submit() {
   if (videoMode.value === 'landscape' && !mediaVideoDir.value.trim()) return void (error.value = '风景素材拼接模式需要选择素材目录')
   saving.value = true; error.value = ''
   try {
-    const batch = await createBatch({ name: name.value.trim() || '批量生产', scripts: scripts.value, voiceProfileId: voiceProfileId.value, outputDir: outputDir.value.trim(), mediaVideoDir: videoMode.value === 'landscape' ? mediaVideoDir.value.trim() : '', includeVideo: videoMode.value !== 'none', videoMode: videoMode.value, semanticReviewMode: semanticReviewMode.value, segmentationMode: segmentationMode.value, storyboardMode: storyboardMode.value, continueOnError: continueOnError.value })
+    const batch = await createBatch({ name: name.value.trim() || '批量生产', scripts: scripts.value, voiceProfileId: voiceProfileId.value, outputDir: outputDir.value.trim(), mediaVideoDir: videoMode.value === 'landscape' ? mediaVideoDir.value.trim() : '', includeVideo: videoMode.value !== 'none', videoMode: videoMode.value, segmentationMode: segmentationMode.value, storyboardMode: storyboardMode.value, continueOnError: continueOnError.value })
     localStorage.removeItem('tubeaiflow-batch-draft')
     await router.push(`/batches/${batch.id}`)
   } catch (err) { error.value = err instanceof Error ? err.message : '批次创建失败' }
@@ -95,7 +94,7 @@ onMounted(async () => {
     const raw = localStorage.getItem('tubeaiflow-batch-draft')
     if (raw) {
       const draft = JSON.parse(raw)
-      name.value = draft.name || name.value; voiceProfileId.value = draft.voiceProfileId || ''; outputDir.value = draft.outputDir || ''; mediaVideoDir.value = draft.mediaVideoDir || ''; videoMode.value = draft.videoMode || videoMode.value; semanticReviewMode.value = 'automatic'; segmentationMode.value = draft.segmentationMode || segmentationMode.value; storyboardMode.value = draft.storyboardMode || storyboardMode.value; continueOnError.value = draft.continueOnError ?? true
+      name.value = draft.name || name.value; voiceProfileId.value = draft.voiceProfileId || ''; outputDir.value = draft.outputDir || ''; mediaVideoDir.value = draft.mediaVideoDir || ''; videoMode.value = ['ai_generated_images', 'landscape', 'none'].includes(draft.videoMode) ? draft.videoMode : videoMode.value; segmentationMode.value = draft.segmentationMode || segmentationMode.value; storyboardMode.value = draft.storyboardMode || storyboardMode.value; continueOnError.value = draft.continueOnError ?? true
     }
     if (!voiceProfileId.value && voices.value.length === 1) voiceProfileId.value = voices.value[0].id
   } catch (err) { error.value = err instanceof Error ? err.message : '系统音色加载失败' }
@@ -118,13 +117,13 @@ onMounted(async () => {
         <label class="setting"><span><Headphones/>系统音色 <b>*</b></span><select v-model="voiceProfileId"><option value="">请选择系统音色</option><option v-for="voice in voices" :key="voice.id" :value="voice.id">{{ voice.name }} · {{ voice.tts_engine }}</option></select></label>
         <div class="setting"><span><Folder/>输出目录 <b>*</b></span><div class="path-input"><input v-model="outputDir" readonly placeholder="请选择输出文件夹"/><button @click="chooseFolder('output')"><Folder :size="16"/></button></div></div>
         <label class="setting"><span><Scissors/>切段方式 <b>*</b></span><select v-model="segmentationMode"><option value="ai">AI 自动切段（推荐）</option><option value="newline">按换行切段</option></select></label>
-        <label class="setting"><span><Monitor/>视频模式 <b>*</b></span><select v-model="videoMode"><option value="ai_semantic">AI 语义视频拼接</option><option value="ai_generated_images">本地 AI 分镜图片视频</option><option value="landscape">风景素材拼接</option><option value="none">仅生成完整配音</option></select></label>
-        <label class="setting" v-if="videoMode==='ai_semantic'||videoMode==='ai_generated_images'"><span><Sparkles/>分镜方式 <b>*</b></span><select v-model="storyboardMode"><option value="ai">AI 自动分镜（推荐）</option><option value="segments">按逐字稿切段生成</option></select></label>
+        <label class="setting"><span><Monitor/>视频模式 <b>*</b></span><select v-model="videoMode"><option value="ai_generated_images">本地 AI 分镜图片视频</option><option value="landscape">风景素材拼接</option><option value="none">仅生成完整配音</option></select></label>
+        <label class="setting" v-if="videoMode==='ai_generated_images'"><span><Sparkles/>分镜方式 <b>*</b></span><select v-model="storyboardMode"><option value="segments">按逐字稿切段生成（默认）</option><option value="ai">AI 自动分镜</option></select></label>
         <div class="setting wide" v-if="videoMode==='landscape'"><span><Image/>风景素材目录 <b>*</b></span><div class="path-input"><input v-model="mediaVideoDir" readonly placeholder="请选择素材文件夹"/><button @click="chooseFolder('video')"><Folder :size="16"/></button></div></div>
         <label class="setting continue"><span><AlertCircle/>失败后是否继续 <b>*</b></span><select v-model="continueOnError"><option :value="true">继续处理后续项目</option><option :value="false">立即暂停批次</option></select></label>
       </div><div class="config-tip"><AlertCircle :size="17"/><span><strong>配置提示</strong>以上配置将应用于本批次的所有项目，创建后不可修改。请确保输出目录拥有足够的可用空间。</span></div></article>
 
-      <article class="create-card confirm-card"><h2><i>3</i>确认和开始</h2><div class="summary-box"><h3>批次概要</h3><dl><dt>项目数量</dt><dd class="accent">{{ scripts.length }} 个</dd><dt>脚本文件</dt><dd>{{ scripts.length }} 个文件</dd><dt>总字符数（估算）</dt><dd>约 {{ estimatedCharacters.toLocaleString() }} 字</dd><dt>预计磁盘占用</dt><dd>约 {{ estimatedStorage }} GB</dd></dl><h3>配置摘要</h3><dl><dt>系统音色</dt><dd>{{ selectedVoice?.name || '未选择' }}</dd><dt>输出目录</dt><dd class="path">{{ outputDir || '未选择' }}</dd><dt>切段方式</dt><dd>{{ segmentationMode==='ai'?'AI 自动切段':'按换行切段' }}</dd><dt>视频模式</dt><dd>{{ videoMode==='none'?'仅生成完整配音':videoMode==='landscape'?'风景素材拼接':'AI 语义生产' }}</dd><dt>执行方式</dt><dd>全自动，无人工审核</dd></dl><h3>预计磁盘占用 <b>约 {{ estimatedStorage }} GB</b></h3><div class="storage-bar"><i :style="{width: `${Math.min(100,Number(estimatedStorage))}%`}"></i></div><div class="ready-state" :class="{ ready }"><Check :size="17"/>{{ ready ? '已就绪，可以创建' : '请完成左侧必填配置' }}</div></div></article>
+      <article class="create-card confirm-card"><h2><i>3</i>确认和开始</h2><div class="summary-box"><h3>批次概要</h3><dl><dt>项目数量</dt><dd class="accent">{{ scripts.length }} 个</dd><dt>脚本文件</dt><dd>{{ scripts.length }} 个文件</dd><dt>总字符数（估算）</dt><dd>约 {{ estimatedCharacters.toLocaleString() }} 字</dd><dt>预计磁盘占用</dt><dd>约 {{ estimatedStorage }} GB</dd></dl><h3>配置摘要</h3><dl><dt>系统音色</dt><dd>{{ selectedVoice?.name || '未选择' }}</dd><dt>输出目录</dt><dd class="path">{{ outputDir || '未选择' }}</dd><dt>切段方式</dt><dd>{{ segmentationMode==='ai'?'AI 自动切段':'按换行切段' }}</dd><dt>视频模式</dt><dd>{{ videoMode==='none'?'仅生成完整配音':videoMode==='landscape'?'风景素材拼接':'本地 AI 分镜图片视频' }}</dd><dt>执行方式</dt><dd>全自动生成</dd></dl><h3>预计磁盘占用 <b>约 {{ estimatedStorage }} GB</b></h3><div class="storage-bar"><i :style="{width: `${Math.min(100,Number(estimatedStorage))}%`}"></i></div><div class="ready-state" :class="{ ready }"><Check :size="17"/>{{ ready ? '已就绪，可以创建' : '请完成左侧必填配置' }}</div></div></article>
     </div>
     <footer class="create-actions"><RouterLink to="/batches">取消</RouterLink><button class="draft" @click="saveDraft">保存草稿</button><button class="submit" :disabled="saving || selectingFolder!==null" @click="submit"><Play :size="18"/>{{ saving?'正在创建项目…':'创建并开始' }}</button></footer>
   </section>

@@ -11,7 +11,7 @@ import { API_BASE_URL } from '../../api/client'
 import { listVoices, type VoiceProfile } from '../../api/voices'
 import AudioPlayer from '../../components/common/AudioPlayer.vue'
 import { usePageFeedback } from '../../services/feedback'
-import type { Project, SegmentationMode, SemanticReviewMode, StoryboardMode, VideoGenerationMode, VideoOutputFormat } from '../../types/project'
+import type { Project, SegmentationMode, StoryboardMode, VideoGenerationMode } from '../../types/project'
 
 const route = useRoute()
 const router = useRouter()
@@ -24,11 +24,9 @@ const outputDir = ref('')
 const outputFilename = ref('')
 const mediaVideoDir = ref('')
 const videoMode = ref<VideoGenerationMode>('none')
-const semanticReviewMode = ref<SemanticReviewMode>('manual')
-const videoOutputFormat = ref<VideoOutputFormat>('fcpxml')
 const storyboardTransitionEnabled = ref(true)
 const segmentationMode = ref<SegmentationMode>('newline')
-const storyboardMode = ref<StoryboardMode>('ai')
+const storyboardMode = ref<StoryboardMode>('segments')
 const loading = ref(false)
 const saving = ref(false)
 const selectingFolder = ref<'output' | 'video' | null>(null)
@@ -61,29 +59,18 @@ function fillForm() {
   const filename = projectConfig.value.output_filename
   const videoDir = projectConfig.value.media_video_dir
   const configuredMode = projectConfig.value.video_mode
-  videoMode.value = configuredMode === 'ai_semantic' || configuredMode === 'ai_generated_images' || configuredMode === 'landscape' || configuredMode === 'none'
+  videoMode.value = configuredMode === 'ai_generated_images' || configuredMode === 'landscape' || configuredMode === 'none'
     ? configuredMode
     : projectConfig.value.include_video === true ? 'landscape' : 'none'
-  semanticReviewMode.value = projectConfig.value.semantic_review_mode === 'automatic'
-    ? 'automatic'
-    : 'manual'
-  const configuredOutput = projectConfig.value.video_output_format
-  videoOutputFormat.value = configuredOutput === 'fcpxml' || configuredOutput === 'prproj' || configuredOutput === 'editable_both'
-    ? configuredOutput
-    : 'mp4'
   storyboardTransitionEnabled.value = projectConfig.value.storyboard_transition_enabled !== false
   segmentationMode.value = projectConfig.value.segmentation_mode === 'ai' ? 'ai' : 'newline'
-  storyboardMode.value = projectConfig.value.storyboard_mode === 'segments' ? 'segments' : 'ai'
+  storyboardMode.value = projectConfig.value.storyboard_mode === 'ai' ? 'ai' : 'segments'
   outputFilename.value = typeof filename === 'string' ? filename : ''
   mediaVideoDir.value = typeof videoDir === 'string' ? videoDir : ''
   voiceProfileId.value = typeof projectConfig.value.voice_profile_id === 'string'
     ? projectConfig.value.voice_profile_id
     : ''
 }
-
-watch(videoMode, (value) => {
-  if (value === 'none') videoOutputFormat.value = 'fcpxml'
-})
 
 async function load() {
   loading.value = true
@@ -145,8 +132,6 @@ async function save() {
       media_video_dir: videoMode.value === 'landscape' ? mediaVideoDir.value.trim() : '',
       include_video: videoMode.value !== 'none',
       video_mode: videoMode.value,
-      semantic_review_mode: semanticReviewMode.value,
-      video_output_format: videoOutputFormat.value,
       voice_profile_id: voiceProfileId.value,
       storyboard_transition_enabled: storyboardTransitionEnabled.value,
       segmentation_mode: segmentationMode.value,
@@ -226,7 +211,6 @@ onMounted(load)
           <select v-model="videoMode">
             <option value="none">不生成视频（仅配音与原文 SRT）</option>
             <option value="landscape">纯风景素材拼接</option>
-            <option value="ai_semantic">AI 语义视频拼接</option>
             <option value="ai_generated_images">本地 AI 分镜图片视频</option>
           </select>
           <span class="muted">三种方式共用切段、TTS、音频合并和 SRT 生成，只在字幕完成后分流。</span>
@@ -246,43 +230,13 @@ onMounted(load)
           </div>
           <span class="muted">生成最终视频时会扫描该目录中的视频素材。</span>
         </label>
-        <div class="field reference-field">
-          <span>最终交付格式</span>
-          <div class="output-format-options" role="radiogroup" aria-label="最终交付格式">
-            <label class="output-format-option" :class="{ 'is-selected': videoOutputFormat === 'fcpxml' }">
-              <input v-model="videoOutputFormat" type="radio" value="fcpxml" />
-              <span><strong>FCPXML 可编辑工程</strong><small>可导入桌面版剪映继续深度剪辑</small></span>
-            </label>
-            <label class="output-format-option" :class="{ 'is-selected': videoOutputFormat === 'mp4' }">
-              <input v-model="videoOutputFormat" type="radio" value="mp4" />
-              <span><strong>{{ videoMode === 'none' ? '仅配音与原文 SRT' : '视频文件（MP4）' }}</strong><small>{{ videoMode === 'none' ? '不额外生成 FCPXML 时间线' : '直接渲染可播放的最终视频文件' }}</small></span>
-            </label>
-            <label class="output-format-option" :class="{ 'is-selected': videoOutputFormat === 'prproj' }">
-              <input v-model="videoOutputFormat" type="radio" value="prproj" />
-              <span><strong>Premiere PRPROJ 工程</strong><small>供仅接受 .prproj 的剪映版本导入</small></span>
-            </label>
-            <label class="output-format-option" :class="{ 'is-selected': videoOutputFormat === 'editable_both' }">
-              <input v-model="videoOutputFormat" type="radio" value="editable_both" />
-              <span><strong>两种可编辑工程</strong><small>同时生成 FCPXML 和 PRPROJ</small></span>
-            </label>
-          </div>
-          <span class="muted">可编辑工程模式跳过 MP4 渲染。PRPROJ 由本机 Premiere Pro 从 FCPXML 转换，素材移动后需要重新链接。</span>
-        </div>
-        <label v-if="videoMode === 'ai_semantic' || videoMode === 'ai_generated_images'" class="field reference-field">
+        <label v-if="videoMode === 'ai_generated_images'" class="field reference-field">
           <span>分镜头视觉场景切分</span>
           <select v-model="storyboardMode">
-            <option value="ai">AI 自动生成分镜头（默认，全文理解）</option>
-            <option value="segments">按逐字稿切段生成分镜头</option>
+            <option value="segments">按逐字稿切段生成分镜头（默认）</option>
+            <option value="ai">AI 自动生成分镜头（全文理解）</option>
           </select>
           <span class="muted">按切段模式消费最终逐字稿切段；AI 自动模式独立读取全文决定视觉场景边界。</span>
-        </label>
-        <label v-if="videoMode === 'ai_semantic' || videoMode === 'ai_generated_images'" class="field reference-field">
-          <span>素材审核方式</span>
-          <select v-model="semanticReviewMode">
-            <option value="manual">人工审核拼接</option>
-            <option value="automatic">自动审核拼接</option>
-          </select>
-          <span class="muted">自动模式只会按匹配度选用合格候选，并禁止同一分镜重复使用相同素材内容。</span>
         </label>
         <label class="checkbox-field">
           <input v-model="storyboardTransitionEnabled" type="checkbox" :disabled="videoMode === 'none'" />

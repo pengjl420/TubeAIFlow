@@ -37,8 +37,7 @@ let refreshTimer: number | undefined
 
 const stageLabels: Record<string, string> = {
   segmenting: '脚本准备', tts: '配音生成', audio_merge: '音频合并', subtitles: '准备视频（旧任务）',
-  storyboard: '分镜生成', asset_search: '素材检索', asset_review: '自动选材',
-  image_generation: '图片生成', image_review: '自动选图', scene_render: '场景渲染',
+  storyboard: '分镜生成', image_generation: '图片生成与分配', scene_render: '场景渲染',
   visual_track: '视频合成', final_render: '最终合成', quality_check: '完成生成（旧任务）',
   quality_review: '完成生成（旧任务）', completed: '任务完成',
 }
@@ -47,7 +46,7 @@ const statusLabels: Record<string, string> = {
   review_required: '旧任务待恢复', completed: '已完成', failed: '失败', cancelled: '已取消',
 }
 const narrationStages = ['segmenting', 'tts', 'audio_merge', 'completed']
-const videoStages = ['storyboard', 'asset_search', 'asset_review', 'image_generation', 'image_review', 'scene_render', 'visual_track', 'final_render', 'completed']
+const videoStages = ['storyboard', 'image_generation', 'scene_render', 'visual_track', 'final_render', 'quality_check', 'completed']
 
 const filtered = computed(() => tasks.value.filter((item) => {
   const keyword = query.value.trim().toLocaleLowerCase()

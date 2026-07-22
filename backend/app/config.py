@@ -9,7 +9,6 @@ from sqlalchemy.exc import OperationalError
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_WORKSPACE_DIR = (BASE_DIR / "workspace").resolve()
-DEFAULT_EMBEDDING_MODEL_DIR = (BASE_DIR.parent / "models" / "Qwen3-VL-Embedding-2B").resolve()
 DEFAULT_IMAGE_MODEL_PATH = (
     BASE_DIR.parent
     / "models"
@@ -77,27 +76,6 @@ class Settings(BaseModel):
     deepseek_timeout_seconds: float = Field(default=60.0, gt=0, le=600)
     deepseek_max_tokens: int = Field(default=8192, ge=1, le=65536)
     deepseek_retry_count: int = Field(default=1, ge=0, le=10)
-    pexels_api_key: str = ""
-    pixabay_api_key: str = ""
-    pexels_storage_dir: Path | None = None
-    pixabay_storage_dir: Path | None = None
-    media_search_cache_hours: int = Field(default=24, ge=24, le=168)
-    media_search_download_limit: int = Field(default=3, ge=1, le=5)
-    auto_fallback_enabled: bool = True
-    auto_landscape_fallback_enabled: bool = False
-    auto_fallback_review_required: bool = True
-    auto_fallback_max_ratio_percent: int = Field(default=20, ge=0, le=100)
-    auto_fallback_max_consecutive_shots: int = Field(default=2, ge=1, le=5)
-    vision_embedding_model_dir: Path | None = (
-        DEFAULT_EMBEDDING_MODEL_DIR if DEFAULT_EMBEDDING_MODEL_DIR.is_dir() else None
-    )
-    vision_embedding_device: str = "cuda:0"
-    vision_embedding_dtype: str = "float16"
-    vision_embedding_max_images: int = Field(default=4, ge=1, le=8)
-    vision_embedding_max_pixels: int = Field(default=589824, ge=4096, le=1843200)
-    vision_embedding_instruction: str = (
-        "Retrieve documentary video shots relevant to the narration query."
-    )
     image_generation_model_path: Path | None = (
         DEFAULT_IMAGE_MODEL_PATH if DEFAULT_IMAGE_MODEL_PATH.is_file() else None
     )
@@ -117,13 +95,6 @@ class Settings(BaseModel):
         "text, watermark, logo, caption, signature, deformed anatomy, extra fingers, "
         "duplicate people, low resolution, blurry, oversaturated"
     )
-    image_selection_semantic_weight: float = Field(default=0.7, ge=0, le=1)
-    image_selection_technical_weight: float = Field(default=0.3, ge=0, le=1)
-    image_selection_min_semantic_score: float = Field(default=0.2, ge=0, le=1)
-    image_selection_min_total_score: float = Field(default=0.5, ge=0, le=1)
-    image_selection_min_score_margin: float = Field(default=0.03, ge=0, le=1)
-    image_selection_min_sharpness: float = Field(default=0.001, ge=0, le=1)
-    image_selection_max_clipped_ratio: float = Field(default=0.55, ge=0, le=1)
     qwen_tts_root: Path | None = None
     qwen_tts_python: Path | None = None
     qwen_tts_model_dir: Path | None = None
@@ -152,12 +123,9 @@ class Settings(BaseModel):
         "cosyvoice_root",
         "cosyvoice_python",
         "cosyvoice_model_dir",
-        "vision_embedding_model_dir",
         "image_generation_model_path",
         "image_generation_config_dir",
         "image_generation_python",
-        "pexels_storage_dir",
-        "pixabay_storage_dir",
         "premiere_pro_path",
         mode="before",
     )
@@ -225,14 +193,6 @@ class Settings(BaseModel):
             raise ValueError("Qwen3-TTS device and language cannot be empty")
         return text
 
-    @field_validator("vision_embedding_dtype")
-    @classmethod
-    def validate_vision_embedding_dtype(cls, value):
-        dtype = str(value or "").strip().lower()
-        if dtype not in {"bfloat16", "float16", "float32"}:
-            raise ValueError("Unsupported vision embedding dtype")
-        return dtype
-
     @field_validator("image_generation_dtype")
     @classmethod
     def validate_image_generation_dtype(cls, value):
@@ -247,14 +207,6 @@ class Settings(BaseModel):
         text = str(value or "").strip()
         if not text:
             raise ValueError("Image generation device and negative prompt cannot be empty")
-        return text
-
-    @field_validator("vision_embedding_device", "vision_embedding_instruction")
-    @classmethod
-    def non_empty_vision_embedding_setting(cls, value):
-        text = str(value or "").strip()
-        if not text:
-            raise ValueError("Vision embedding device and instruction cannot be empty")
         return text
 
     @property
@@ -272,12 +224,9 @@ def _normalize_paths(settings: Settings) -> Settings:
         "cosyvoice_root",
         "cosyvoice_python",
         "cosyvoice_model_dir",
-        "vision_embedding_model_dir",
         "image_generation_model_path",
         "image_generation_config_dir",
         "image_generation_python",
-        "pexels_storage_dir",
-        "pixabay_storage_dir",
     ):
         value = getattr(settings, field_name)
         if value is not None:

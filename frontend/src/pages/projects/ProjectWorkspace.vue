@@ -18,14 +18,10 @@ const items = computed(() => {
   const stage = task.value?.stage || ''
   const status = project.value?.status || ''
   const narrationDone = ['narration_ready', 'video_in_progress', 'review_required', 'completed'].includes(status)
-  const storyboardDone = ['asset_search', 'asset_review', 'scene_render', 'final_render', 'completed'].includes(stage) || status === 'completed'
-  const reviewDone = ['scene_render', 'visual_track', 'final_render', 'completed'].includes(stage) || status === 'completed'
   const renderDone = status === 'completed'
   return [
     { path: 'overview', label: '项目概览', hint: '生成状态与结果', done: true },
     { path: 'narration', label: '一键生成', hint: '脚本、配音与成片', done: narrationDone },
-    { path: 'storyboard', label: '视觉分镜', hint: '自动生成的镜头方案', done: storyboardDone },
-    { path: 'media-review', label: '素材审核', hint: '逐分镜确认图片与视频', done: reviewDone },
     { path: 'render', label: '成片预览', hint: '查看最终视频', done: renderDone },
     { path: 'delivery', label: '质量与交付', hint: '质量检查与工程导出', done: renderDone },
   ]

@@ -43,14 +43,13 @@ class ProjectSettingsRequest(BaseModel):
     media_video_dir: str = ""
     include_video: bool = False
     video_mode: str | None = None
-    semantic_review_mode: str | None = None
     video_output_format: str | None = project_service.VIDEO_OUTPUT_MP4
     tts_engine: str = project_service.DEFAULT_TTS_ENGINE
     reference_audio_text: str = ""
     voice_profile_id: str = ""
     storyboard_transition_enabled: bool = True
     segmentation_mode: str = project_service.SEGMENTATION_MODE_NEWLINE
-    storyboard_mode: str = project_service.STORYBOARD_MODE_AI
+    storyboard_mode: str = project_service.STORYBOARD_MODE_SEGMENTS
 
 
 class DirectoryPickerRequest(BaseModel):
@@ -80,14 +79,13 @@ def create_project(
     media_video_dir: str = Form(""),
     include_video: bool = Form(False),
     video_mode: str | None = Form(None),
-    semantic_review_mode: str | None = Form(project_service.SEMANTIC_REVIEW_AUTO),
     video_output_format: str | None = Form(project_service.VIDEO_OUTPUT_MP4),
     tts_engine: str = Form(project_service.DEFAULT_TTS_ENGINE),
     reference_audio_text: str = Form(""),
     voice_profile_id: str = Form(""),
     storyboard_transition_enabled: bool = Form(True),
     segmentation_mode: str = Form(project_service.SEGMENTATION_MODE_NEWLINE),
-    storyboard_mode: str = Form(project_service.STORYBOARD_MODE_AI),
+    storyboard_mode: str = Form(project_service.STORYBOARD_MODE_SEGMENTS),
     session: Session = Depends(get_session),
 ) -> dict:
     if not name.strip():
@@ -114,7 +112,6 @@ def create_project(
             include_video,
             voice_profile_id,
             video_mode,
-            semantic_review_mode,
             video_output_format,
             storyboard_transition_enabled,
             segmentation_mode,
@@ -292,7 +289,6 @@ def save_project_settings(
             payload.include_video,
             payload.voice_profile_id,
             payload.video_mode,
-            payload.semantic_review_mode,
             payload.video_output_format,
             payload.storyboard_transition_enabled,
             payload.segmentation_mode,

@@ -3,7 +3,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$forbiddenPath = '(?i)(^|/)(backend/workspace|workspace|runtime|data|models|reports|\.downloads|\.venv|venv|node_modules|dist)(/|$)'
+# Project artifact directories are root-relative. Keep environment/build
+# directories forbidden at any depth, but do not confuse source packages such
+# as backend/app/models with downloaded model artifacts in /models.
+$forbiddenPath = '(?i)(^(backend/workspace|workspace|runtime|data|models|reports|\.downloads)(/|$)|(^|/)(\.venv|venv|node_modules|dist)(/|$))'
 $forbiddenName = '(?i)(^|/)\.env(?:\..+)?$'
 $forbiddenExtension = '(?i)\.(db|sqlite|sqlite3|safetensors|ckpt|pt|pth|onnx|wav|mp3|flac|m4a|mp4|mov|mkv|avi)$'
 $errors = [System.Collections.Generic.List[string]]::new()

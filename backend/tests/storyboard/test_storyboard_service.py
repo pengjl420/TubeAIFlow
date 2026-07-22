@@ -260,7 +260,11 @@ class StoryboardServiceTests(unittest.TestCase):
             )
             SQLModel.metadata.create_all(engine)
             with Session(engine) as session:
-                project = Project(id="p1", name="Project")
+                project = Project(
+                    id="p1",
+                    name="Project",
+                    config_json='{"storyboard_mode":"ai"}',
+                )
                 session.add(project)
                 for index in range(1, 4):
                     session.add(

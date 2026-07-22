@@ -258,9 +258,6 @@ def process_next_task() -> bool:
         except runtime_control.TaskCancelledError as exc:
             session.rollback()
             _cancel_task(session, task.id, str(exc))
-        except video_synthesis.ReviewRequired as exc:
-            session.rollback()
-            _mark_review_required(session, task.id, exc.stage, str(exc))
         except Exception as exc:
             session.rollback()
             logger.exception("Task %s failed at stage %s", task.id, task.current_stage)
@@ -372,37 +369,6 @@ def _fail_task(
         refresh_batch_status(session, batch.id)
 
 
-def _mark_review_required(session: Session, task_id: str, stage: str, message: str) -> None:
-    task = session.get(TaskRun, task_id)
-    if not task:
-        return
-    now = utc_now_iso()
-    task.status = "review_required"
-    task.current_stage = stage
-    task.cancel_requested = False
-    task.lease_owner = None
-    task.heartbeat_at = now
-    task.updated_at = now
-    task.error_message = message[-4000:]
-    _append_checkpoint_event(task, "review_required", stage, now, task.error_message)
-    session.add(task)
-    project = session.get(Project, task.project_id)
-    if project:
-        project.status = "review_required"
-        project.updated_at = now
-        session.add(project)
-    item = session.get(BatchItem, task.batch_item_id) if task.batch_item_id else None
-    if item:
-        item.status = "review_required"
-        item.current_stage = stage
-        item.error_message = message[-4000:]
-        item.updated_at = now
-        session.add(item)
-    session.commit()
-    if task.batch_id:
-        refresh_batch_status(session, task.batch_id)
-
-
 def _cancel_task(session: Session, task_id: str, error: str) -> None:
     task = session.get(TaskRun, task_id)
     if not task:
@@ -447,12 +413,8 @@ def refresh_batch_status(session: Session, batch_id: str) -> None:
     )
     batch.completed = sum(item.status == "completed" for item in items)
     batch.failed = sum(item.status == "failed" for item in items)
-    review_required = any(item.status == "review_required" for item in items)
     unfinished = any(item.status not in {"completed", "failed"} for item in items)
-    if review_required:
-        batch.status = "review_required"
-        batch.finished_at = None
-    elif not unfinished:
+    if not unfinished:
         batch.status = "completed_with_errors" if batch.failed else "completed"
         batch.finished_at = utc_now_iso()
     elif batch.status != "paused":

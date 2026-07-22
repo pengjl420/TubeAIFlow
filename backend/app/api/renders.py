@@ -133,12 +133,10 @@ def intelligent_render_status(project_id: str, session: Session = Depends(get_se
             select(SceneAssignment).where(SceneAssignment.project_id == project_id)
         ).all()
     )
-    assignments = [
-        item for item in assignments if item.scene_id in scene_ids and item.manual_confirmed
-    ]
+    assignments = [item for item in assignments if item.scene_id in scene_ids]
     scene_coverages = [timeline_composer.scene_coverage(session, scene) for scene in scenes]
     completed_scene_count = sum(
-        coverage["complete"] and not coverage["review_required"]
+        coverage["complete"]
         for coverage in scene_coverages
     )
     rendered = sum(scene_renderer.scene_output_path(project, scene).is_file() for scene in scenes)

@@ -8,10 +8,7 @@ from app.config import get_settings
 from app.infrastructure.ffmpeg import run_ffmpeg
 from app.infrastructure.project_layout import ensure_project_dirs, get_project_work_dir
 from app.models.media import (
-    LIBRARY_ROLE_LANDSCAPE_FALLBACK,
     LIBRARY_ROLE_PROJECT_GENERATED,
-    LIBRARY_ROLE_SEMANTIC,
-    LIBRARY_ROLE_THEMED_FALLBACK,
     MediaFile,
     MediaShot,
     SceneAssignment,
@@ -81,8 +78,8 @@ def render_scene(
         assignments = assignment
     else:
         assignments = [assignment]
-    if not assignments or any(not item.manual_confirmed for item in assignments):
-        raise ValueError("请先在素材审核中确认该场景使用的镜头")
+    if not assignments:
+        raise ValueError("场景尚未分配生成图片")
 
     settings = get_settings()
     base_dir = get_project_work_dir(project, settings.workspace_dir)
@@ -103,7 +100,7 @@ def render_scene(
         media_file = session.get(MediaFile, shot.media_file_id) if shot else None
         if not shot or not media_file:
             raise ValueError("场景指派的素材镜头不存在")
-        validate_semantic_assignment(item, shot, media_file)
+        validate_generated_assignment(item, shot, media_file)
         source_path = Path(media_file.path).resolve()
         if not source_path.is_file():
             raise ValueError(f"素材文件不存在：{source_path}")
@@ -199,26 +196,18 @@ def render_scene(
     )
 
 
-def validate_semantic_assignment(
+def validate_generated_assignment(
     assignment: SceneAssignment,
     shot: MediaShot,
     media_file: MediaFile,
 ) -> None:
-    expected_role = {
-        "local_semantic": LIBRARY_ROLE_SEMANTIC,
-        "remote_semantic": LIBRARY_ROLE_SEMANTIC,
-        "manual_upload": LIBRARY_ROLE_SEMANTIC,
-        "local_generated_image": LIBRARY_ROLE_PROJECT_GENERATED,
-        LIBRARY_ROLE_THEMED_FALLBACK: LIBRARY_ROLE_THEMED_FALLBACK,
-        LIBRARY_ROLE_LANDSCAPE_FALLBACK: LIBRARY_ROLE_LANDSCAPE_FALLBACK,
-        "manual": shot.library_role,
-    }.get(assignment.selection_stage)
-    if expected_role is None:
-        raise ValueError(f"未知的素材选择阶段：{assignment.selection_stage}")
-    if shot.library_role != expected_role or media_file.library_role != expected_role:
-        raise ValueError("场景素材角色与选择阶段不匹配，已拒绝渲染")
-    if media_file.review_status != "approved" or not media_file.enabled:
-        raise ValueError("场景素材未审核通过或已停用")
+    if assignment.selection_stage != "generated_image":
+        raise ValueError(f"不支持的画面来源：{assignment.selection_stage}")
+    if (
+        shot.library_role != LIBRARY_ROLE_PROJECT_GENERATED
+        or media_file.library_role != LIBRARY_ROLE_PROJECT_GENERATED
+    ):
+        raise ValueError("场景画面不是当前项目生成的图片")
 
 
 def scene_output_path(project: Project, scene: VisualScene) -> Path:

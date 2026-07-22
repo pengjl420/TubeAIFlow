@@ -158,14 +158,14 @@ onMounted(load)
   <section class="delivery-page">
     <header class="page-header">
       <div><span class="section-eyebrow">QUALITY & DELIVERY</span><h1>质量与交付</h1><p>集中预览最终视频、处理 QA 问题，并获取全部生产产物。</p></div>
-      <div class="page-title-actions"><button class="secondary-button" :disabled="loading || exporting !== null" @click="exportEditable('fcpxml')"><FileCode2 :size="16" /> {{ exporting === 'fcpxml' ? '正在生成…' : '生成 FCPXML' }}</button><button class="secondary-button" :disabled="loading || exporting !== null" @click="exportEditable('prproj')"><FileCode2 :size="16" /> {{ exporting === 'prproj' ? '正在转换…' : '生成 PRPROJ' }}</button><button class="secondary-button" :disabled="loading" @click="load"><RefreshCw :size="16" /> 刷新</button><a v-if="finalVideo" class="primary-link" :href="projectOutputFileUrl(projectId, finalVideo.path)" target="_blank"><ExternalLink :size="16" /> 打开最终视频</a></div>
+      <div class="page-title-actions"><button class="secondary-button" :disabled="loading || exporting !== null" @click="exportEditable('fcpxml')"><FileCode2 :size="16" /> {{ exporting === 'fcpxml' ? '正在生成…' : '生成 FCPXML' }}</button><button class="secondary-button" :disabled="loading || exporting !== null" @click="exportEditable('prproj')"><FileCode2 :size="16" /> {{ exporting === 'prproj' ? '正在转换…' : '手动导出 PRPROJ' }}</button><button class="secondary-button" :disabled="loading" @click="load"><RefreshCw :size="16" /> 刷新</button><a v-if="finalVideo" class="primary-link" :href="projectOutputFileUrl(projectId, finalVideo.path)" target="_blank"><ExternalLink :size="16" /> 打开最终视频</a></div>
     </header>
 
     <section class="delivery-video-grid">
       <article class="panel final-video-card">
         <div class="section-head"><div><span class="section-eyebrow">FINAL VIDEO</span><h2>最终视频</h2></div><span class="status-pill" :class="finalVideo ? 'is-success' : 'is-neutral'">{{ finalVideo ? '已生成' : '未生成' }}</span></div>
         <video v-if="finalVideo" controls preload="metadata" :src="projectOutputFileUrl(projectId, finalVideo.path)"></video>
-        <div v-else class="video-empty"><FileVideo2 :size="40" /><strong>最终视频尚未生成</strong><p>先完成素材审核与视频渲染，成片会自动出现在这里。</p><RouterLink class="secondary-button" :to="`/projects/${projectId}/render`">前往视频渲染</RouterLink></div>
+        <div v-else class="video-empty"><FileVideo2 :size="40" /><strong>最终视频尚未生成</strong><p>完成图片生成与视频渲染后，成片会自动出现在这里。</p><RouterLink class="secondary-button" :to="`/projects/${projectId}/render`">前往视频渲染</RouterLink></div>
         <div v-if="finalVideo" class="video-file-meta"><span><strong>1920 × 1080</strong><small>输出分辨率</small></span><span><strong>{{ formatDuration(qa?.summary.video_duration_seconds || project?.audio_duration_seconds || 0) }}</strong><small>成片时长</small></span><span><strong>{{ formatSize(finalVideo.size) }}</strong><small>文件大小</small></span><a :href="projectOutputFileUrl(projectId, finalVideo.path, true)"><Download :size="15" /> 下载</a></div>
       </article>
 

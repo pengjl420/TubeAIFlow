@@ -39,7 +39,10 @@ def run_ffmpeg(args: list[str], project_id: str | None = None) -> None:
     except FileNotFoundError as exc:
         raise RuntimeError(f"FFmpeg executable was not found: {command[0]}") from exc
     task_control.register_process(project_id, process)
-    stdout, stderr = process.communicate()
+    try:
+        stdout, stderr = process.communicate()
+    finally:
+        task_control.unregister_process(project_id, process)
     task_control.check_cancelled(project_id)
     if process.returncode != 0:
         logger.error("FFmpeg failed: %s", stderr)

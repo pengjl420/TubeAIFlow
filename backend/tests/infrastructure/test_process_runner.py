@@ -1,5 +1,6 @@
 import threading
 import unittest
+from unittest.mock import Mock, patch
 
 from app.infrastructure import process_runner
 
@@ -32,6 +33,37 @@ class ProcessRunnerDeferredTests(unittest.TestCase):
         self.assertTrue(finished.wait(timeout=2))
         self.assertFalse(process_runner.status("project-deferred")["running"])
         thread.join(timeout=2)
+
+    def test_windows_cancel_terminates_the_registered_process_tree(self) -> None:
+        process = Mock(pid=4321)
+        process.poll.return_value = None
+
+        with self.assertRaises(process_runner.TaskCancelledError):
+            with process_runner.controlled("project-cancel", "tts"):
+                process_runner.register_process("project-cancel", process)
+                with patch.object(process_runner.sys, "platform", "win32"), patch.object(
+                    process_runner.subprocess, "run", return_value=Mock(returncode=0)
+                ) as taskkill:
+                    result = process_runner.cancel("project-cancel")
+
+                self.assertTrue(result["cancelled"])
+                taskkill.assert_called_once_with(
+                    ["taskkill", "/PID", "4321", "/T", "/F"],
+                    capture_output=True,
+                    check=False,
+                    timeout=10,
+                )
+                process.kill.assert_not_called()
+
+    def test_unregister_process_preserves_stage_but_removes_stale_child(self) -> None:
+        process = Mock()
+        with self.assertRaises(process_runner.TaskCancelledError):
+            with process_runner.controlled("project-unregister", "tts"):
+                process_runner.register_process("project-unregister", process)
+                process_runner.unregister_process("project-unregister", process)
+                self.assertTrue(process_runner.status("project-unregister")["running"])
+                process_runner.cancel("project-unregister")
+                process.kill.assert_not_called()
 
     def test_deferred_call_receives_active_stage_failure(self) -> None:
         entered = threading.Event()

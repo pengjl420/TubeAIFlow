@@ -3,11 +3,9 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   AudioLines,
-  Boxes,
   ChevronDown,
   Cpu,
   FolderKanban,
-  HardDrive,
   Layers3,
   LayoutDashboard,
   ListTodo,
@@ -34,7 +32,6 @@ const navigation = [
   { to: '/projects', label: '项目', icon: FolderKanban },
   { to: '/batches', label: '批量生产', icon: Layers3 },
   { to: '/tasks', label: '任务中心', icon: ListTodo },
-  { to: '/assets', label: '素材中心', icon: Boxes },
   { to: '/voices', label: '音色中心', icon: AudioLines },
   { to: '/settings/general', label: '系统设置', icon: Settings2 },
 ]
@@ -129,9 +126,6 @@ onBeforeUnmount(() => {
           <RouterLink to="/tasks" class="taf-status-item green">
             <span class="taf-status-icon"><Cpu :size="19" /></span><span>GPU<strong>2/2 <i></i></strong></span>
           </RouterLink>
-          <RouterLink to="/assets/storage" class="taf-status-item storage">
-            <span class="taf-status-icon"><HardDrive :size="19" /></span><span>磁盘剩余<strong>1.26 TB <small>/ 2.00 TB</small></strong></span>
-          </RouterLink>
         </div>
 
         <div v-click-outside="() => { createMenuOpen = false }" class="create-menu">
@@ -141,7 +135,6 @@ onBeforeUnmount(() => {
           <div v-if="createMenuOpen" class="create-menu-popover" role="menu">
             <button type="button" @click="selectCreate('/projects/new')"><FolderKanban :size="17" /><span><strong>新建项目</strong><small>从一份逐字稿开始</small></span></button>
             <button type="button" @click="selectCreate('/batches/new')"><Layers3 :size="17" /><span><strong>新建批次</strong><small>批量导入多个脚本</small></span></button>
-            <button type="button" @click="selectCreate('/assets/import')"><Boxes :size="17" /><span><strong>导入素材</strong><small>扫描本地素材目录</small></span></button>
           </div>
         </div>
       </header>

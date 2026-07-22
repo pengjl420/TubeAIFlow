@@ -32,19 +32,6 @@ export interface SystemSettings {
   deepseek_timeout_seconds: number
   deepseek_max_tokens: number
   deepseek_retry_count: number
-  pexels_api_key: string
-  pexels_api_key_configured: boolean
-  pixabay_api_key: string
-  pixabay_api_key_configured: boolean
-  pexels_storage_dir: string | null
-  pixabay_storage_dir: string | null
-  media_search_cache_hours: number
-  media_search_download_limit: number
-  auto_fallback_enabled: boolean
-  auto_landscape_fallback_enabled: boolean
-  auto_fallback_review_required: boolean
-  auto_fallback_max_ratio_percent: number
-  auto_fallback_max_consecutive_shots: number
   image_generation_model_path: string | null
   image_generation_config_dir: string | null
   image_generation_python: string | null
@@ -57,19 +44,6 @@ export interface SystemSettings {
   image_generation_candidates_per_scene: number
   image_generation_cpu_offload: boolean
   image_generation_negative_prompt: string
-  image_selection_semantic_weight: number
-  image_selection_technical_weight: number
-  image_selection_min_semantic_score: number
-  image_selection_min_total_score: number
-  image_selection_min_score_margin: number
-  image_selection_min_sharpness: number
-  image_selection_max_clipped_ratio: number
-  vision_embedding_model_dir: string | null
-  vision_embedding_device: string
-  vision_embedding_dtype: 'bfloat16' | 'float16' | 'float32'
-  vision_embedding_max_images: number
-  vision_embedding_max_pixels: number
-  vision_embedding_instruction: string
   qwen_tts_root: string | null
   qwen_tts_python: string | null
   qwen_tts_model_dir: string | null
@@ -101,17 +75,6 @@ export interface FfmpegInstallResult {
   status: FfmpegStatus
 }
 
-export interface MediaProviderStatus {
-  provider: 'pexels' | 'pixabay'
-  configured: boolean
-  status: 'unconfigured' | 'available' | 'cooldown' | 'error'
-  rate_limit: number | null
-  remaining: number | null
-  reset_at: string | null
-  last_error: string | null
-  updated_at: string | null
-}
-
 export async function getSystemSettings(): Promise<SystemSettings> {
   return unwrap<SystemSettings>(await apiClient.get('/settings'))
 }
@@ -122,11 +85,6 @@ export async function saveSystemSettings(settings: SystemSettings): Promise<Syst
 
 export async function clearSystemSecret(field: string): Promise<SystemSettings> {
   return unwrap<SystemSettings>(await apiClient.post('/settings/clear-secret', { field }))
-}
-
-export async function getMediaProviderStatuses(): Promise<MediaProviderStatus[]> {
-  const result = unwrap<{ providers: MediaProviderStatus[] }>(await apiClient.get('/settings/media-providers/status'))
-  return result.providers
 }
 
 export async function getFfmpegStatus(): Promise<FfmpegStatus> {

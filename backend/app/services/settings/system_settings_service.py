@@ -8,7 +8,7 @@ from app.models.settings import SystemSetting
 from app.shared.time import utc_now_iso
 
 
-SECRET_FIELDS = {"deepseek_api_key", "pexels_api_key", "pixabay_api_key"}
+SECRET_FIELDS = {"deepseek_api_key"}
 
 
 def get_public_settings() -> dict:
@@ -22,13 +22,10 @@ def get_public_settings() -> dict:
 
 def save_settings(session: Session, values: dict) -> dict:
     current = get_settings().model_dump(mode="json")
-    changed_provider_secrets = []
     for field_name in SECRET_FIELDS:
         value = str(values.pop(field_name, "") or "").strip()
         if value:
             current[field_name] = value
-            if field_name in {"pexels_api_key", "pixabay_api_key"}:
-                changed_provider_secrets.append(field_name.removesuffix("_api_key"))
     current.update(values)
     settings = Settings.model_validate(current)
     _validate_paths(settings)
@@ -42,11 +39,6 @@ def save_settings(session: Session, values: dict) -> dict:
         record = SystemSetting(id=1, config_json=serialized)
     session.add(record)
     session.commit()
-    if changed_provider_secrets:
-        from app.services.media_library.media_provider_service import reset_provider_state
-
-        for provider in changed_provider_secrets:
-            reset_provider_state(session, provider)
     clear_settings_cache()
     return get_public_settings()
 
@@ -66,10 +58,6 @@ def clear_secret(session: Session, field_name: str) -> dict:
         record = SystemSetting(id=1, config_json=serialized)
     session.add(record)
     session.commit()
-    if field_name in {"pexels_api_key", "pixabay_api_key"}:
-        from app.services.media_library.media_provider_service import reset_provider_state
-
-        reset_provider_state(session, field_name.removesuffix("_api_key"))
     clear_settings_cache()
     return get_public_settings()
 
@@ -91,19 +79,11 @@ def _validate_paths(settings: Settings) -> None:
     workspace.mkdir(parents=True, exist_ok=True)
     if not workspace.is_dir():
         raise ValueError("Workspace path is not a directory")
-    for field_name in ("pexels_storage_dir", "pixabay_storage_dir"):
-        path: Path | None = getattr(settings, field_name)
-        if path is not None:
-            path = path.expanduser().resolve()
-            path.mkdir(parents=True, exist_ok=True)
-            if not path.is_dir():
-                raise ValueError(f"{field_name} must be a directory")
     for field_name in (
         "qwen_tts_root",
         "qwen_tts_model_dir",
         "cosyvoice_root",
         "cosyvoice_model_dir",
-        "vision_embedding_model_dir",
         "image_generation_config_dir",
     ):
         path: Path | None = getattr(settings, field_name)

@@ -10,8 +10,6 @@ from app.infrastructure import process_runner as task_control
 from app.config import get_settings
 from app.infrastructure.project_layout import (
     get_final_audio_path,
-    get_final_fcpxml_path,
-    get_final_prproj_path,
     get_final_srt_path,
     get_final_video_path,
     get_output_stem,
@@ -108,7 +106,7 @@ def run_project_generation(
             raise
         on_stage_changed("completed")
 
-    if stage in {"storyboard", "asset_search", "asset_review", "image_generation", "image_review", "scene_render", "visual_track", "final_render", "quality_check", "quality_review", "fcpxml_export", "prproj_export", "editable_export"}:
+    if stage in video_synthesis.STAGES and stage != "completed":
         video_synthesis.run_video_synthesis(session, project, stage, on_stage_changed)
 
 
@@ -118,18 +116,9 @@ def _stage_after_narration(project: Project, include_video: bool) -> str:
         if include_video
         else project_service.VIDEO_MODE_NONE
     )
-    output_format = project_service.get_video_output_format(project)
-    if (
-        video_mode in {project_service.VIDEO_MODE_NONE, project_service.VIDEO_MODE_LANDSCAPE}
-        and output_format != project_service.VIDEO_OUTPUT_MP4
-    ):
-        return video_synthesis.output_stage(project)
     if video_mode == project_service.VIDEO_MODE_LANDSCAPE:
         return "video"
-    if video_mode in {
-        project_service.VIDEO_MODE_AI_SEMANTIC,
-        project_service.VIDEO_MODE_AI_GENERATED_IMAGES,
-    }:
+    if video_mode == project_service.VIDEO_MODE_AI_GENERATED_IMAGES:
         return "storyboard"
     return "completed"
 
@@ -188,22 +177,9 @@ def _narration_outputs_exist(session: Session, project: Project) -> bool:
 
 
 def _final_output_exists(project: Project) -> bool:
-    settings = get_settings()
-    output_format = project_service.get_video_output_format(project)
-    if output_format == project_service.VIDEO_OUTPUT_FCPXML:
-        return get_final_fcpxml_path(project, settings.workspace_dir).is_file()
-    if output_format == project_service.VIDEO_OUTPUT_PRPROJ:
-        return get_final_prproj_path(project, settings.workspace_dir).is_file()
-    if output_format == project_service.VIDEO_OUTPUT_EDITABLE_BOTH:
-        return (
-            get_final_fcpxml_path(project, settings.workspace_dir).is_file()
-            and get_final_prproj_path(project, settings.workspace_dir).is_file()
-        )
-    return get_final_video_path(project, settings.workspace_dir).is_file()
+    return get_final_video_path(project, get_settings().workspace_dir).is_file()
 
 
 def _stage_after_existing_output(project: Project) -> str:
-    if project_service.get_video_output_format(project) != project_service.VIDEO_OUTPUT_MP4:
-        return "completed"
     report = qa_service.read_report(project)
     return "completed" if report and report.get("passed") else "quality_check"

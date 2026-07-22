@@ -93,7 +93,7 @@ def run_quality_check(session: Session, project: Project) -> dict:
     for scene in scenes:
         scene_assignments = assignments.get(scene.id, [])
         coverage = timeline_composer.scene_coverage(session, scene)
-        if not coverage["complete"] or any(not item.manual_confirmed for item in scene_assignments):
+        if not coverage["complete"]:
             _issue(
                 issues,
                 "assignment_missing",

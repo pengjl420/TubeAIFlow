@@ -10,7 +10,6 @@ export interface Project {
     tts_engine?: string
     include_video?: boolean
     video_mode?: VideoGenerationMode
-    semantic_review_mode?: SemanticReviewMode
     video_output_format?: VideoOutputFormat
     storyboard_transition_enabled?: boolean
     segmentation_mode?: SegmentationMode
@@ -27,8 +26,7 @@ export interface Project {
   latest_task_status?: string | null
 }
 
-export type VideoGenerationMode = 'none' | 'landscape' | 'ai_semantic' | 'ai_generated_images'
-export type SemanticReviewMode = 'manual' | 'automatic'
+export type VideoGenerationMode = 'none' | 'landscape' | 'ai_generated_images'
 export type VideoOutputFormat = 'mp4' | 'fcpxml' | 'prproj' | 'editable_both'
 export type SegmentationMode = 'newline' | 'ai'
 export type StoryboardMode = 'ai' | 'segments'

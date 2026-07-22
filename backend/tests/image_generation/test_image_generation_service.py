@@ -14,7 +14,6 @@ from app.models.media import (
     GeneratedImageVariant,
     MediaFile,
     MediaShot,
-    SceneCandidate,
 )
 from app.models.project import Project
 from app.models.storyboard import VisualScene
@@ -85,16 +84,13 @@ class ImageGenerationServiceTests(unittest.TestCase):
             self.assertEqual(second["generated_count"], 0)
             self.assertEqual(runner.call_count, 1)
             variants = session.exec(select(GeneratedImageVariant)).all()
-            candidates = session.exec(select(SceneCandidate)).all()
             media_files = session.exec(select(MediaFile)).all()
             shots = session.exec(select(MediaShot)).all()
             self.assertEqual(len(variants), 2)
-            self.assertEqual(len(candidates), 1)  # identical fake images deduplicate by hash
+            self.assertEqual(len(media_files), 1)  # identical fake images deduplicate by hash
             self.assertTrue(all(item.status == "completed" for item in variants))
             self.assertTrue(all(item.library_role == LIBRARY_ROLE_PROJECT_GENERATED for item in media_files))
             self.assertTrue(all(item.library_role == LIBRARY_ROLE_PROJECT_GENERATED for item in shots))
-            self.assertEqual(candidates[0].scene_id, scene.id)
-            self.assertEqual(candidates[0].selection_stage, "local_generated_image")
 
     def _project_scene(self, session: Session):
         project = Project(id="project-1", name="Generated", output_dir=str(self.root))

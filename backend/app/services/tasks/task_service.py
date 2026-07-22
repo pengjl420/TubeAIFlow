@@ -94,16 +94,6 @@ def get_latest_project_workflow_task(
     ).first()
 
 
-def resume_review_task(session: Session, task: TaskRun, *, current_stage: str | None = None) -> None:
-    if task.status != "review_required":
-        raise ValueError("当前任务不处于待复核状态")
-    if current_stage:
-        task.current_stage = current_stage
-    queue_paused_task(session, task)
-    session.commit()
-    session.refresh(task)
-
-
 def resume_failed_task(session: Session, task: TaskRun, *, current_stage: str) -> None:
     """Requeue a failed task from a verified workflow checkpoint."""
     if task.status != "failed":
@@ -196,7 +186,7 @@ def request_cancel(session: Session, task: TaskRun) -> None:
         task.finished_at = now
     elif task.status == "running":
         task.cancel_requested = True
-    elif task.status in {"paused", "review_required"}:
+    elif task.status == "paused":
         task.status = "cancelled"
         task.finished_at = now
     task.updated_at = now

@@ -3,11 +3,13 @@ import json
 import httpx
 
 from app.config import Settings, get_settings
+from app.infrastructure import process_runner as task_control
 
 
 class DeepSeekClient:
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(self, settings: Settings | None = None, project_id: str | None = None) -> None:
         self.settings = settings or get_settings()
+        self.project_id = project_id
 
     def chat_json(self, system_prompt: str, user_prompt: str) -> dict:
         if not self.settings.deepseek_api_key.strip():
@@ -28,16 +30,22 @@ class DeepSeekClient:
         }
         last_error: Exception | None = None
         for _attempt in range(self.settings.deepseek_retry_count + 1):
+            if self.project_id:
+                task_control.check_cancelled(self.project_id)
+            client = httpx.Client(timeout=self.settings.deepseek_timeout_seconds)
+            if self.project_id:
+                task_control.register_cancel_callback(self.project_id, client.close)
             try:
-                with httpx.Client(timeout=self.settings.deepseek_timeout_seconds) as client:
-                    response = client.post(
-                        endpoint,
-                        headers={
-                            "Authorization": f"Bearer {self.settings.deepseek_api_key}",
-                            "Content-Type": "application/json",
-                        },
-                        json=payload,
-                    )
+                response = client.post(
+                    endpoint,
+                    headers={
+                        "Authorization": f"Bearer {self.settings.deepseek_api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                )
+                if self.project_id:
+                    task_control.check_cancelled(self.project_id)
                 response.raise_for_status()
                 data = response.json()
                 choice = data["choices"][0]
@@ -50,6 +58,12 @@ class DeepSeekClient:
                 if not isinstance(parsed, dict):
                     raise RuntimeError("DeepSeek 返回的 JSON 根节点必须是对象")
                 return parsed
-            except (httpx.HTTPError, KeyError, IndexError, TypeError, json.JSONDecodeError, RuntimeError) as exc:
+            except task_control.TaskCancelledError:
+                raise
+            except (httpx.HTTPError, OSError, KeyError, IndexError, TypeError, json.JSONDecodeError, RuntimeError) as exc:
                 last_error = exc
+            finally:
+                if self.project_id:
+                    task_control.register_cancel_callback(self.project_id, None)
+                client.close()
         raise RuntimeError(f"DeepSeek 请求失败：{last_error}") from last_error

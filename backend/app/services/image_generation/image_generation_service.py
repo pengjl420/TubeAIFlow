@@ -22,7 +22,6 @@ from app.models.media import (
     MediaFile,
     MediaShot,
     SceneAssignment,
-    SceneCandidate,
 )
 from app.models.project import Project
 from app.models.storyboard import VisualScene
@@ -33,7 +32,6 @@ from app.shared.time import utc_now_iso
 logger = logging.getLogger(__name__)
 WORKFLOW_VERSION = "sdxl_single_file_v1"
 PROVIDER = "local_image_generation"
-SELECTION_STAGE = "local_generated_image"
 
 
 def generate_project_images(session: Session, project: Project) -> dict:
@@ -201,7 +199,7 @@ def _generate(
     for variant in variants:
         session.refresh(variant)
         if variant.status == "completed" and Path(variant.path).is_file():
-            _register_candidate(session, project, variant)
+            _register_generated_image(session, project, variant)
             registered += 1
     session.commit()
     failures = [item for item in variants if item.status == "failed"]
@@ -262,7 +260,11 @@ def _run_batch(
     started = time.monotonic()
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     task_control.register_process(project.id, process)
-    stdout, stderr = process.communicate()
+    try:
+        stdout, stderr = process.communicate()
+    finally:
+        task_control.unregister_process(project.id, process)
+    task_control.check_cancelled(project.id)
     logger.info("Image generation runner completed in %.2fs", time.monotonic() - started)
     if process.returncode != 0:
         details = (stderr or stdout or "图片生成子进程失败").strip()
@@ -286,7 +288,7 @@ def _apply_results(session: Session, result_path: Path) -> None:
     session.commit()
 
 
-def _register_candidate(session: Session, project: Project, variant: GeneratedImageVariant) -> None:
+def _register_generated_image(session: Session, project: Project, variant: GeneratedImageVariant) -> None:
     path = Path(variant.path).resolve()
     file_hash = _sha256(path)
     media_file = session.exec(select(MediaFile).where(MediaFile.file_hash == file_hash)).first()
@@ -305,8 +307,6 @@ def _register_candidate(session: Session, project: Project, variant: GeneratedIm
             width=width,
             height=height,
             library_role=LIBRARY_ROLE_PROJECT_GENERATED,
-            review_status="approved",
-            enabled=True,
             metadata_json=json.dumps(
                 {
                     "project_id": project.id,
@@ -338,30 +338,7 @@ def _register_candidate(session: Session, project: Project, variant: GeneratedIm
         if shot is None:
             raise RuntimeError("生成图片素材缺少 MediaShot")
 
-    candidate = session.exec(
-        select(SceneCandidate).where(
-            SceneCandidate.scene_id == variant.scene_id,
-            SceneCandidate.media_shot_id == shot.id,
-        )
-    ).first()
-    if candidate is None:
-        candidate = SceneCandidate(
-            id=f"generated_candidate_{hashlib.sha1(variant.id.encode()).hexdigest()[:20]}",
-            project_id=project.id,
-            scene_id=variant.scene_id,
-            media_shot_id=shot.id,
-            source=PROVIDER,
-            query=variant.prompt,
-            technical_score=1.0,
-            total_score=1.0,
-            status="QUALIFIED",
-            selection_stage=SELECTION_STAGE,
-            conflicts_json="[]",
-        )
-        session.add(candidate)
-        session.flush()
     variant.media_file_id = media_file.id
-    variant.candidate_id = candidate.id
     variant.updated_at = utc_now_iso()
     session.add(variant)
 
@@ -372,17 +349,16 @@ def _clear_scene_generated_assets(session: Session, scene_id: str) -> None:
             select(GeneratedImageVariant).where(GeneratedImageVariant.scene_id == scene_id)
         ).all()
     )
-    candidate_ids = {item.candidate_id for item in variants if item.candidate_id}
     media_ids = {item.media_file_id for item in variants if item.media_file_id}
     for assignment in session.exec(
         select(SceneAssignment).where(SceneAssignment.scene_id == scene_id)
     ).all():
-        if assignment.candidate_id in candidate_ids:
+        if assignment.media_shot_id in {
+            shot.id
+            for media_id in media_ids
+            for shot in session.exec(select(MediaShot).where(MediaShot.media_file_id == media_id)).all()
+        }:
             session.delete(assignment)
-    for candidate_id in candidate_ids:
-        candidate = session.get(SceneCandidate, candidate_id)
-        if candidate:
-            session.delete(candidate)
     for media_id in media_ids:
         still_referenced = session.exec(
             select(GeneratedImageVariant).where(
@@ -399,7 +375,6 @@ def _clear_scene_generated_assets(session: Session, scene_id: str) -> None:
             session.delete(media_file)
     for variant in variants:
         variant.media_file_id = None
-        variant.candidate_id = None
         session.add(variant)
     session.flush()
 

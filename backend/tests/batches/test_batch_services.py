@@ -161,7 +161,7 @@ class GenerationCheckpointTests(unittest.TestCase):
         compose_video.assert_called_once_with(session, project)
         self.assertEqual(stages, ["completed"])
 
-    def test_audio_only_fcpxml_exports_after_audio(self) -> None:
+    def test_audio_only_legacy_fcpxml_setting_does_not_export_video_or_project(self) -> None:
         session = MagicMock()
         project = Project(
             id="p1",
@@ -181,17 +181,15 @@ class GenerationCheckpointTests(unittest.TestCase):
                 session, project, "subtitles", False, stages.append
             )
 
-        video_workflow.assert_called_once_with(
-            session, project, "fcpxml_export", stages.append
-        )
-        self.assertEqual(stages, ["fcpxml_export"])
+        video_workflow.assert_not_called()
+        self.assertEqual(stages, ["completed"])
 
-    def test_ai_semantic_mode_branches_after_shared_subtitle_stage(self) -> None:
+    def test_generated_image_mode_branches_after_shared_subtitle_stage(self) -> None:
         session = MagicMock()
         project = Project(
             id="p1",
             name="Project",
-            config_json='{"include_video":true,"video_mode":"ai_semantic"}',
+            config_json='{"include_video":true,"video_mode":"ai_generated_images"}',
         )
         stages: list[str] = []
 

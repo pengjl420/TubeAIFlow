@@ -162,7 +162,7 @@ class ProjectSettingsTests(unittest.TestCase):
             config = json.loads(result.config_json or "{}")
             self.assertFalse(config["include_video"])
 
-    def test_ai_semantic_video_does_not_require_landscape_directory(self) -> None:
+    def test_generated_image_video_does_not_require_landscape_directory(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             project = Project(id="project-id", name="Name", config_json="{}")
@@ -179,12 +179,12 @@ class ProjectSettingsTests(unittest.TestCase):
                     "voice",
                     "",
                     include_video=True,
-                    video_mode="ai_semantic",
+                    video_mode="ai_generated_images",
                 )
 
             config = json.loads(result.config_json or "{}")
             self.assertTrue(config["include_video"])
-            self.assertEqual(config["video_mode"], "ai_semantic")
+            self.assertEqual(config["video_mode"], "ai_generated_images")
             self.assertNotIn("media_video_dir", config)
 
     def test_legacy_include_video_projects_resolve_to_landscape_mode(self) -> None:
@@ -209,34 +209,15 @@ class ProjectSettingsTests(unittest.TestCase):
             project_service.VIDEO_OUTPUT_MP4,
         )
 
-    def test_semantic_review_mode_defaults_to_automatic(self) -> None:
+    def test_storyboard_defaults_to_transcript_segments(self) -> None:
         legacy = Project(id="legacy", name="Legacy", config_json="{}")
         self.assertEqual(
-            project_service.get_semantic_review_mode(legacy),
-            project_service.SEMANTIC_REVIEW_AUTO,
+            project_service.normalize_storyboard_mode(None),
+            project_service.STORYBOARD_MODE_SEGMENTS,
         )
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            project = Project(id="project-id", name="Name", config_json="{}")
-            with patch.object(
-                project_service,
-                "get_settings",
-                return_value=SimpleNamespace(workspace_dir=root / "workspace"),
-            ):
-                result = project_service.update_project_settings(
-                    FakeSession(),
-                    project,
-                    "Name",
-                    str(root / "output"),
-                    "voice",
-                    "",
-                    include_video=True,
-                    video_mode="ai_semantic",
-                    semantic_review_mode="automatic",
-                )
         self.assertEqual(
-            json.loads(result.config_json or "{}")["semantic_review_mode"],
-            "automatic",
+            project_service.get_storyboard_mode(legacy),
+            project_service.STORYBOARD_MODE_SEGMENTS,
         )
 
     def test_switching_to_qwen_resets_completed_segments(self) -> None:

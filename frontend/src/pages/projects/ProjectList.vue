@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowRight, AudioLines, CheckCircle2, Clock3, Download, FileVideo2, Folder,
-  FolderKanban, MoreVertical, Play, Plus, RefreshCw, Search, Trash2,
+  FolderKanban, PauseCircle, Play, Plus, RefreshCw, Search, Trash2,
   WandSparkles, XCircle,
 } from 'lucide-vue-next'
 
@@ -96,7 +96,7 @@ function videoMode(project: Project) {
 function projectStage(project: Project) {
   if (project.status === 'failed') return '视频渲染失败'
   if (project.status === 'completed') return '已完成 100%'
-  if (project.status === 'review_required') return '素材审核'
+  if (project.status === 'review_required') return '旧任务待恢复'
   if (project.status === 'narration_ready') return '字幕校对'
   if (project.status === 'video_in_progress' || project.status === 'rendering') return '视频渲染'
   if (isGenerating(project)) return '配音生成'
@@ -112,13 +112,13 @@ function stageProgress(project: Project) {
 }
 function projectTarget(project: Project) {
   if (project.status === 'completed') return `/projects/${project.id}/delivery`
-  if (project.status === 'review_required') return `/projects/${project.id}/media-review`
+  if (project.status === 'review_required') return `/projects/${project.id}/narration`
   if (project.status === 'narration_ready') return `/projects/${project.id}/subtitles`
   return `/projects/${project.id}/overview`
 }
 function actionLabel(project: Project) {
   if (project.status === 'completed') return '查看产物'
-  if (project.status === 'review_required') return '审核素材'
+  if (project.status === 'review_required') return '重新生成'
   if (project.status === 'narration_ready') return '校对字幕'
   if (project.status === 'failed') return '查看错误'
   if (isGenerating(project)) return '查看进度'
@@ -142,11 +142,41 @@ async function setWaitingFilter() {
 }
 
 async function stopProject(project: Project) {
-  if (!await confirmAction({ eyebrow: '停止生成任务', title: `停止“${project.name}”？`, description: '已生成的文件会保留，可稍后从检查点继续。', confirmText: '确认停止', tone: 'warning' })) return
+  if (!await confirmAction({ eyebrow: '强制暂停生成任务', title: `暂停“${project.name}”？`, description: '将终止当前生成子进程；已生成的文件会保留，可稍后从检查点继续。', confirmText: '确认强制暂停', tone: 'warning' })) return
   actingProjectId.value = project.id
-  try { await cancelProjectTask(project.id); await loadProjects() }
-  catch (err) { showToast({ title: '停止失败', description: err instanceof Error ? err.message : '请稍后重试', tone: 'danger' }) }
+  try {
+    await cancelProjectTask(project.id)
+    await loadProjects()
+    showToast({ title: '强制暂停指令已发送', description: '当前子进程正在终止，已生成文件会保留。', tone: 'success' })
+  }
+  catch (err) { showToast({ title: '强制暂停失败', description: err instanceof Error ? err.message : '请稍后重试', tone: 'danger' }) }
   finally { actingProjectId.value = '' }
+}
+async function removeProject(project: Project) {
+  if (isGenerating(project)) {
+    showToast({ title: '项目仍在生成中', description: '请先强制暂停，确认任务停止后再删除。', tone: 'warning' })
+    return
+  }
+  if (!await confirmAction({
+    eyebrow: '删除项目',
+    title: `删除“${project.name}”？`,
+    description: '项目记录和对应生成文件会移入系统回收站。',
+    confirmText: '确认删除',
+    tone: 'danger',
+  })) return
+  actingProjectId.value = project.id
+  try {
+    await deleteProject(project.id)
+    const selected = new Set(selectedProjectIds.value)
+    selected.delete(project.id)
+    selectedProjectIds.value = selected
+    await loadProjects()
+    showToast({ title: '项目已删除', description: project.name, tone: 'success' })
+  } catch (err) {
+    showToast({ title: '删除失败', description: err instanceof Error ? err.message : '请稍后重试', tone: 'danger' })
+  } finally {
+    actingProjectId.value = ''
+  }
 }
 async function removeSelected() {
   const targets = [...selectedProjects.value]
@@ -218,13 +248,13 @@ onBeforeUnmount(() => { if (refreshTimer !== undefined) window.clearInterval(ref
         <div class="taf-project-filters">
           <label><Search :size="17" /><input v-model="query" type="search" placeholder="搜索项目名称" /></label>
           <select v-model="statusFilter"><option value="all">全部状态</option><option value="generating">生成中</option><option value="waiting">等待处理</option><option value="review_required">等待审核</option><option value="completed">已完成</option><option value="failed">失败/异常</option></select>
-          <select v-model="modeFilter"><option value="all">全部视频模式</option><option value="ai_generated_images">图文快剪</option><option value="ai_semantic">访谈纪实</option><option value="landscape">Vlog</option><option value="none">仅配音字幕</option></select>
+          <select v-model="modeFilter"><option value="all">全部视频模式</option><option value="ai_generated_images">图文快剪</option><option value="landscape">风景素材拼接</option><option value="none">仅配音字幕</option></select>
           <select v-model="sortOrder" aria-label="项目排序"><option value="updated_desc">最近更新优先</option><option value="updated_asc">最早更新优先</option><option value="name_asc">名称 A–Z</option><option value="name_desc">名称 Z–A</option></select>
           <select v-model="voiceFilter" aria-label="音色筛选"><option value="all">全部音色</option><option v-for="name in voiceOptions" :key="name" :value="name">{{ name }}</option></select>
           <span class="taf-filter-spacer"></span><button class="taf-filter-button" :disabled="loading" @click="loadProjects"><RefreshCw :size="15" /></button>
         </div>
 
-        <div class="taf-project-table-head"><span><input type="checkbox" :checked="allSelected" @change="toggleAll" /></span><span>项目名称</span><span>生命周期状态</span><span>当前阶段</span><span>视频模式</span><span>音色</span><span>总时长</span><span>最近更新时间</span><span>主操作</span><span></span></div>
+        <div class="taf-project-table-head"><span><input type="checkbox" :checked="allSelected" @change="toggleAll" /></span><span>项目名称</span><span>生命周期状态</span><span>当前阶段</span><span>视频模式</span><span>音色</span><span>总时长</span><span>最近更新时间</span><span>主操作</span><span>项目操作</span></div>
         <div v-if="loading && !projects.length" class="taf-empty-row">正在加载项目...</div>
         <div v-else-if="!filteredProjects.length" class="taf-empty-row">没有匹配的项目</div>
         <div v-for="(project, index) in filteredProjects" :key="project.id" class="taf-project-table-row" :class="{ selected: selectedProjectIds.has(project.id) }">
@@ -237,7 +267,20 @@ onBeforeUnmount(() => { if (refreshTimer !== undefined) window.clearInterval(ref
           <span>{{ formatDuration(project.audio_duration_seconds || null, '—') }}</span>
           <span class="taf-date"><strong>{{ formatDateTime(project.updated_at) }}</strong><small>本地项目</small></span>
           <span><RouterLink class="taf-table-action" :to="projectTarget(project)">{{ actionLabel(project) }} <ArrowRight :size="13" /></RouterLink></span>
-          <span><button v-if="isGenerating(project)" class="taf-icon-button" :disabled="actingProjectId === project.id" @click="stopProject(project)"><MoreVertical :size="17" /></button><button v-else class="taf-icon-button" @click="router.push(`/projects/${project.id}/settings`)"><MoreVertical :size="17" /></button></span>
+          <span class="taf-project-row-actions">
+            <button
+              class="taf-project-pause-button"
+              :disabled="!isGenerating(project) || actingProjectId === project.id"
+              :title="isGenerating(project) ? '强制暂停当前生成任务' : '当前没有生成中的任务'"
+              @click="stopProject(project)"
+            ><PauseCircle :size="13" />强制暂停</button>
+            <button
+              class="taf-project-delete-button"
+              :disabled="isGenerating(project) || actingProjectId === project.id"
+              :title="isGenerating(project) ? '请先强制暂停任务' : '删除项目'"
+              @click="removeProject(project)"
+            ><Trash2 :size="13" />删除</button>
+          </span>
         </div>
       </section>
 

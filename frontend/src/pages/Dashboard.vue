@@ -35,12 +35,12 @@ const statusLabels: Record<string, string> = {
 }
 const stageLabels: Record<string, string> = {
   segmenting: '准备脚本', tts: '生成配音', audio_merge: '合并音频', subtitles: '准备视频',
-  storyboard: '视觉分镜', asset_search: '素材匹配', asset_review: '自动选材', scene_render: '渲染视频',
+  storyboard: '视觉分镜', image_generation: '生成图片', scene_render: '渲染视频',
   final_render: '合成视频', quality_check: '完成生成', quality_review: '完成生成',
 }
 const stageProgress: Record<string, number> = {
-  segmenting: 18, tts: 42, audio_merge: 55, subtitles: 68, storyboard: 24,
-  asset_search: 35, asset_review: 48, scene_render: 68, final_render: 82, quality_check: 90,
+  segmenting: 18, tts: 42, audio_merge: 55, subtitles: 68,
+  storyboard: 35, image_generation: 48, scene_render: 68, final_render: 82, quality_check: 90,
 }
 
 function projectStatus(project: DashboardProject) { return statusLabels[project.status] || '待开始' }

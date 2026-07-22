@@ -2,12 +2,8 @@ from app.models.batch import BatchItem, BatchJob
 from app.models.media import (
     GeneratedImageVariant,
     MediaFile,
-    MediaKeyframe,
-    MediaProviderState,
-    MediaQueryCache,
     MediaShot,
     SceneAssignment,
-    SceneCandidate,
 )
 from app.models.narration import Segment, VoiceProfile
 from app.models.project import Project
@@ -20,14 +16,10 @@ __all__ = [
     "BatchJob",
     "GeneratedImageVariant",
     "MediaFile",
-    "MediaKeyframe",
-    "MediaProviderState",
-    "MediaQueryCache",
     "MediaShot",
     "Project",
     "Segment",
     "SceneAssignment",
-    "SceneCandidate",
     "SystemSetting",
     "SubtitleCue",
     "TaskRun",

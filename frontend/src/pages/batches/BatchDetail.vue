@@ -25,7 +25,7 @@ let pollTimer: number | undefined
 const statusMeta: Record<string, { label: string; tone: string }> = {
   draft:{label:'草稿',tone:'muted'},queued:{label:'运行中',tone:'blue'},running:{label:'运行中',tone:'blue'},paused:{label:'已暂停',tone:'muted'},review_required:{label:'待人工处理',tone:'orange'},completed:{label:'已完成',tone:'green'},completed_with_errors:{label:'部分失败',tone:'red'},failed:{label:'失败',tone:'red'},
 }
-const stageLabels: Record<string,string> = {segmenting:'文本切段',tts:'生成配音',audio_merge:'合并音频',subtitles:'生成字幕',video:'生成视频',storyboard:'生成分镜',asset_search:'素材检索',asset_review:'素材审核',image_generation:'生成分镜图片',image_review:'图片审核',scene_render:'场景渲染',final_render:'最终合成',quality_check:'质量检查',quality_review:'质量复核',fcpxml_export:'FCPXML 工程导出',prproj_export:'PRPROJ 工程导出',editable_export:'双格式工程导出',completed:'导出完成'}
+const stageLabels: Record<string,string> = {segmenting:'文本切段',tts:'生成配音',audio_merge:'合并音频',subtitles:'生成字幕',video:'生成视频',storyboard:'生成分镜',image_generation:'生成并分配分镜图片',scene_render:'场景渲染',visual_track:'画面轨道合成',final_render:'最终合成',quality_check:'成片质量检查',completed:'导出完成'}
 const statusOf = (status:string) => statusMeta[status] || {label:status,tone:'muted'}
 const stageOf = (stage:string) => stageLabels[stage] || stage || '等待执行'
 const completedCount = computed(() => batch.value?.completed || 0)

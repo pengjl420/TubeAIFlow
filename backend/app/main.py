@@ -3,7 +3,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session
 
 from app.api import (
-    assets,
     batches,
     exports,
     projects,
@@ -47,15 +46,14 @@ def health() -> dict:
 
 
 app.include_router(projects.router, prefix="/api")
-app.include_router(assets.router, prefix="/api")
 app.include_router(batches.router, prefix="/api")
 app.include_router(voices.router, prefix="/api")
 app.include_router(segments.router, prefix="/api")
 app.include_router(tts.router, prefix="/api")
 app.include_router(subtitles.router, prefix="/api")
-app.include_router(storyboard.router, prefix="/api")
 app.include_router(exports.router, prefix="/api")
 app.include_router(renders.router, prefix="/api")
 app.include_router(tasks.router, prefix="/api")
 app.include_router(quality.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
+app.include_router(storyboard.router, prefix="/api")

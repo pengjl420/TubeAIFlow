@@ -461,7 +461,10 @@ def _run_controlled_process(project_id: str, command: list[str], **kwargs) -> su
         kwargs["stderr"] = subprocess.PIPE
     process = subprocess.Popen(command, **kwargs)
     task_control.register_process(project_id, process)
-    stdout, stderr = process.communicate()
+    try:
+        stdout, stderr = process.communicate()
+    finally:
+        task_control.unregister_process(project_id, process)
     task_control.check_cancelled(project_id)
     return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 

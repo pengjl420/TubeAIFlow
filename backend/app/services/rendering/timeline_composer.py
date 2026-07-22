@@ -83,7 +83,6 @@ def scene_coverage(session: Session, scene: VisualScene) -> dict:
         "duration_ms": duration_ms,
         "remaining_ms": max(0, duration_ms - covered_ms),
         "complete": bool(assignments) and covered_ms >= duration_ms,
-        "review_required": any(not item.manual_confirmed for item in assignments),
     }
 
 

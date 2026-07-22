@@ -1,5 +1,5 @@
 import { apiClient, unwrap } from './client'
-import type { Project, SegmentationMode, SemanticReviewMode, StoryboardMode, VideoGenerationMode, VideoOutputFormat } from '../types/project'
+import type { Project, SegmentationMode, StoryboardMode, VideoGenerationMode } from '../types/project'
 
 export interface CreateProjectInput {
   name: string
@@ -9,8 +9,6 @@ export interface CreateProjectInput {
   media_video_dir: string
   include_video: boolean
   video_mode: VideoGenerationMode
-  semantic_review_mode: SemanticReviewMode
-  video_output_format: VideoOutputFormat
   storyboard_transition_enabled: boolean
   segmentation_mode: SegmentationMode
   storyboard_mode: StoryboardMode
@@ -29,8 +27,6 @@ export async function createProject(input: CreateProjectInput): Promise<Project>
   form.append('media_video_dir', input.media_video_dir)
   form.append('include_video', String(input.include_video))
   form.append('video_mode', input.video_mode)
-  form.append('semantic_review_mode', input.semantic_review_mode)
-  form.append('video_output_format', input.video_output_format)
   form.append('storyboard_transition_enabled', String(input.storyboard_transition_enabled))
   form.append('segmentation_mode', input.segmentation_mode)
   form.append('storyboard_mode', input.storyboard_mode)
@@ -120,8 +116,6 @@ export interface ProjectSettingsInput {
   media_video_dir: string
   include_video: boolean
   video_mode: VideoGenerationMode
-  semantic_review_mode: SemanticReviewMode
-  video_output_format: VideoOutputFormat
   voice_profile_id: string
   storyboard_transition_enabled: boolean
   segmentation_mode: SegmentationMode

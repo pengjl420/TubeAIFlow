@@ -18,10 +18,9 @@ let timer: number | undefined
 const active = computed(() => task.value?.status === 'queued' || task.value?.status === 'running')
 const stageLabels: Record<string, string> = {
   segmenting: '文本切段', tts: '分段配音', audio_merge: '完整配音合成', subtitles: '时间轴与字幕',
-  video: '视频合成', storyboard: '视觉分镜', asset_search: '素材检索与自动选择',
-  asset_review: '素材自动审核', image_generation: '画面生成', image_review: '画面自动审核',
+  video: '视频合成', storyboard: '视觉分镜', image_generation: '画面生成与分配',
   scene_render: '场景渲染', visual_track: '画面轨道合成', final_render: '最终视频合成',
-  quality_check: '质量检查', quality_review: '质量复核', fcpxml_export: 'FCPXML 导出',
+  quality_check: '成片质量检查', fcpxml_export: 'FCPXML 导出',
   prproj_export: 'Premiere 工程导出', editable_export: '可编辑工程导出', completed: '全部完成',
 }
 const statusText = computed(() => {

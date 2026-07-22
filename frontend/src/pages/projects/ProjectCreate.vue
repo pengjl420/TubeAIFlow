@@ -5,7 +5,7 @@ import { useRouter } from 'vue-router'
 import { createProject, selectDirectory } from '../../api/projects'
 import { listVoices, type VoiceProfile } from '../../api/voices'
 import { usePageFeedback } from '../../services/feedback'
-import type { SegmentationMode, SemanticReviewMode, StoryboardMode, VideoGenerationMode, VideoOutputFormat } from '../../types/project'
+import type { SegmentationMode, StoryboardMode, VideoGenerationMode } from '../../types/project'
 
 const router = useRouter()
 const name = ref('')
@@ -14,12 +14,10 @@ const voiceProfileId = ref('')
 const outputDir = ref('D:\\video_darft')
 const outputFilename = ref('')
 const mediaVideoDir = ref('')
-const videoMode = ref<VideoGenerationMode>('ai_semantic')
-const semanticReviewMode = ref<SemanticReviewMode>('automatic')
-const videoOutputFormat = ref<VideoOutputFormat>('mp4')
+const videoMode = ref<VideoGenerationMode>('ai_generated_images')
 const storyboardTransitionEnabled = ref(true)
 const segmentationMode = ref<SegmentationMode>('newline')
-const storyboardMode = ref<StoryboardMode>('ai')
+const storyboardMode = ref<StoryboardMode>('segments')
 const saving = ref(false)
 const selectingFolder = ref<'output' | 'video' | null>(null)
 const error = ref('')
@@ -28,10 +26,6 @@ let outputFilenameEdited = false
 
 watch(name, (value) => {
   if (!outputFilenameEdited) outputFilename.value = value.trim()
-})
-
-watch(videoMode, (value) => {
-  if (value === 'none' && videoOutputFormat.value === 'mp4') videoOutputFormat.value = 'fcpxml'
 })
 
 function markOutputFilenameEdited() {
@@ -82,8 +76,6 @@ async function submit() {
       media_video_dir: videoMode.value === 'landscape' ? mediaVideoDir.value.trim() : '',
       include_video: videoMode.value !== 'none',
       video_mode: videoMode.value,
-      semantic_review_mode: semanticReviewMode.value,
-      video_output_format: videoOutputFormat.value,
       storyboard_transition_enabled: storyboardTransitionEnabled.value,
       segmentation_mode: segmentationMode.value,
       storyboard_mode: storyboardMode.value,
@@ -182,7 +174,6 @@ onMounted(async () => {
           <select v-model="videoMode">
             <option value="none">不生成视频（仅生成完整配音）</option>
             <option value="landscape">纯风景素材拼接</option>
-            <option value="ai_semantic">AI 语义视频拼接</option>
             <option value="ai_generated_images">本地 AI 分镜图片视频</option>
           </select>
           <span class="muted">选择后，一键生成会自动完成配音、素材匹配与最终 MP4 合成。</span>
@@ -202,21 +193,11 @@ onMounted(async () => {
           </div>
           <span class="muted">生成最终视频时会扫描该目录中的视频素材。</span>
         </label>
-        <div class="field reference-field">
-          <span>最终交付格式</span>
-          <select v-model="videoOutputFormat">
-            <option value="mp4">视频文件（MP4）</option>
-            <option value="fcpxml">FCPXML 可编辑工程</option>
-            <option value="prproj">Premiere PRPROJ 工程</option>
-            <option value="editable_both">同时生成 FCPXML 与 PRPROJ</option>
-          </select>
-          <span class="muted">PRPROJ 由本机 Adobe Premiere Pro 转换生成；没有安装 Premiere 时仍会保留 FCPXML。</span>
-        </div>
-        <label v-if="videoMode === 'ai_semantic' || videoMode === 'ai_generated_images'" class="field reference-field">
+        <label v-if="videoMode === 'ai_generated_images'" class="field reference-field">
           <span>分镜头视觉场景切分</span>
           <select v-model="storyboardMode">
-            <option value="ai">AI 自动生成分镜头（默认，全文理解）</option>
-            <option value="segments">按逐字稿切段生成分镜头</option>
+            <option value="segments">按逐字稿切段生成分镜头（默认）</option>
+            <option value="ai">AI 自动生成分镜头（全文理解）</option>
           </select>
           <span class="muted">按切段模式严格沿用最终切段结果；上方切段方式变化时，分镜边界也会随之变化。</span>
         </label>

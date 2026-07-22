@@ -31,10 +31,7 @@ let timer: number | undefined
 
 const stageLabels: Record<string, string> = {
   storyboard: '生成视觉分镜',
-  asset_search: '检索本地素材库',
-  asset_review: '审核分镜素材',
   image_generation: '本地生成分镜图片',
-  image_review: '审核分镜图片',
   scene_render: '渲染场景视频',
   visual_track: '拼接纯视频轨道',
   final_render: '合成最终视频',
@@ -48,7 +45,7 @@ const stageLabels: Record<string, string> = {
 
 const videoMode = computed(() => project.value?.config?.video_mode || 'none')
 const usesLandscapeVideo = computed(() => videoMode.value === 'landscape')
-const usesAiVideo = computed(() => videoMode.value === 'ai_semantic' || videoMode.value === 'ai_generated_images')
+const usesAiVideo = computed(() => videoMode.value === 'ai_generated_images')
 const active = computed(() => usesLandscapeVideo.value
   ? videoProgress.value?.status === 'running'
   : task.value?.status === 'queued' || task.value?.status === 'running')
@@ -73,8 +70,8 @@ const pipelineStages = computed(() => {
   const value = status.value
   return [
     { label: '分镜生成', caption: value?.scene_count ? `${value.scene_count} 个场景` : '尚未生成', done: Boolean(value?.scene_count) },
-    { label: '素材选择与审核', caption: value?.scene_count ? `${value.assignment_count}/${value.scene_count} 已通过` : '等待分镜', done: Boolean(value?.scene_count && value.assignment_count === value.scene_count) },
-    { label: '场景渲染', caption: value?.scene_count ? `${value.rendered_scene_count}/${value.scene_count} 已完成` : '等待选材', done: Boolean(value?.scene_count && value.rendered_scene_count === value.scene_count) },
+    { label: '生成图片分配', caption: value?.scene_count ? `${value.assignment_count}/${value.scene_count} 已分配` : '等待分镜', done: Boolean(value?.scene_count && value.assignment_count === value.scene_count) },
+    { label: '场景渲染', caption: value?.scene_count ? `${value.rendered_scene_count}/${value.scene_count} 已完成` : '等待图片生成', done: Boolean(value?.scene_count && value.rendered_scene_count === value.scene_count) },
     { label: '纯视频轨道', caption: value?.visual_track_exists ? '无音轨 MP4 已生成' : '等待场景渲染', done: Boolean(value?.visual_track_exists) },
     { label: '最终合成', caption: value?.final_video_exists ? 'MP4 已生成' : '尚未生成', done: Boolean(value?.final_video_exists) },
   ]
@@ -175,7 +172,7 @@ onBeforeUnmount(stopPolling)
       <div>
         <span class="section-eyebrow">VIDEO RENDERING</span>
         <h1>视频渲染</h1>
-        <p>{{ usesLandscapeVideo ? '查看风景素材处理和最终视频合成进度。' : '查看自动选材、场景渲染和最终视频合成进度。' }}</p>
+        <p>{{ usesLandscapeVideo ? '查看风景素材处理和最终视频合成进度。' : '查看图片生成、场景渲染和最终视频合成进度。' }}</p>
       </div>
       <div class="page-title-actions">
         <button class="primary-button" :disabled="loading || starting || active || (!usesLandscapeVideo && !usesAiVideo)" @click="start">
@@ -185,11 +182,6 @@ onBeforeUnmount(stopPolling)
     </div>
 
     <div v-if="task?.status === 'failed'" class="alert alert-danger"><strong>自动流程无法继续</strong><span>{{ task.error_message }}</span></div>
-    <div v-if="task?.status === 'review_required'" class="alert alert-warning">
-      <strong>分镜素材等待审核</strong>
-      <span>{{ task.error_message || '请逐个分镜确认系统预选的图片或视频后继续。' }}</span>
-      <RouterLink class="primary-link" :to="`/projects/${projectId}/media-review`">进入素材审核</RouterLink>
-    </div>
     <div v-if="usesLandscapeVideo && videoProgress?.status === 'failed'" class="alert alert-danger"><strong>风景视频生成失败</strong><span>{{ videoProgress.error || videoProgress.message }}</span></div>
 
     <div class="pipeline-stage-grid">
@@ -203,7 +195,7 @@ onBeforeUnmount(stopPolling)
       <article class="panel">
         <div class="section-head"><h2>后台任务</h2><span class="status-pill is-neutral">{{ usesLandscapeVideo ? (videoProgress?.status || 'idle') : (task?.status || 'idle') }}</span></div>
         <dl class="output-path-list">
-          <div><dt>视频模式</dt><dd>{{ usesLandscapeVideo ? '风景素材拼接' : usesAiVideo ? 'AI 语义视频' : '仅生成完整配音' }}</dd></div>
+          <div><dt>视频模式</dt><dd>{{ usesLandscapeVideo ? '风景素材拼接' : usesAiVideo ? '本地 AI 分镜图片视频' : '仅生成完整配音' }}</dd></div>
           <div><dt>当前阶段</dt><dd>{{ usesLandscapeVideo ? (videoProgress?.message || videoProgress?.stage || '尚未启动') : (stageLabels[task?.stage || ''] || task?.stage || '尚未启动') }}</dd></div>
           <div v-if="!usesLandscapeVideo"><dt>任务编号</dt><dd>{{ task?.id || '—' }}</dd></div>
           <div><dt>最终视频</dt><dd>{{ status?.final_video_path || '生成后显示' }}</dd></div>

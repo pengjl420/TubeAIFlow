@@ -237,11 +237,11 @@ const mediaVideoDir = computed(() => {
 
 const videoMode = computed(() => {
   const mode = projectConfig.value.video_mode
-  if (mode === 'ai_semantic' || mode === 'ai_generated_images' || mode === 'landscape' || mode === 'none') return mode
+  if (mode === 'ai_generated_images' || mode === 'landscape' || mode === 'none') return mode
   return projectConfig.value.include_video === true ? 'landscape' : 'none'
 })
 const includeVideo = computed(() => videoMode.value !== 'none')
-const usesAiSemanticVideo = computed(() => videoMode.value === 'ai_semantic' || videoMode.value === 'ai_generated_images')
+const usesAiSemanticVideo = computed(() => videoMode.value === 'ai_generated_images')
 const usesLandscapeVideo = computed(() => videoMode.value === 'landscape')
 
 const finalVideoPath = computed(() => {
@@ -257,7 +257,7 @@ const projectStatusLabel = computed(() => {
     narration_in_progress: '配音生成中',
     narration_ready: '配音已就绪',
     video_in_progress: '视频合成中',
-    review_required: '等待复核',
+    review_required: '旧任务待恢复',
     completed: '已完成',
     failed: '执行失败',
   }
@@ -280,7 +280,7 @@ const workflowSteps = computed(() => {
   const videoReady = outputs.value?.final_video_exists === true
   const videoActive = composingVideo.value || Boolean(
     projectTask.value?.status === 'running'
-    && ['storyboard', 'asset_search', 'asset_review', 'image_generation', 'image_review', 'scene_render', 'final_render', 'quality_check', 'quality_review', 'fcpxml_export', 'prproj_export', 'editable_export'].includes(projectTask.value.stage || ''),
+    && ['storyboard', 'image_generation', 'scene_render', 'visual_track', 'final_render', 'quality_check'].includes(projectTask.value.stage || ''),
   )
   return [
     { label: '脚本', caption: scriptCharacterCount.value ? `${scriptCharacterCount.value} 字` : scriptReady ? '已保存' : '等待输入', state: scriptReady ? 'done' : 'current' },
@@ -425,10 +425,7 @@ function taskStageLabel(task: ProjectTaskStatus) {
     subtitles: '准备视频（兼容旧任务）',
     video: '生成视频',
     storyboard: '生成视觉分镜',
-    asset_search: '检索语义素材',
-    asset_review: '自动选择素材',
-    image_generation: '本地生成分镜图片',
-    image_review: '自动选择图片',
+    image_generation: '生成并分配图片',
     scene_render: '渲染场景视频',
     final_render: '合成最终视频',
     quality_check: '完成生成（兼容旧任务）',
@@ -479,7 +476,7 @@ function applyProjectTaskStatus(task: ProjectTaskStatus) {
   if (task.status === 'failed') error.value = task.error_message || '一键生成失败'
   if (task.status === 'cancelled') message.value = '任务已取消'
   if (task.status === 'paused') message.value = '任务已暂停；如果它属于批次，请从批次详情页恢复执行。'
-  if (task.status === 'review_required') error.value = task.error_message || '旧版任务停在人工复核阶段，请重新启动一键生成。'
+  if (task.status === 'review_required') error.value = task.error_message || '旧版任务需要重新启动一键生成。'
 }
 
 async function refreshProjectTaskStatus() {

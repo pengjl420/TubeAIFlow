@@ -55,7 +55,6 @@ def create_batch(
     reference_audio_text: str = "",
     voice_profile_id: str = "",
     video_mode: str | None = None,
-    semantic_review_mode: str | None = None,
     segmentation_mode: str | None = None,
     storyboard_mode: str | None = None,
 ) -> BatchJob:
@@ -88,9 +87,6 @@ def create_batch(
         raise ValueError("CosyVoice 需要填写参考音频逐字稿")
 
     resolved_video_mode = project_service.normalize_video_mode(video_mode, include_video)
-    resolved_semantic_review_mode = project_service.normalize_semantic_review_mode(
-        semantic_review_mode
-    )
     resolved_segmentation_mode = project_service.normalize_segmentation_mode(segmentation_mode)
     resolved_storyboard_mode = project_service.normalize_storyboard_mode(storyboard_mode)
     include_video = resolved_video_mode != project_service.VIDEO_MODE_NONE
@@ -114,7 +110,6 @@ def create_batch(
                 "media_video_dir": str(video_root) if video_root else "",
                 "include_video": include_video,
                 "video_mode": resolved_video_mode,
-                "semantic_review_mode": resolved_semantic_review_mode,
                 "segmentation_mode": resolved_segmentation_mode,
                 "storyboard_mode": resolved_storyboard_mode,
                 "continue_on_error": continue_on_error,
@@ -160,7 +155,6 @@ def create_batch(
             include_video,
             voice_profile_id=selected_profile.id if selected_profile else "",
             video_mode=resolved_video_mode,
-            semantic_review_mode=resolved_semantic_review_mode,
             segmentation_mode=resolved_segmentation_mode,
             storyboard_mode=resolved_storyboard_mode,
         )

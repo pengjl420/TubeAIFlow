@@ -9,7 +9,7 @@ from app.config import get_settings
 from app.models.project import Project
 from app.models.narration import Segment
 from app.models.batch import BatchItem, BatchJob
-from app.models.media import GeneratedImageVariant, MediaFile, MediaShot, SceneAssignment, SceneCandidate
+from app.models.media import GeneratedImageVariant, MediaFile, MediaShot, SceneAssignment
 from app.models.task import TaskRun
 from app.models.storyboard import SubtitleCue, VisualScene
 from app.infrastructure.file_storage import ensure_inside_any, project_dir
@@ -43,10 +43,7 @@ STORYBOARD_MODE_SEGMENTS = "segments"
 SUPPORTED_STORYBOARD_MODES = {STORYBOARD_MODE_AI, STORYBOARD_MODE_SEGMENTS}
 VIDEO_MODE_NONE = "none"
 VIDEO_MODE_LANDSCAPE = "landscape"
-VIDEO_MODE_AI_SEMANTIC = "ai_semantic"
 VIDEO_MODE_AI_GENERATED_IMAGES = "ai_generated_images"
-SEMANTIC_REVIEW_MANUAL = "manual"
-SEMANTIC_REVIEW_AUTO = "automatic"
 VIDEO_OUTPUT_MP4 = "mp4"
 VIDEO_OUTPUT_FCPXML = "fcpxml"
 VIDEO_OUTPUT_PRPROJ = "prproj"
@@ -57,14 +54,9 @@ SUPPORTED_VIDEO_OUTPUT_FORMATS = {
     VIDEO_OUTPUT_PRPROJ,
     VIDEO_OUTPUT_EDITABLE_BOTH,
 }
-SUPPORTED_SEMANTIC_REVIEW_MODES = {
-    SEMANTIC_REVIEW_MANUAL,
-    SEMANTIC_REVIEW_AUTO,
-}
 SUPPORTED_VIDEO_MODES = {
     VIDEO_MODE_NONE,
     VIDEO_MODE_LANDSCAPE,
-    VIDEO_MODE_AI_SEMANTIC,
     VIDEO_MODE_AI_GENERATED_IMAGES,
 }
 EDITABLE_STATUSES = {"created", "script_imported", "segmented"}
@@ -94,7 +86,7 @@ def create_project(session: Session, name: str, config: dict | None = None) -> P
             {
                 "tts_engine": DEFAULT_TTS_ENGINE,
                 "segmentation_mode": SEGMENTATION_MODE_NEWLINE,
-                "storyboard_mode": STORYBOARD_MODE_AI,
+                "storyboard_mode": STORYBOARD_MODE_SEGMENTS,
                 "storyboard_transition_enabled": True,
                 **(config or {}),
             },
@@ -195,19 +187,6 @@ def get_project_video_mode(project: Project) -> str:
     )
 
 
-def normalize_semantic_review_mode(mode: str | None) -> str:
-    normalized = str(mode or SEMANTIC_REVIEW_AUTO).strip().lower()
-    if normalized not in SUPPORTED_SEMANTIC_REVIEW_MODES:
-        raise ValueError("Unsupported semantic video review mode")
-    return normalized
-
-
-def get_semantic_review_mode(project: Project) -> str:
-    return normalize_semantic_review_mode(
-        load_project_config(project).get("semantic_review_mode")
-    )
-
-
 def normalize_segmentation_mode(mode: str | None) -> str:
     normalized = str(mode or SEGMENTATION_MODE_NEWLINE).strip().lower()
     if normalized not in SUPPORTED_SEGMENTATION_MODES:
@@ -220,7 +199,7 @@ def get_segmentation_mode(project: Project) -> str:
 
 
 def normalize_storyboard_mode(mode: str | None) -> str:
-    normalized = str(mode or STORYBOARD_MODE_AI).strip().lower()
+    normalized = str(mode or STORYBOARD_MODE_SEGMENTS).strip().lower()
     if normalized not in SUPPORTED_STORYBOARD_MODES:
         raise ValueError("Unsupported storyboard segmentation mode")
     return normalized
@@ -288,10 +267,6 @@ def delete_project(session: Session, project: Project) -> dict:
         media_file = session.get(MediaFile, media_id)
         if media_file and media_file.provider == "local_image_generation":
             session.delete(media_file)
-    for candidate in session.exec(
-        select(SceneCandidate).where(SceneCandidate.project_id == project.id)
-    ).all():
-        session.delete(candidate)
     for scene in session.exec(
         select(VisualScene).where(VisualScene.project_id == project.id)
     ).all():
@@ -503,7 +478,6 @@ def update_project_settings(
     include_video: bool = False,
     voice_profile_id: str = "",
     video_mode: str | None = None,
-    semantic_review_mode: str | None = None,
     video_output_format: str | None = None,
     storyboard_transition_enabled: bool = True,
     segmentation_mode: str | None = None,
@@ -533,8 +507,9 @@ def update_project_settings(
         raise ValueError("CosyVoice requires the reference audio transcript")
 
     resolved_video_mode = normalize_video_mode(video_mode, include_video)
-    resolved_semantic_review_mode = normalize_semantic_review_mode(semantic_review_mode)
-    resolved_video_output_format = normalize_video_output_format(video_output_format)
+    # Video delivery is controlled solely by video_mode/include_video. Editable
+    # project files are explicit, project-level exports and never replace MP4.
+    resolved_video_output_format = VIDEO_OUTPUT_MP4
     resolved_segmentation_mode = normalize_segmentation_mode(segmentation_mode)
     resolved_storyboard_mode = normalize_storyboard_mode(storyboard_mode)
     include_video = resolved_video_mode != VIDEO_MODE_NONE
@@ -567,7 +542,7 @@ def update_project_settings(
     config["cosyvoice_speed"] = normalized_cosyvoice_speed
     config["include_video"] = include_video
     config["video_mode"] = resolved_video_mode
-    config["semantic_review_mode"] = resolved_semantic_review_mode
+    config.pop("semantic_review_mode", None)
     config["video_output_format"] = resolved_video_output_format
     config["storyboard_transition_enabled"] = bool(storyboard_transition_enabled)
     config["segmentation_mode"] = resolved_segmentation_mode

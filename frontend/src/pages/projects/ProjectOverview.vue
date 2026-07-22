@@ -30,7 +30,6 @@ const error = ref('')
 usePageFeedback(error, undefined, { errorTitle: '项目概览未能更新' })
 
 const completedSegments = computed(() => segments.value.filter((item) => item.status === 'completed').length)
-const confirmedScenes = computed(() => render.value?.assignment_count || 0)
 // Segment audio files are also listed in `outputs.files`, so their presence does
 // not mean that the merged narration artifact has been generated.
 const hasAudio = computed(() => outputs.value?.final_audio_exists === true)
@@ -43,8 +42,7 @@ const statusLabel = computed(() => ({
 const flow = computed(() => [
   { label: '逐字稿', icon: FileText, done: segments.value.length > 0, path: 'narration' },
   { label: '配音', icon: Volume2, done: hasAudio.value, path: 'narration' },
-  { label: '分镜', icon: Film, done: scenes.value.length > 0, path: 'storyboard' },
-  { label: '自动选材', icon: FolderKanban, done: scenes.value.length > 0 && confirmedScenes.value >= scenes.value.length, path: 'render' },
+  { label: '画面生成', icon: Film, done: scenes.value.length > 0, path: 'render' },
   { label: '渲染', icon: Play, done: hasVideo.value, path: 'render' },
 ])
 const activeFlowIndex = computed(() => {
@@ -56,14 +54,14 @@ const nextAction = computed(() => {
   if (project.value?.status === 'failed') return { title: '生产任务执行失败', detail: task.value?.error_message || '请查看任务详情并从检查点重新执行。', label: '查看详情', path: '/tasks' }
   if (!segments.value.length) return { title: '逐字稿与配音', detail: '项目尚未生成口播分段，完成脚本后才能继续生产。', label: '进入逐字稿', path: `/projects/${projectId}/narration` }
   if (task.value?.status === 'running' || task.value?.status === 'queued') return { title: '正在自动生成', detail: '系统会自动完成剩余步骤，无需人工介入。', label: '查看生成进度', path: `/projects/${projectId}/narration` }
-  if (!hasVideo.value) return { title: '开始一键生成', detail: '系统将自动完成配音、分镜、选材和渲染。', label: '进入一键生成', path: `/projects/${projectId}/narration` }
+  if (!hasVideo.value) return { title: '开始一键生成', detail: '系统将自动完成配音、画面生成和渲染。', label: '进入一键生成', path: `/projects/${projectId}/narration` }
   return { title: '成片已生成', detail: '最终视频已经可以预览。', label: '查看成片', path: `/projects/${projectId}/render` }
 })
 
 const recentTasks = computed(() => [
   { type: '配音合成', stage: '逐字稿与配音', time: '18 分钟前', state: hasAudio.value ? '已完成' : '进行中', icon: FileAudio2 },
   { type: '逐字稿生成', stage: '逐字稿与配音', time: '32 分钟前', state: segments.value.length ? '已完成' : '未开始', icon: FileText },
-  { type: '素材匹配', stage: '视觉分镜', time: '—', state: scenes.value.length ? '进行中' : '未开始', icon: FolderKanban },
+  { type: '画面生成', stage: '本地 AI 图片', time: '—', state: scenes.value.length ? '进行中' : '未开始', icon: FolderKanban },
   { type: '视频渲染', stage: '视频渲染', time: '—', state: hasVideo.value ? '已完成' : '未开始', icon: Film },
 ])
 function stateTone(state: string) { return state === '已完成' ? 'green' : state === '进行中' ? 'orange' : 'gray' }
@@ -111,7 +109,7 @@ onMounted(load)
 
       <section class="taf-card taf-production-info">
         <h2>生产信息</h2>
-        <div class="taf-info-stats"><div><span>配音分段数</span><strong>{{ segments.length }} <small>段</small></strong><em>已完成 {{ completedSegments }}</em></div><div><span>完整配音</span><strong>{{ hasAudio ? '已生成' : '未生成' }}</strong><em>{{ formatDuration(project?.audio_duration_seconds || 0) }}</em></div><div><span>场景数量</span><strong>{{ scenes.length }} <small>个</small></strong><em>{{ scenes.length ? '已生成' : '未开始' }}</em></div><div><span>自动选材场景</span><strong>{{ confirmedScenes }} <small>个</small></strong><em>{{ scenes.length ? Math.round(confirmedScenes / scenes.length * 100) : 0 }}%</em></div></div>
+        <div class="taf-info-stats"><div><span>配音分段数</span><strong>{{ segments.length }} <small>段</small></strong><em>已完成 {{ completedSegments }}</em></div><div><span>完整配音</span><strong>{{ hasAudio ? '已生成' : '未生成' }}</strong><em>{{ formatDuration(project?.audio_duration_seconds || 0) }}</em></div><div><span>场景数量</span><strong>{{ scenes.length }} <small>个</small></strong><em>{{ scenes.length ? '已生成' : '未开始' }}</em></div><div><span>已分配画面</span><strong>{{ render?.assignment_count || 0 }} <small>个</small></strong><em>自动完成</em></div></div>
         <div class="taf-info-bottom"><div><span>视频渲染进度</span><i><b :style="{ width: `${render?.scene_count ? (render.rendered_scene_count || 0) / render.scene_count * 100 : 0}%` }"></b></i><strong>{{ render?.scene_count ? Math.round((render.rendered_scene_count || 0) / render.scene_count * 100) : 0 }}%</strong><small>{{ hasVideo ? '已完成' : '未开始' }}</small></div></div>
       </section>
     </div>

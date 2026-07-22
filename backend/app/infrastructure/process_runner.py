@@ -1,4 +1,5 @@
 import subprocess
+import sys
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -137,7 +138,15 @@ def register_process(project_id: str, process: subprocess.Popen) -> None:
         state.process = process
         cancelled = state.cancelled
     if cancelled and process.poll() is None:
-        process.kill()
+        _terminate_process_tree(process)
+
+
+def unregister_process(project_id: str, process: subprocess.Popen) -> None:
+    """Forget a completed child without clearing the surrounding stage state."""
+    with _lock:
+        state = _states.get(project_id)
+        if state and state.process is process:
+            state.process = None
 
 
 def register_cancel_callback(project_id: str, callback: Callable[[], None] | None) -> None:
@@ -162,8 +171,36 @@ def cancel(project_id: str) -> dict:
         except Exception:
             pass
     if process and process.poll() is None:
-        process.kill()
+        _terminate_process_tree(process)
     return {"cancelled": True, "stage": stage}
+
+
+def _terminate_process_tree(process: subprocess.Popen) -> None:
+    """Terminate the registered command and its descendants.
+
+    TTS runners commonly create worker processes.  Killing only their direct
+    parent leaves those workers running (especially on Windows), so a user
+    cancellation must target the whole process tree.
+    """
+    if process.poll() is not None:
+        return
+    if sys.platform == "win32":
+        try:
+            result = subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                capture_output=True,
+                check=False,
+                timeout=10,
+            )
+            if result.returncode == 0:
+                return
+        except (OSError, subprocess.SubprocessError):
+            pass
+    try:
+        process.kill()
+    except (OSError, subprocess.SubprocessError):
+        # The process may have exited between poll() and kill().
+        pass
 
 
 def status(project_id: str) -> dict:

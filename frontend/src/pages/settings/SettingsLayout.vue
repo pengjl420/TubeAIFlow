@@ -1,16 +1,13 @@
 <script setup lang="ts">
-import { Bot, Boxes, CircleGauge, Database, Image, Mic2, MonitorCog, RotateCcw, ServerCog, Sparkles } from 'lucide-vue-next'
+import { Bot, CircleGauge, Database, Image, Mic2, MonitorCog, RotateCcw } from 'lucide-vue-next'
 
 const navigation = [
   { path: 'general', label: '基础与存储', icon: Database },
   { path: 'ai-services', label: 'AI 服务', icon: Bot },
   { path: 'tts', label: '配音引擎', icon: Mic2 },
-  { path: 'vision', label: '视觉模型', icon: Sparkles },
   { path: 'image-generation', label: '图片生成', icon: Image },
-  { path: 'media-platforms', label: '素材平台', icon: Boxes },
   { path: 'render', label: '渲染与编码', icon: MonitorCog },
   { path: 'transitions', label: '转场策略', icon: RotateCcw },
-  { path: 'fallback', label: '兜底策略', icon: ServerCog },
   { path: 'diagnostics', label: '系统诊断', icon: CircleGauge },
 ]
 </script>
@@ -19,7 +16,7 @@ const navigation = [
   <section class="settings-center settings-design-shell">
     <header class="settings-title">
       <h1>系统设置</h1>
-      <p>统一管理系统基础环境、AI 服务、配音引擎、视觉模型与生成策略</p>
+      <p>统一管理系统基础环境、AI 服务、配音引擎、图片生成与渲染策略</p>
     </header>
     <div class="settings-workspace">
       <aside class="settings-navigation">

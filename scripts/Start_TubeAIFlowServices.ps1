@@ -83,7 +83,7 @@ try {
         -FilePath $backendPython `
         -ArgumentList @("-m", "app.run") `
         -WorkingDirectory $backendDirectory `
-        -WindowStyle Normal `
+        -WindowStyle Hidden `
         -PassThru
 
     $env:VITE_API_PORT = [string]$BackendPort
@@ -112,7 +112,7 @@ try {
         started_at = (Get-Date).ToUniversalTime().ToString("o")
     } | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8
 
-    Write-Host "Backend started in a visible command window (PID $($backendProcess.Id), port $BackendPort)."
+    Write-Host "Backend started in the background (PID $($backendProcess.Id), port $BackendPort)."
     Write-Host "Frontend started in the background (PID $($frontendProcess.Id), port $FrontendPort)."
     Write-Host "Frontend logs: $logDirectory"
 }

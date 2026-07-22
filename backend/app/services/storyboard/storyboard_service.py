@@ -51,7 +51,7 @@ def generate_storyboard(
     cues = _load_narration_units(session, project.id)
     if not cues:
         raise ValueError("请先完成分段配音")
-    llm_client = client or DeepSeekClient()
+    llm_client = client or DeepSeekClient(project_id=project.id)
     storyboard_mode = project_service.get_storyboard_mode(project)
     full_script = "\n".join(cue["text"] for cue in cues)
     if storyboard_mode == project_service.STORYBOARD_MODE_SEGMENTS:

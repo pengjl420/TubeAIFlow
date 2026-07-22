@@ -33,7 +33,7 @@ class FcpxmlExportTests(unittest.TestCase):
                     id="project-id",
                     name="Story",
                     output_dir=str(output_dir),
-                    config_json='{"output_filename":"Story","project_directory_name":"Story","video_mode":"ai_semantic","video_output_format":"fcpxml"}',
+                    config_json='{"output_filename":"Story","project_directory_name":"Story","video_mode":"ai_generated_images","video_output_format":"fcpxml"}',
                 )
                 scene = VisualScene(
                     id="scene-1", project_id=project.id, scene_index=1,

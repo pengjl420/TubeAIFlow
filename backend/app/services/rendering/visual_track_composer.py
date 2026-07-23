@@ -63,15 +63,17 @@ def compose_visual_track(session: Session, project: Project) -> dict:
             duration=getattr(settings, "storyboard_transition_duration_seconds", 0.45),
         )
     if transition_plan:
+        filter_script_path = base_dir / "renders" / "visual_track_filter.txt"
+        transition_args = build_scene_transition_args(
+            scene_paths,
+            [window[2] / config.video.fps for window in frame_windows],
+            transition_plan,
+            output_path,
+            config.video,
+            expected_frame_count,
+        )
         run_ffmpeg(
-            build_scene_transition_args(
-                scene_paths,
-                [window[2] / config.video.fps for window in frame_windows],
-                transition_plan,
-                output_path,
-                config.video,
-                expected_frame_count,
-            ),
+            _externalize_filter_graph(transition_args, filter_script_path),
             project.id,
         )
     else:
@@ -127,7 +129,13 @@ def build_scene_transition_args(
         transition = transitions.get(index + 1)
         padding = transition.duration if transition else 0.0
         suffix = f",tpad=stop_mode=clone:stop_duration={padding:.3f}" if padding else ""
-        filters.append(f"[{index}:v]setpts=PTS-STARTPTS{suffix}[v{index}]")
+        # xfade requires both inputs to use exactly the same time base. Scene
+        # MP4s can still expose different container time bases even though they
+        # share the same FPS and render settings, so normalize every input
+        # before it reaches either xfade or concat.
+        filters.append(
+            f"[{index}:v]settb=AVTB,setpts=PTS-STARTPTS{suffix}[v{index}]"
+        )
 
     current_label = "v0"
     current_duration = scene_durations[0]
@@ -160,3 +168,20 @@ def build_scene_transition_args(
         str(output_path),
     ])
     return args
+
+
+def _externalize_filter_graph(args: list[str], script_path: Path) -> list[str]:
+    """Keep large scene graphs out of the Windows process command line."""
+    try:
+        filter_index = args.index("-filter_complex")
+        filter_graph = args[filter_index + 1]
+    except (ValueError, IndexError) as exc:
+        raise ValueError("Transition command is missing its filter graph") from exc
+    script_path.parent.mkdir(parents=True, exist_ok=True)
+    script_path.write_text(filter_graph, encoding="utf-8")
+    return [
+        *args[:filter_index],
+        "-filter_complex_script",
+        str(script_path),
+        *args[filter_index + 2 :],
+    ]

@@ -285,10 +285,40 @@ class ImageMotionRenderingTests(unittest.TestCase):
         )
 
         graph = args[args.index("-filter_complex") + 1]
-        self.assertIn("[0:v]setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=0.450", graph)
+        self.assertIn(
+            "[0:v]settb=AVTB,setpts=PTS-STARTPTS,"
+            "tpad=stop_mode=clone:stop_duration=0.450",
+            graph,
+        )
+        self.assertIn("[1:v]settb=AVTB,setpts=PTS-STARTPTS", graph)
+        self.assertIn("[2:v]settb=AVTB,setpts=PTS-STARTPTS", graph)
         self.assertIn("xfade=transition=fade:duration=0.450:offset=4.000", graph)
         self.assertIn("xfade=transition=dissolve:duration=0.450:offset=9.000", graph)
         self.assertEqual(args[args.index("-frames:v") + 1], "450")
+
+    def test_visual_track_writes_large_transition_graph_to_script(self) -> None:
+        video_config = ProjectRenderConfig().video
+        args = visual_track_composer.build_scene_transition_args(
+            [Path("scene_0001.mp4"), Path("scene_0002.mp4")],
+            [4.0, 5.0],
+            [visual_track_composer.PlannedTransition(1, "fade", 0.45)],
+            Path("visual_track.mp4"),
+            video_config,
+            270,
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            script_path = Path(temporary) / "visual_track_filter.txt"
+            command = visual_track_composer._externalize_filter_graph(args, script_path)
+
+            self.assertNotIn("-filter_complex", command)
+            self.assertEqual(
+                command[command.index("-filter_complex_script") + 1],
+                str(script_path),
+            )
+            graph = script_path.read_text(encoding="utf-8")
+            self.assertIn("[0:v]settb=AVTB,setpts=PTS-STARTPTS", graph)
+            self.assertIn("xfade=transition=fade", graph)
 
     def test_visual_track_rejects_two_effects_on_same_boundary(self) -> None:
         with self.assertRaisesRegex(ValueError, "Only one transition effect"):

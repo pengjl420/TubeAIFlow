@@ -136,7 +136,10 @@ def start_video_workflow(project_id: str, session: Session = Depends(get_session
     project = project_service.get_project(session, project_id)
     if not project:
         raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
-    if project_service.get_project_video_mode(project) != project_service.VIDEO_MODE_AI_GENERATED_IMAGES:
+    if project_service.get_project_video_mode(project) not in {
+        project_service.VIDEO_MODE_AI_GENERATED_IMAGES,
+        project_service.VIDEO_MODE_AI_LANDSCAPE_MIX,
+    }:
         raise HTTPException(
             status_code=409,
             detail={"success": False, "error": "当前项目未启用 AI 语义视频生成"},

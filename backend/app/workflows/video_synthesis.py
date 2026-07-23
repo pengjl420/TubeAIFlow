@@ -6,7 +6,11 @@ from app.infrastructure import process_runner as task_control
 from app.infrastructure.ffmpeg import ensure_ffmpeg_available
 from app.models.project import Project
 from app.models.storyboard import SubtitleCue, VisualScene
-from app.services.image_generation import image_assignment_service, image_generation_service
+from app.services.image_generation import (
+    hybrid_assignment_service,
+    image_assignment_service,
+    image_generation_service,
+)
 from app.services.projects import project_service
 from app.services.quality import qa_service
 from app.services.rendering import final_renderer, scene_renderer, visual_track_composer
@@ -31,8 +35,12 @@ def run_video_synthesis(
     current_stage: str,
     on_stage_changed: StageChanged,
 ) -> None:
-    if project_service.get_project_video_mode(project) != project_service.VIDEO_MODE_AI_GENERATED_IMAGES:
-        raise ValueError("Video synthesis only supports project-generated images")
+    video_mode = project_service.get_project_video_mode(project)
+    if video_mode not in {
+        project_service.VIDEO_MODE_AI_GENERATED_IMAGES,
+        project_service.VIDEO_MODE_AI_LANDSCAPE_MIX,
+    }:
+        raise ValueError("Video synthesis only supports AI storyboard and mixed video modes")
     ensure_ffmpeg_available()
 
     stage = current_stage or "storyboard"
@@ -46,6 +54,8 @@ def run_video_synthesis(
         on_stage_changed(stage)
 
     if stage == "image_generation":
+        if video_mode == project_service.VIDEO_MODE_AI_LANDSCAPE_MIX:
+            hybrid_assignment_service.assign_landscape_scenes(session, project)
         with task_control.controlled(project.id, "image_generation"):
             image_generation_service.generate_project_images(session, project)
         image_assignment_service.assign_generated_images(session, project)

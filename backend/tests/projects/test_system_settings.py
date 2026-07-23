@@ -8,6 +8,7 @@ from app.config import Settings
 from app.services.settings.system_settings_service import (
     SECRET_FIELDS,
     _serialize_settings,
+    _validate_paths,
     get_public_settings,
 )
 
@@ -61,6 +62,20 @@ class SettingsModelTests(unittest.TestCase):
 
         self.assertEqual(serialized["app_port"], 18080)
         self.assertEqual(serialized["pexels_api_key"], "provider-secret")
+
+    def test_premiere_path_must_reference_an_existing_file(self) -> None:
+        settings = Settings(
+            workspace_dir=Path("workspace"),
+            premiere_pro_path=Path("missing-premiere.exe"),
+            image_generation_model_path=None,
+        )
+        with (
+            patch.object(Path, "mkdir"),
+            patch.object(Path, "is_dir", return_value=True),
+            patch.object(Path, "is_file", return_value=False),
+            self.assertRaisesRegex(ValueError, "premiere_pro_path"),
+        ):
+            _validate_paths(settings)
 
 
 if __name__ == "__main__":

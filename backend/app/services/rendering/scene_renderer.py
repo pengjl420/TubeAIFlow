@@ -8,6 +8,7 @@ from app.config import get_settings
 from app.infrastructure.ffmpeg import run_ffmpeg
 from app.infrastructure.project_layout import ensure_project_dirs, get_project_work_dir
 from app.models.media import (
+    LIBRARY_ROLE_LOCAL_LANDSCAPE,
     LIBRARY_ROLE_PROJECT_GENERATED,
     MediaFile,
     MediaShot,
@@ -99,7 +100,7 @@ def render_scene(
         media_file = session.get(MediaFile, shot.media_file_id) if shot else None
         if not shot or not media_file:
             raise ValueError("场景指派的素材镜头不存在")
-        validate_generated_assignment(item, shot, media_file)
+        validate_visual_assignment(item, shot, media_file)
         source_path = Path(media_file.path).resolve()
         if not source_path.is_file():
             raise ValueError(f"素材文件不存在：{source_path}")
@@ -195,11 +196,19 @@ def render_scene(
     )
 
 
-def validate_generated_assignment(
+def validate_visual_assignment(
     assignment: SceneAssignment,
     shot: MediaShot,
     media_file: MediaFile,
 ) -> None:
+    if assignment.selection_stage == "local_landscape_mix":
+        if (
+            shot.library_role != LIBRARY_ROLE_LOCAL_LANDSCAPE
+            or media_file.library_role != LIBRARY_ROLE_LOCAL_LANDSCAPE
+            or media_file.media_type != "video"
+        ):
+            raise ValueError("Mixed-mode landscape assignment is not a registered local video")
+        return
     if assignment.selection_stage != "generated_image":
         raise ValueError(f"不支持的画面来源：{assignment.selection_stage}")
     if (

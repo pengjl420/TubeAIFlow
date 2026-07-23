@@ -4,6 +4,7 @@ from app.shared.time import utc_now_iso
 
 
 LIBRARY_ROLE_PROJECT_GENERATED = "project_generated"
+LIBRARY_ROLE_LOCAL_LANDSCAPE = "local_landscape"
 
 
 class MediaFile(SQLModel, table=True):

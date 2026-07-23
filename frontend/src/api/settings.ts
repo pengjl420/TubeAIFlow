@@ -75,6 +75,12 @@ export interface FfmpegInstallResult {
   status: FfmpegStatus
 }
 
+export interface PremiereStatus {
+  installed: boolean
+  path: string | null
+  configured_path: string | null
+}
+
 export async function getSystemSettings(): Promise<SystemSettings> {
   return unwrap<SystemSettings>(await apiClient.get('/settings'))
 }
@@ -89,6 +95,10 @@ export async function clearSystemSecret(field: string): Promise<SystemSettings> 
 
 export async function getFfmpegStatus(): Promise<FfmpegStatus> {
   return unwrap<FfmpegStatus>(await apiClient.get('/settings/ffmpeg/status'))
+}
+
+export async function getPremiereStatus(): Promise<PremiereStatus> {
+  return unwrap<PremiereStatus>(await apiClient.get('/settings/premiere/status'))
 }
 
 export async function installFfmpeg(): Promise<FfmpegInstallResult> {

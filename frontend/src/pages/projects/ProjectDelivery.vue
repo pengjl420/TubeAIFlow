@@ -80,6 +80,7 @@ function artifactKind(file: ProjectOutputFile) {
   if (name.endsWith('.srt')) return { label: 'SRT 字幕', icon: FileText, group: '字幕' }
   if (name.endsWith('.mp4')) return { label: relativePath.includes('/scenes/') || name.includes('scene') ? '场景视频' : name.includes('preview') ? '预览视频' : '最终视频', icon: FileVideo2, group: '视频' }
   if (name.endsWith('.fcpxml')) return { label: 'FCPXML 工程', icon: FileCode2, group: '工程' }
+  if (name.endsWith('.premiere.xml')) return { label: 'Premiere XML 工程', icon: FileCode2, group: '工程' }
   if (name.endsWith('.prproj')) return { label: 'Premiere PRPROJ 工程', icon: FileCode2, group: '工程' }
   if (name.endsWith('.log')) return { label: '运行日志', icon: ScrollText, group: '日志' }
   if (name === 'manifest.json') return { label: '项目 Manifest', icon: FileCode2, group: '项目数据' }
@@ -99,6 +100,7 @@ function artifactCategoryFor(file: ProjectOutputFile): ArtifactCategoryId {
     outputs.value?.final_srt_path,
     outputs.value?.final_video_path,
     outputs.value?.final_fcpxml_path,
+    outputs.value?.final_premiere_xml_path,
     outputs.value?.final_prproj_path,
   ].filter((path): path is string => Boolean(path))
   if (finalPaths.includes(file.path)) return 'delivery'

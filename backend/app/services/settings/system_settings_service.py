@@ -68,6 +68,12 @@ def get_ffmpeg_status() -> dict:
     return get_status()
 
 
+def get_premiere_status() -> dict:
+    from app.services.projects.prproj_export_service import get_premiere_status as get_status
+
+    return get_status()
+
+
 def install_ffmpeg(session: Session) -> dict:
     from app.services.settings.ffmpeg_installer_service import install_ffmpeg as install
 
@@ -100,6 +106,8 @@ def _validate_paths(settings: Settings) -> None:
         raise ValueError("image_generation_model_path must be an existing file")
     if settings.image_generation_python is not None and not settings.image_generation_python.is_file():
         raise ValueError("image_generation_python must be an existing file")
+    if settings.premiere_pro_path is not None and not settings.premiere_pro_path.is_file():
+        raise ValueError("premiere_pro_path must be an existing file")
 
 
 def _serialize_settings(settings: Settings, record: SystemSetting | None) -> str:

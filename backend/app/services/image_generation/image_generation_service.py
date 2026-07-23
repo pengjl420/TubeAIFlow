@@ -44,7 +44,20 @@ def generate_project_images(session: Session, project: Project) -> dict:
     )
     if not scenes:
         raise ValueError("项目尚未生成视觉分镜")
-    return _generate(session, project, scenes)
+    assigned_scene_ids = {
+        item.scene_id
+        for item in session.exec(
+            select(SceneAssignment).where(
+                SceneAssignment.project_id == project.id,
+                SceneAssignment.selection_stage == "local_landscape_mix",
+            )
+        ).all()
+    }
+    return _generate(
+        session,
+        project,
+        [scene for scene in scenes if scene.id not in assigned_scene_ids],
+    )
 
 
 def _generate(

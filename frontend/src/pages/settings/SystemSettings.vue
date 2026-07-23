@@ -8,10 +8,12 @@ import { selectDirectory } from '../../api/projects'
 import {
   clearSystemSecret,
   getFfmpegStatus,
+  getPremiereStatus,
   getSystemSettings,
   installFfmpeg,
   saveSystemSettings,
   type FfmpegStatus,
+  type PremiereStatus,
   type SystemSettings,
 } from '../../api/settings'
 import { usePageFeedback } from '../../services/feedback'
@@ -20,6 +22,7 @@ const route = useRoute()
 const section = computed(() => String(route.params.section || 'general'))
 const settings = ref<SystemSettings | null>(null)
 const ffmpegStatus = ref<FfmpegStatus | null>(null)
+const premiereStatus = ref<PremiereStatus | null>(null)
 const loading = ref(true)
 const saving = ref(false)
 const error = ref('')
@@ -43,7 +46,11 @@ const transitionTotal = computed(() => settings.value?.storyboard_transition_eff
 async function load() {
   loading.value = true
   try {
-    [settings.value, ffmpegStatus.value] = await Promise.all([getSystemSettings(), getFfmpegStatus()])
+    [settings.value, ffmpegStatus.value, premiereStatus.value] = await Promise.all([
+      getSystemSettings(),
+      getFfmpegStatus(),
+      getPremiereStatus(),
+    ])
   } catch (err) { error.value = err instanceof Error ? err.message : '系统设置加载失败' }
   finally { loading.value = false }
 }
@@ -91,8 +98,19 @@ function normalizeTransitions() {
   enabled.forEach((item, index) => { item.enabled = true; item.percentage = base + (index < 100 - base * enabled.length ? 1 : 0) })
 }
 
+function useDetectedPremiere() {
+  if (settings.value && premiereStatus.value?.path) {
+    settings.value.premiere_pro_path = premiereStatus.value.path
+  }
+}
+
 function exportDiagnostics() {
-  const report = JSON.stringify({ generated_at: new Date().toISOString(), settings: settings.value, ffmpeg: ffmpegStatus.value }, null, 2)
+  const report = JSON.stringify({
+    generated_at: new Date().toISOString(),
+    settings: settings.value,
+    ffmpeg: ffmpegStatus.value,
+    premiere: premiereStatus.value,
+  }, null, 2)
   const url = URL.createObjectURL(new Blob([report], { type: 'application/json' }))
   const link = document.createElement('a')
   link.href = url; link.download = 'TubeAIFlow-diagnostics.json'; link.click(); URL.revokeObjectURL(url)
@@ -109,7 +127,7 @@ onMounted(load)
 
       <div v-if="section === 'general'" class="setting-grid two">
         <article class="setting-card"><h3>本地服务</h3><div class="form-list"><label><span>监听地址</span><input v-model="settings.app_host" /></label><label><span>端口</span><input v-model.number="settings.app_port" type="number" /></label></div></article>
-        <article class="setting-card"><h3>路径</h3><div class="form-list"><label><span>工作目录</span><div class="input-action"><input v-model="settings.workspace_dir" /><button @click="chooseWorkspace">浏览</button></div></label><label><span>FFmpeg</span><input v-model="settings.ffmpeg_path" /></label><label><span>ffprobe</span><input v-model="settings.ffprobe_path" /></label></div></article>
+        <article class="setting-card"><h3>路径</h3><div class="form-list"><label><span>工作目录</span><div class="input-action"><input v-model="settings.workspace_dir" /><button @click="chooseWorkspace">浏览</button></div></label><label><span>FFmpeg</span><input v-model="settings.ffmpeg_path" /></label><label><span>ffprobe</span><input v-model="settings.ffprobe_path" /></label><label><span>Adobe Premiere Pro</span><div class="input-action"><input v-model="settings.premiere_pro_path" placeholder="Adobe Premiere Pro.exe 的完整路径" /><button v-if="premiereStatus?.path" type="button" @click="useDetectedPremiere">使用检测结果</button></div><small :class="premiereStatus?.installed ? 'status-ok' : 'status-warning'">{{ premiereStatus?.installed ? `已检测：${premiereStatus.path}` : '未检测到 Premiere Pro' }}</small></label></div></article>
       </div>
 
       <article v-else-if="section === 'ai-services'" class="setting-card"><h3>DeepSeek</h3><div class="form-grid compact-form"><label><span>基础 URL</span><input v-model="settings.deepseek_base_url" /></label><label><span>模型</span><select v-model="settings.deepseek_model"><option>deepseek-v4-flash</option><option>deepseek-v4-pro</option></select></label><label><span>API Key</span><input v-model="settings.deepseek_api_key" type="password" /></label><label><span>超时（秒）</span><input v-model.number="settings.deepseek_timeout_seconds" type="number" /></label><button v-if="settings.deepseek_api_key_configured" @click="clearDeepseekKey">清除密钥</button></div></article>

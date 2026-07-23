@@ -45,7 +45,7 @@ const stageLabels: Record<string, string> = {
 
 const videoMode = computed(() => project.value?.config?.video_mode || 'none')
 const usesLandscapeVideo = computed(() => videoMode.value === 'landscape')
-const usesAiVideo = computed(() => videoMode.value === 'ai_generated_images')
+const usesAiVideo = computed(() => videoMode.value === 'ai_generated_images' || videoMode.value === 'ai_landscape_mix')
 const active = computed(() => usesLandscapeVideo.value
   ? videoProgress.value?.status === 'running'
   : task.value?.status === 'queued' || task.value?.status === 'running')

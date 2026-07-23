@@ -39,6 +39,10 @@ def get_final_fcpxml_path(project: Project, workspace_dir: Path) -> Path:
     return get_project_output_dir(project, workspace_dir) / f"{get_output_stem(project)}.fcpxml"
 
 
+def get_final_premiere_xml_path(project: Project, workspace_dir: Path) -> Path:
+    return get_project_output_dir(project, workspace_dir) / f"{get_output_stem(project)}.premiere.xml"
+
+
 def get_final_prproj_path(project: Project, workspace_dir: Path) -> Path:
     return get_project_output_dir(project, workspace_dir) / f"{get_output_stem(project)}.prproj"
 

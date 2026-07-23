@@ -12,6 +12,7 @@ from app.infrastructure.file_storage import ensure_inside_any, project_dir
 from app.infrastructure.project_layout import (
     get_final_audio_path,
     get_final_fcpxml_path,
+    get_final_premiere_xml_path,
     get_final_prproj_path,
     get_final_srt_path,
     get_final_video_path,
@@ -166,6 +167,7 @@ def get_project_outputs(project_id: str, session: Session = Depends(get_session)
     final_srt_path = get_final_srt_path(project, get_settings().workspace_dir)
     final_video_path = get_final_video_path(project, get_settings().workspace_dir)
     final_fcpxml_path = get_final_fcpxml_path(project, get_settings().workspace_dir)
+    final_premiere_xml_path = get_final_premiere_xml_path(project, get_settings().workspace_dir)
     final_prproj_path = get_final_prproj_path(project, get_settings().workspace_dir)
     output_files = []
     seen_paths: set[Path] = set()
@@ -184,7 +186,14 @@ def get_project_outputs(project_id: str, session: Session = Depends(get_session)
                     "modified_at": stat.st_mtime,
                 }
             )
-    for final_path in (final_audio_path, final_video_path, final_fcpxml_path, final_prproj_path, final_srt_path):
+    for final_path in (
+        final_audio_path,
+        final_video_path,
+        final_fcpxml_path,
+        final_premiere_xml_path,
+        final_prproj_path,
+        final_srt_path,
+    ):
         if not final_path.is_file() or final_path.resolve() in seen_paths:
             continue
         stat = final_path.stat()
@@ -204,11 +213,13 @@ def get_project_outputs(project_id: str, session: Session = Depends(get_session)
         "final_srt_path": str(final_srt_path),
         "final_video_path": str(final_video_path),
         "final_fcpxml_path": str(final_fcpxml_path),
+        "final_premiere_xml_path": str(final_premiere_xml_path),
         "final_prproj_path": str(final_prproj_path),
         "final_audio_exists": final_audio_path.is_file(),
         "final_srt_exists": final_srt_path.is_file(),
         "final_video_exists": final_video_path.is_file(),
         "final_fcpxml_exists": final_fcpxml_path.is_file(),
+        "final_premiere_xml_exists": final_premiere_xml_path.is_file(),
         "final_prproj_exists": final_prproj_path.is_file(),
         "files": output_files,
     })

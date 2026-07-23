@@ -8,6 +8,8 @@ from app.infrastructure.project_layout import (
     ensure_project_dirs,
     get_final_srt_path,
     get_final_fcpxml_path,
+    get_final_premiere_xml_path,
+    get_final_prproj_path,
     get_final_video_path,
     get_output_stem,
     get_project_work_dir,
@@ -33,6 +35,10 @@ def create_manifest(project: Project) -> Path:
             "final_srt": str(get_final_srt_path(project, get_settings().workspace_dir)),
             "final_video": str(get_final_video_path(project, get_settings().workspace_dir)),
             "final_fcpxml": str(get_final_fcpxml_path(project, get_settings().workspace_dir)),
+            "final_premiere_xml": str(
+                get_final_premiere_xml_path(project, get_settings().workspace_dir)
+            ),
+            "final_prproj": str(get_final_prproj_path(project, get_settings().workspace_dir)),
             "timeline": str(base_dir / "timeline" / f"{stem}_timeline.json"),
             "selected_videos": str(base_dir / "video" / "selected_videos.json"),
         },

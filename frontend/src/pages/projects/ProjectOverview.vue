@@ -67,7 +67,7 @@ const recentTasks = computed(() => [
 function stateTone(state: string) { return state === '已完成' ? 'green' : state === '进行中' ? 'orange' : 'gray' }
 function videoMode() {
   const mode = project.value?.config?.video_mode
-  return mode === 'none' ? '仅完整配音' : mode === 'landscape' ? 'Vlog 16:9' : mode === 'ai_generated_images' ? '图文快剪 16:9' : '横版 16:9'
+  return mode === 'none' ? '仅完整配音' : mode === 'landscape' ? 'Vlog 16:9' : mode === 'ai_landscape_mix' ? 'AI + 风景混剪 16:9' : mode === 'ai_generated_images' ? '图文快剪 16:9' : '横版 16:9'
 }
 
 async function load() {

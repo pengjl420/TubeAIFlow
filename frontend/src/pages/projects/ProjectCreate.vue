@@ -61,8 +61,8 @@ async function submit() {
     error.value = '请选择输出文件夹'
     return
   }
-  if (videoMode.value === 'landscape' && !mediaVideoDir.value.trim()) {
-    error.value = '纯风景素材拼接必须选择原始素材文件夹'
+  if (['landscape', 'ai_landscape_mix'].includes(videoMode.value) && !mediaVideoDir.value.trim()) {
+    error.value = '当前视频模式必须选择风景素材文件夹'
     return
   }
   saving.value = true
@@ -73,7 +73,7 @@ async function submit() {
       voice_profile_id: voiceProfileId.value,
       output_dir: outputDir.value.trim(),
       output_filename: outputFilename.value.trim(),
-      media_video_dir: videoMode.value === 'landscape' ? mediaVideoDir.value.trim() : '',
+      media_video_dir: ['landscape', 'ai_landscape_mix'].includes(videoMode.value) ? mediaVideoDir.value.trim() : '',
       include_video: videoMode.value !== 'none',
       video_mode: videoMode.value,
       storyboard_transition_enabled: storyboardTransitionEnabled.value,
@@ -175,10 +175,11 @@ onMounted(async () => {
             <option value="none">不生成视频（仅生成完整配音）</option>
             <option value="landscape">纯风景素材拼接</option>
             <option value="ai_generated_images">本地 AI 分镜图片视频</option>
+            <option value="ai_landscape_mix">本地 AI 分镜 + 风景素材混合视频</option>
           </select>
           <span class="muted">选择后，一键生成会自动完成配音、素材匹配与最终 MP4 合成。</span>
         </label>
-        <label v-if="videoMode === 'landscape'" class="field reference-field">
+        <label v-if="videoMode === 'landscape' || videoMode === 'ai_landscape_mix'" class="field reference-field">
           <span>原始素材文件夹</span>
           <div class="inline-form">
             <input v-model="mediaVideoDir" readonly placeholder="请选择原始素材文件夹" />
@@ -193,7 +194,7 @@ onMounted(async () => {
           </div>
           <span class="muted">生成最终视频时会扫描该目录中的视频素材。</span>
         </label>
-        <label v-if="videoMode === 'ai_generated_images'" class="field reference-field">
+        <label v-if="videoMode === 'ai_generated_images' || videoMode === 'ai_landscape_mix'" class="field reference-field">
           <span>分镜头视觉场景切分</span>
           <select v-model="storyboardMode">
             <option value="segments">按逐字稿切段生成分镜头（默认）</option>

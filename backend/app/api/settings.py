@@ -49,6 +49,11 @@ def get_ffmpeg_status() -> dict:
     return {"success": True, "data": system_settings_service.get_ffmpeg_status()}
 
 
+@router.get("/settings/premiere/status")
+def get_premiere_status() -> dict:
+    return {"success": True, "data": system_settings_service.get_premiere_status()}
+
+
 @router.post("/settings/ffmpeg/install")
 def install_ffmpeg(session: Session = Depends(get_session)) -> dict:
     try:

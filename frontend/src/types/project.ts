@@ -25,7 +25,7 @@ export interface Project {
   latest_task_status?: string | null
 }
 
-export type VideoGenerationMode = 'none' | 'landscape' | 'ai_generated_images'
+export type VideoGenerationMode = 'none' | 'landscape' | 'ai_generated_images' | 'ai_landscape_mix'
 export type VideoOutputFormat = 'mp4' | 'fcpxml' | 'prproj' | 'editable_both'
 export type SegmentationMode = 'newline' | 'ai'
 export type StoryboardMode = 'ai' | 'segments'

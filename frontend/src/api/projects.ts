@@ -56,11 +56,13 @@ export interface ProjectOutputs {
   final_srt_path?: string
   final_video_path?: string
   final_fcpxml_path?: string
+  final_premiere_xml_path?: string
   final_prproj_path?: string
   final_audio_exists?: boolean
   final_srt_exists?: boolean
   final_video_exists?: boolean
   final_fcpxml_exists?: boolean
+  final_premiere_xml_exists?: boolean
   final_prproj_exists?: boolean
   files: ProjectOutputFile[]
 }

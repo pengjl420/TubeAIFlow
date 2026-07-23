@@ -91,7 +91,7 @@ function voiceName(project: Project) {
 }
 function videoMode(project: Project) {
   const mode = project.config?.video_mode
-  return mode === 'none' ? '仅配音字幕' : mode === 'landscape' ? 'Vlog' : mode === 'ai_generated_images' ? '图文快剪' : '访谈纪实'
+  return mode === 'none' ? '仅配音字幕' : mode === 'landscape' ? 'Vlog' : mode === 'ai_landscape_mix' ? 'AI + 风景混剪' : mode === 'ai_generated_images' ? '图文快剪' : '访谈纪实'
 }
 function projectStage(project: Project) {
   if (project.status === 'failed') return '视频渲染失败'

@@ -94,10 +94,13 @@ def create_batch(
     output_root.mkdir(parents=True, exist_ok=True)
     video_root = Path(media_video_dir).expanduser().resolve() if media_video_dir.strip() else None
     if (
-        resolved_video_mode == project_service.VIDEO_MODE_LANDSCAPE
+        resolved_video_mode in {
+            project_service.VIDEO_MODE_LANDSCAPE,
+            project_service.VIDEO_MODE_AI_LANDSCAPE_MIX,
+        }
         and (video_root is None or not video_root.is_dir())
     ):
-        raise ValueError("纯风景视频生成时必须选择有效的素材视频目录")
+        raise ValueError("当前视频模式必须选择有效的风景素材视频目录")
 
     now = utc_now_iso()
     batch = BatchJob(

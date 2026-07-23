@@ -18,6 +18,7 @@ from app.infrastructure.project_layout import (
     ensure_project_dirs,
     get_final_audio_path,
     get_final_fcpxml_path,
+    get_final_premiere_xml_path,
     get_final_prproj_path,
     get_final_srt_path,
     get_final_video_path,
@@ -44,6 +45,7 @@ SUPPORTED_STORYBOARD_MODES = {STORYBOARD_MODE_AI, STORYBOARD_MODE_SEGMENTS}
 VIDEO_MODE_NONE = "none"
 VIDEO_MODE_LANDSCAPE = "landscape"
 VIDEO_MODE_AI_GENERATED_IMAGES = "ai_generated_images"
+VIDEO_MODE_AI_LANDSCAPE_MIX = "ai_landscape_mix"
 VIDEO_OUTPUT_MP4 = "mp4"
 VIDEO_OUTPUT_FCPXML = "fcpxml"
 VIDEO_OUTPUT_PRPROJ = "prproj"
@@ -58,6 +60,7 @@ SUPPORTED_VIDEO_MODES = {
     VIDEO_MODE_NONE,
     VIDEO_MODE_LANDSCAPE,
     VIDEO_MODE_AI_GENERATED_IMAGES,
+    VIDEO_MODE_AI_LANDSCAPE_MIX,
 }
 EDITABLE_STATUSES = {"created", "script_imported", "segmented"}
 GENERATING_STATUSES = {
@@ -306,6 +309,7 @@ def _project_artifact_paths(project: Project) -> list[Path]:
         get_final_srt_path(project, settings.workspace_dir),
         get_final_video_path(project, settings.workspace_dir),
         get_final_fcpxml_path(project, settings.workspace_dir),
+        get_final_premiere_xml_path(project, settings.workspace_dir),
         get_final_prproj_path(project, settings.workspace_dir),
     ]
     return list(dict.fromkeys(paths))
@@ -514,7 +518,7 @@ def update_project_settings(
     resolved_storyboard_mode = normalize_storyboard_mode(storyboard_mode)
     include_video = resolved_video_mode != VIDEO_MODE_NONE
     video_directory: Path | None = None
-    if resolved_video_mode == VIDEO_MODE_LANDSCAPE and not media_video_dir.strip():
+    if resolved_video_mode in {VIDEO_MODE_LANDSCAPE, VIDEO_MODE_AI_LANDSCAPE_MIX} and not media_video_dir.strip():
         raise ValueError("Video material directory is required for landscape video generation")
     if media_video_dir.strip():
         video_directory = Path(media_video_dir).expanduser().resolve()

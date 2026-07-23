@@ -75,7 +75,7 @@ npm run build
 - API keys are never returned to the frontend after they are saved.
 - Generated project files live under `backend/workspace/projects/{project_id}` by default.
 - FFmpeg, ffprobe, Qwen3-TTS, CosyVoice, DeepSeek, workspace, host, and port are configured on the System Settings page.
-- PRPROJ export first creates FCPXML and then uses Adobe Premiere Pro's `openFCPXML()` conversion API. Configure the Premiere executable under **System Settings → Basic & Storage** when it is not detected automatically. FCPXML export does not require Premiere.
+- PRPROJ export retains the Final Cut Pro X FCPXML, converts the timeline to Premiere-compatible Final Cut Pro 7 XML, and then uses Adobe Premiere Pro's `openFCPXML()` API to create the native project. Configure the Premiere executable under **System Settings → Basic & Storage** when Windows App Paths and standard installation folders do not detect it automatically. FCPXML and Premiere XML export do not require Premiere.
 - AI image assignments support stable automatic motion presets. Network stock search, semantic vector retrieval, candidate review, and manual material approval are not part of the video workflow.
 - Every intermediate scene and `renders/visual_track.mp4` is validated with ffprobe and must contain exactly one H.264 video stream, 30 FPS CFR, yuv420p, and no audio stream under the default render profile.
 - Project render settings may be stored in `config.render.video` and `config.render.policy`; missing values use the validated 1920×1080, 30 FPS defaults.

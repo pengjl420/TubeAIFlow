@@ -230,12 +230,13 @@ const mediaVideoDir = computed(() => {
 
 const videoMode = computed(() => {
   const mode = projectConfig.value.video_mode
-  if (mode === 'ai_generated_images' || mode === 'landscape' || mode === 'none') return mode
+  if (mode === 'ai_generated_images' || mode === 'ai_landscape_mix' || mode === 'landscape' || mode === 'none') return mode
   return projectConfig.value.include_video === true ? 'landscape' : 'none'
 })
 const includeVideo = computed(() => videoMode.value !== 'none')
-const usesAiSemanticVideo = computed(() => videoMode.value === 'ai_generated_images')
+const usesAiSemanticVideo = computed(() => videoMode.value === 'ai_generated_images' || videoMode.value === 'ai_landscape_mix')
 const usesLandscapeVideo = computed(() => videoMode.value === 'landscape')
+const usesLandscapeMaterial = computed(() => usesLandscapeVideo.value || videoMode.value === 'ai_landscape_mix')
 
 const finalVideoPath = computed(() => {
   if (!hasOutputFilename.value) return ''
@@ -732,7 +733,7 @@ async function oneClickGenerate() {
     error.value = '请先配置项目参考音频后再一键生成'
     return
   }
-  if (usesLandscapeVideo.value && !mediaVideoDir.value) {
+  if (usesLandscapeMaterial.value && !mediaVideoDir.value) {
     error.value = '当前项目缺少风景素材目录，请重新创建项目并选择素材目录'
     return
   }

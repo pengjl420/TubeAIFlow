@@ -120,7 +120,10 @@ def _stage_after_narration(project: Project, include_video: bool) -> str:
     )
     if video_mode == project_service.VIDEO_MODE_LANDSCAPE:
         return "video"
-    if video_mode == project_service.VIDEO_MODE_AI_GENERATED_IMAGES:
+    if video_mode in {
+        project_service.VIDEO_MODE_AI_GENERATED_IMAGES,
+        project_service.VIDEO_MODE_AI_LANDSCAPE_MIX,
+    }:
         return "storyboard"
     return "completed"
 

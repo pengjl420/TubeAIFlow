@@ -3,12 +3,40 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from app.infrastructure import ffmpeg
 from app.services.settings import ffmpeg_installer_service as installer
 
 
 class FfmpegInstallerTests(unittest.TestCase):
+    def test_runtime_discovers_installed_version_when_configured_path_is_stale(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            discovered = (
+                workspace
+                / "tools"
+                / "ffmpeg"
+                / "windows-x64"
+                / "9.0"
+                / "bin"
+                / "ffmpeg.exe"
+            )
+            discovered.parent.mkdir(parents=True)
+            discovered.write_bytes(b"binary")
+            settings = SimpleNamespace(workspace_dir=workspace)
+
+            with (
+                patch.object(ffmpeg, "get_settings", return_value=settings),
+                patch.object(ffmpeg.shutil, "which", return_value=None),
+            ):
+                resolved = ffmpeg._resolve_tool(
+                    str(workspace / "tools" / "ffmpeg" / "windows-x64" / "8.1" / "bin" / "ffmpeg.exe")
+                )
+
+            self.assertEqual(Path(resolved), discovered.resolve())
+
     def test_extracts_only_required_executables(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

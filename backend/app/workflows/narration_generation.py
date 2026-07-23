@@ -7,6 +7,7 @@ from app.models.project import Project
 from app.models.narration import Segment
 from app.models.storyboard import SubtitleCue
 from app.infrastructure import process_runner as task_control
+from app.infrastructure.ffmpeg import ensure_ffmpeg_available
 from app.config import get_settings
 from app.infrastructure.project_layout import (
     get_final_audio_path,
@@ -49,6 +50,7 @@ def run_project_generation(
     on_stage_changed: StageChanged,
 ) -> None:
     """Run one project's generation stages from its persisted checkpoint."""
+    ensure_ffmpeg_available()
     stage = current_stage or "segmenting"
     supported_stages = {
         "segmenting", "tts", "audio_merge", "subtitles", "video", "completed",

@@ -156,11 +156,50 @@ def _parse_optional_int(value: str | int | None) -> int | None:
 
 def _resolve_tool(configured: str) -> str:
     configured_path = Path(configured)
-    if configured_path.is_absolute():
+    if _path_is_file(configured_path):
         return str(configured_path)
 
-    found = shutil.which(configured)
+    executable_name = configured_path.name or configured
+    found = shutil.which(executable_name)
     if found:
         return found
 
-    return configured
+    # An installed FFmpeg version can change while the persisted setting still
+    # points at the previous version. Discover another complete local install
+    # before failing the render.
+    install_root = get_settings().workspace_dir / "tools" / "ffmpeg" / "windows-x64"
+    candidates = sorted(
+        install_root.glob(f"*/bin/{executable_name}"),
+        key=lambda path: path.parent.parent.name,
+        reverse=True,
+    )
+    for candidate in candidates:
+        if _path_is_file(candidate):
+            return str(candidate.resolve())
+
+    return str(configured_path) if configured_path.is_absolute() else configured
+
+
+def ensure_ffmpeg_available() -> None:
+    """Fail before an expensive workflow when FFmpeg tools are unavailable."""
+    settings = get_settings()
+    missing = []
+    for label, configured in (
+        ("FFmpeg", settings.ffmpeg_path),
+        ("ffprobe", settings.ffprobe_path),
+    ):
+        resolved = _resolve_tool(configured)
+        if not _path_is_file(Path(resolved)) and shutil.which(resolved) is None:
+            missing.append(f"{label}: {resolved}")
+    if missing:
+        raise RuntimeError(
+            "Video/audio generation requires installed FFmpeg tools; missing "
+            + ", ".join(missing)
+        )
+
+
+def _path_is_file(path: Path) -> bool:
+    try:
+        return path.is_file()
+    except OSError:
+        return False

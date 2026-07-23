@@ -3,6 +3,7 @@ from collections.abc import Callable
 from sqlmodel import Session, select
 
 from app.infrastructure import process_runner as task_control
+from app.infrastructure.ffmpeg import ensure_ffmpeg_available
 from app.models.project import Project
 from app.models.storyboard import SubtitleCue, VisualScene
 from app.services.image_generation import image_assignment_service, image_generation_service
@@ -32,6 +33,7 @@ def run_video_synthesis(
 ) -> None:
     if project_service.get_project_video_mode(project) != project_service.VIDEO_MODE_AI_GENERATED_IMAGES:
         raise ValueError("Video synthesis only supports project-generated images")
+    ensure_ffmpeg_available()
 
     stage = current_stage or "storyboard"
     if stage not in STAGES:

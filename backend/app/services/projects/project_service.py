@@ -86,7 +86,7 @@ def create_project(session: Session, name: str, config: dict | None = None) -> P
             {
                 "tts_engine": DEFAULT_TTS_ENGINE,
                 "segmentation_mode": SEGMENTATION_MODE_NEWLINE,
-                "storyboard_mode": STORYBOARD_MODE_SEGMENTS,
+                "storyboard_mode": STORYBOARD_MODE_AI,
                 "storyboard_transition_enabled": True,
                 **(config or {}),
             },
@@ -199,7 +199,7 @@ def get_segmentation_mode(project: Project) -> str:
 
 
 def normalize_storyboard_mode(mode: str | None) -> str:
-    normalized = str(mode or STORYBOARD_MODE_SEGMENTS).strip().lower()
+    normalized = str(mode or STORYBOARD_MODE_AI).strip().lower()
     if normalized not in SUPPORTED_STORYBOARD_MODES:
         raise ValueError("Unsupported storyboard segmentation mode")
     return normalized

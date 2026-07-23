@@ -1,9 +1,15 @@
 import unittest
+import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.config import Settings
-from app.services.settings.system_settings_service import SECRET_FIELDS, get_public_settings
+from app.services.settings.system_settings_service import (
+    SECRET_FIELDS,
+    _serialize_settings,
+    get_public_settings,
+)
 
 
 class SettingsModelTests(unittest.TestCase):
@@ -45,6 +51,16 @@ class SettingsModelTests(unittest.TestCase):
 
     def test_legacy_deepseek_model_is_migrated(self) -> None:
         self.assertEqual(Settings(deepseek_model="deepseek-chat").deepseek_model, "deepseek-v4-flash")
+
+    def test_saving_core_settings_preserves_optional_module_values(self) -> None:
+        record = SimpleNamespace(
+            config_json=json.dumps({"pexels_api_key": "provider-secret", "app_port": 1234})
+        )
+
+        serialized = json.loads(_serialize_settings(Settings(app_port=18080), record))
+
+        self.assertEqual(serialized["app_port"], 18080)
+        self.assertEqual(serialized["pexels_api_key"], "provider-secret")
 
 
 if __name__ == "__main__":

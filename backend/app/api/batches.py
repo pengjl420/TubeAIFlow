@@ -36,7 +36,7 @@ def create_batch(
     include_video: bool = Form(True),
     video_mode: str | None = Form(None),
     segmentation_mode: str = Form(project_service.SEGMENTATION_MODE_NEWLINE),
-    storyboard_mode: str = Form(project_service.STORYBOARD_MODE_SEGMENTS),
+    storyboard_mode: str = Form(project_service.STORYBOARD_MODE_AI),
     continue_on_error: bool = Form(True),
     tts_engine: str = Form(batch_service.DEFAULT_TTS_ENGINE),
     reference_audio_text: str = Form(""),

@@ -13,6 +13,15 @@ from app.shared.time import elapsed_seconds, utc_now_iso
 
 ACTIVE_STATUSES = {"queued", "running", "paused"}
 TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
+VIDEO_STAGES = {
+    "video",
+    "storyboard",
+    "image_generation",
+    "scene_render",
+    "visual_track",
+    "final_render",
+    "quality_check",
+}
 _enqueue_lock = threading.Lock()
 
 
@@ -60,7 +69,7 @@ def enqueue_project_task(
         if initial_status == "queued":
             project.status = (
                 "video_in_progress"
-                if workflow == "video_synthesis" or current_stage == "video"
+                if _is_video_task(workflow, current_stage)
                 else "narration_in_progress"
             )
             project.updated_at = now
@@ -115,7 +124,7 @@ def resume_failed_task(session: Session, task: TaskRun, *, current_stage: str) -
     if project:
         project.status = (
             "video_in_progress"
-            if task.workflow == "video_synthesis" or current_stage == "video"
+            if _is_video_task(task.workflow, current_stage)
             else "narration_in_progress"
         )
         project.updated_at = now
@@ -123,6 +132,10 @@ def resume_failed_task(session: Session, task: TaskRun, *, current_stage: str) -
 
     session.commit()
     session.refresh(task)
+
+
+def _is_video_task(workflow: str, current_stage: str) -> bool:
+    return workflow == "video_synthesis" or current_stage in VIDEO_STAGES
 
 
 def get_active_project_task(session: Session, project_id: str) -> TaskRun | None:

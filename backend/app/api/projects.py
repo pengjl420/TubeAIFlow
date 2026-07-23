@@ -48,7 +48,7 @@ class ProjectSettingsRequest(BaseModel):
     voice_profile_id: str = ""
     storyboard_transition_enabled: bool = True
     segmentation_mode: str = project_service.SEGMENTATION_MODE_NEWLINE
-    storyboard_mode: str = project_service.STORYBOARD_MODE_SEGMENTS
+    storyboard_mode: str = project_service.STORYBOARD_MODE_AI
 
 
 class DirectoryPickerRequest(BaseModel):
@@ -84,7 +84,7 @@ def create_project(
     voice_profile_id: str = Form(""),
     storyboard_transition_enabled: bool = Form(True),
     segmentation_mode: str = Form(project_service.SEGMENTATION_MODE_NEWLINE),
-    storyboard_mode: str = Form(project_service.STORYBOARD_MODE_SEGMENTS),
+    storyboard_mode: str = Form(project_service.STORYBOARD_MODE_AI),
     session: Session = Depends(get_session),
 ) -> dict:
     if not name.strip():

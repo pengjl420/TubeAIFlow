@@ -68,6 +68,8 @@ def _generate(
     ensure_project_dirs(base_dir)
     generated_dir = base_dir / "media" / "generated_images"
     logs_dir = base_dir / "logs"
+    result_path = logs_dir / "image_generation_results.json"
+    recovered_results = _load_results_by_variant(result_path)
     jobs = []
     variants = []
     for scene in scenes:
@@ -93,11 +95,12 @@ def _generate(
                 settings.image_generation_guidance_scale,
             )
             variant = session.get(GeneratedImageVariant, variant_id)
+            recovered = recovered_results.get(variant_id)
             reusable = bool(
                 variant
                 and variant.input_signature == signature
-                and variant.status == "completed"
-                and Path(variant.path).is_file()
+                and (variant.status == "completed" or recovered is not None)
+                and _valid_generated_image(Path(variant.path), variant.width, variant.height)
             )
             if variant is None:
                 variant = GeneratedImageVariant(
@@ -134,6 +137,15 @@ def _generate(
                 variant.generation_seconds = None
                 variant.updated_at = utc_now_iso()
                 output_path.unlink(missing_ok=True)
+            elif recovered is not None and variant.status != "completed":
+                # The child process writes its result file continuously, while
+                # the parent commits DB statuses after the full batch exits.
+                # Preserve completed files when the backend is restarted in
+                # the middle of a long image-generation batch.
+                variant.status = "completed"
+                variant.generation_seconds = recovered.get("generation_seconds")
+                variant.error_message = None
+                variant.updated_at = utc_now_iso()
             session.add(variant)
             variants.append(variant)
             if force or not reusable:
@@ -154,7 +166,6 @@ def _generate(
 
     if jobs:
         batch_path = logs_dir / "image_generation_batch.json"
-        result_path = logs_dir / "image_generation_results.json"
         progress_path = logs_dir / "image_generation_progress.json"
         result_path.unlink(missing_ok=True)
         write_json(batch_path, jobs)
@@ -265,6 +276,36 @@ def _apply_results(session: Session, result_path: Path) -> None:
         variant.updated_at = utc_now_iso()
         session.add(variant)
     session.commit()
+
+
+def _load_results_by_variant(result_path: Path) -> dict[str, dict]:
+    if not result_path.is_file():
+        return {}
+    try:
+        results = json.loads(result_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(results, list):
+        return {}
+    return {
+        str(item["variant_id"]): item
+        for item in results
+        if isinstance(item, dict)
+        and item.get("variant_id")
+        and item.get("status") == "completed"
+    }
+
+
+def _valid_generated_image(path: Path, width: int, height: int) -> bool:
+    if not path.is_file():
+        return False
+    try:
+        with Image.open(path) as image:
+            image.verify()
+        with Image.open(path) as image:
+            return image.size == (width, height)
+    except (OSError, ValueError):
+        return False
 
 
 def _register_generated_image(session: Session, project: Project, variant: GeneratedImageVariant) -> None:

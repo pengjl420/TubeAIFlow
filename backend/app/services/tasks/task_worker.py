@@ -213,10 +213,18 @@ def process_next_task() -> bool:
             if not current:
                 raise RuntimeError("Task record disappeared while generation was running")
             changed_at = utc_now_iso()
+            completed_stage = current.current_stage
             current.current_stage = stage
             current.heartbeat_at = changed_at
             current.updated_at = changed_at
-            _append_checkpoint_event(current, "stage_completed", stage, changed_at)
+            _append_checkpoint_event(
+                current,
+                "stage_completed",
+                completed_stage,
+                changed_at,
+                checkpoint_stage=stage,
+                next_stage=stage,
+            )
             session.add(current)
             current_item = session.get(BatchItem, current.batch_item_id) if current.batch_item_id else None
             if current_item:
@@ -431,6 +439,9 @@ def _append_checkpoint_event(
     stage: str,
     timestamp: str,
     error: str | None = None,
+    *,
+    checkpoint_stage: str | None = None,
+    next_stage: str | None = None,
 ) -> None:
     try:
         checkpoint = json.loads(task.checkpoint_json)
@@ -442,10 +453,12 @@ def _append_checkpoint_event(
     if not isinstance(history, list):
         history = []
     entry = {"event": event, "stage": stage, "at": timestamp}
+    if next_stage:
+        entry["next_stage"] = next_stage
     if error:
         entry["error"] = error[-1000:]
     history.append(entry)
-    checkpoint["current_stage"] = stage
+    checkpoint["current_stage"] = checkpoint_stage or stage
     checkpoint["stage_history"] = history[-100:]
     task.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
 

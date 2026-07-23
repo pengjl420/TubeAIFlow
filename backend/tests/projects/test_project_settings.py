@@ -209,15 +209,15 @@ class ProjectSettingsTests(unittest.TestCase):
             project_service.VIDEO_OUTPUT_MP4,
         )
 
-    def test_storyboard_defaults_to_transcript_segments(self) -> None:
+    def test_storyboard_defaults_to_semantic_grouping(self) -> None:
         legacy = Project(id="legacy", name="Legacy", config_json="{}")
         self.assertEqual(
             project_service.normalize_storyboard_mode(None),
-            project_service.STORYBOARD_MODE_SEGMENTS,
+            project_service.STORYBOARD_MODE_AI,
         )
         self.assertEqual(
             project_service.get_storyboard_mode(legacy),
-            project_service.STORYBOARD_MODE_SEGMENTS,
+            project_service.STORYBOARD_MODE_AI,
         )
 
     def test_switching_to_qwen_resets_completed_segments(self) -> None:

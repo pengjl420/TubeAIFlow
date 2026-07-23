@@ -31,7 +31,7 @@ def save_settings(session: Session, values: dict) -> dict:
     _validate_paths(settings)
 
     record = session.get(SystemSetting, 1)
-    serialized = json.dumps(settings.model_dump(mode="json"), ensure_ascii=False)
+    serialized = _serialize_settings(settings, record)
     if record:
         record.config_json = serialized
         record.updated_at = utc_now_iso()
@@ -50,7 +50,7 @@ def clear_secret(session: Session, field_name: str) -> dict:
     values[field_name] = ""
     settings = Settings.model_validate(values)
     record = session.get(SystemSetting, 1)
-    serialized = json.dumps(settings.model_dump(mode="json"), ensure_ascii=False)
+    serialized = _serialize_settings(settings, record)
     if record:
         record.config_json = serialized
         record.updated_at = utc_now_iso()
@@ -100,3 +100,18 @@ def _validate_paths(settings: Settings) -> None:
         raise ValueError("image_generation_model_path must be an existing file")
     if settings.image_generation_python is not None and not settings.image_generation_python.is_file():
         raise ValueError("image_generation_python must be an existing file")
+
+
+def _serialize_settings(settings: Settings, record: SystemSetting | None) -> str:
+    """Keep settings owned by optional/older modules during core setting updates."""
+    data = settings.model_dump(mode="json")
+    if record:
+        try:
+            previous = json.loads(record.config_json)
+        except (TypeError, json.JSONDecodeError):
+            previous = {}
+        if isinstance(previous, dict):
+            for key, value in previous.items():
+                if key not in Settings.model_fields:
+                    data[key] = value
+    return json.dumps(data, ensure_ascii=False)

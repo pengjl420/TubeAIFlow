@@ -89,7 +89,12 @@ class TaskQueueTests(unittest.TestCase):
         self.assertEqual(calls, ["single-project", "batch-project"])
         self.assertEqual(running_counts, [1, 1])
         with Session(self.engine) as session:
-            self.assertEqual(session.get(TaskRun, "single-task").status, "completed")
+            single_task = session.get(TaskRun, "single-task")
+            self.assertEqual(single_task.status, "completed")
+            first_event = json.loads(single_task.checkpoint_json)["stage_history"][0]
+            self.assertEqual(first_event["event"], "stage_completed")
+            self.assertEqual(first_event["stage"], "segmenting")
+            self.assertEqual(first_event["next_stage"], "completed")
             self.assertEqual(session.get(TaskRun, "batch-task").status, "completed")
             self.assertEqual(session.get(BatchJob, "batch").status, "completed")
 
@@ -107,6 +112,21 @@ class TaskQueueTests(unittest.TestCase):
             second = task_service.enqueue_project_task(session, project, include_video=False)
             self.assertNotEqual(second.id, first.id)
             self.assertGreater(second.queue_sequence, first.queue_sequence)
+
+    def test_enqueue_at_ai_video_stage_sets_video_project_status(self) -> None:
+        with Session(self.engine) as session:
+            project = Project(id="project", name="Project", config_json="{}")
+            session.add(project)
+            session.commit()
+
+            task_service.enqueue_project_task(
+                session,
+                project,
+                include_video=True,
+                current_stage="visual_track",
+            )
+
+            self.assertEqual(project.status, "video_in_progress")
 
     def test_restart_compensation_keeps_current_stage_and_checkpoint(self) -> None:
         with Session(self.engine) as session:

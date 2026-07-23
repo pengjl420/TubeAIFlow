@@ -75,6 +75,13 @@ class BatchFileTests(unittest.TestCase):
 
 
 class GenerationCheckpointTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.ffmpeg_patch = patch.object(narration_generation, "ensure_ffmpeg_available")
+        self.ffmpeg_patch.start()
+
+    def tearDown(self) -> None:
+        self.ffmpeg_patch.stop()
+
     def test_generation_resumes_from_audio_merge_checkpoint(self) -> None:
         session = MagicMock()
         project = Project(id="p1", name="Project")

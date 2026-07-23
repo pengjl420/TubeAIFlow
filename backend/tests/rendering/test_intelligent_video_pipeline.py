@@ -34,6 +34,7 @@ class GeneratedImageVideoPipelineTests(unittest.TestCase):
             session.commit()
             changed = []
             with (
+                patch.object(video_synthesis, "ensure_ffmpeg_available"),
                 patch.object(video_synthesis.image_generation_service, "generate_project_images"),
                 patch.object(video_synthesis.image_assignment_service, "assign_generated_images"),
                 patch.object(video_synthesis.scene_renderer, "render_all_scenes"),

@@ -134,7 +134,8 @@ def build_scene_transition_args(
         # share the same FPS and render settings, so normalize every input
         # before it reaches either xfade or concat.
         filters.append(
-            f"[{index}:v]settb=AVTB,setpts=PTS-STARTPTS{suffix}[v{index}]"
+            f"[{index}:v]settb=AVTB,setpts=PTS-STARTPTS,setsar=1"
+            f"{suffix}[v{index}]"
         )
 
     current_label = "v0"

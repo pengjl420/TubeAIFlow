@@ -87,6 +87,14 @@ def run_quality_check(session: Session, project: Project) -> dict:
             visual_metadata = probe_media(visual_track_path)
             if visual_metadata.get("audio_stream_count") != 0:
                 _issue(issues, "visual_track_has_audio", "error", "纯视频轨道包含意外音频流")
+            visual_sar = visual_metadata.get("sample_aspect_ratio")
+            if visual_sar and visual_sar not in {"1:1", "1/1"}:
+                _issue(
+                    issues,
+                    "visual_track_sar_mismatch",
+                    "error",
+                    f"纯视频轨道像素宽高比不是 1:1（实际为 {visual_sar}）",
+                )
         except RuntimeError as exc:
             _issue(issues, "visual_track_invalid", "error", str(exc))
 
@@ -134,6 +142,14 @@ def run_quality_check(session: Session, project: Project) -> dict:
             video_metadata = probe_media(video_path)
             if video_metadata.get("width") != 1920 or video_metadata.get("height") != 1080:
                 _issue(issues, "resolution_mismatch", "error", "最终视频不是 1920×1080")
+            video_sar = video_metadata.get("sample_aspect_ratio")
+            if video_sar and video_sar not in {"1:1", "1/1"}:
+                _issue(
+                    issues,
+                    "video_sar_mismatch",
+                    "error",
+                    f"最终视频像素宽高比不是 1:1（实际为 {video_sar}）",
+                )
             if video_metadata.get("codec_name") != "h264":
                 _issue(issues, "codec_mismatch", "warning", "最终视频编码不是 H.264")
         except RuntimeError as exc:

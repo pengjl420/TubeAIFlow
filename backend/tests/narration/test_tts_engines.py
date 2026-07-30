@@ -215,6 +215,7 @@ class TtsEngineTests(unittest.TestCase):
             self.assertEqual(command[command.index("--reference-text") + 1], "参考文本")
             self.assertEqual(command[command.index("--speed") + 1], "1.1")
             self.assertEqual(command[command.index("--max-attempts") + 1], "3")
+            self.assertEqual(command[command.index("--seed-round") + 1], "0")
             self.assertIn("--fp16", command)
 
     def test_cosyvoice_seed_is_stable_and_attempt_specific(self) -> None:
@@ -223,6 +224,9 @@ class TtsEngineTests(unittest.TestCase):
         self.assertEqual(first, segment_attempt_seed("0192", "第一次只談錢", 1))
         self.assertNotEqual(first, segment_attempt_seed("0192", "第一次只談錢", 2))
         self.assertNotEqual(first, segment_attempt_seed("0193", "第一次只談錢", 1))
+
+        retry_round = segment_attempt_seed("0192", "第一次只談錢", 1, 1)
+        self.assertNotEqual(first, retry_round)
 
     def test_cosyvoice_duration_quality_rejects_hallucination_outlier(self) -> None:
         suspicious, reason, _ = duration_quality(

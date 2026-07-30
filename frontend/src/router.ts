@@ -4,6 +4,7 @@ const BatchCreate = () => import('./pages/batches/BatchCreate.vue')
 const BatchDetail = () => import('./pages/batches/BatchDetail.vue')
 const BatchList = () => import('./pages/batches/BatchList.vue')
 const Dashboard = () => import('./pages/Dashboard.vue')
+const LocalVideoMerge = () => import('./pages/LocalVideoMerge.vue')
 const ProjectCreate = () => import('./pages/projects/ProjectCreate.vue')
 const ProjectDelivery = () => import('./pages/projects/ProjectDelivery.vue')
 const ProjectList = () => import('./pages/projects/ProjectList.vue')
@@ -42,6 +43,7 @@ const router = createRouter({
     { path: '/batches', component: BatchList },
     { path: '/batches/new', component: BatchCreate },
     { path: '/batches/:id', component: BatchDetail },
+    { path: '/local-video-merge', component: LocalVideoMerge, meta: { title: '本地素材拼接' } },
     { path: '/tasks', component: TaskCenter },
     { path: '/voices', component: VoiceProfiles },
     {
@@ -60,6 +62,7 @@ router.afterEach((to) => {
   const section = title || (to.path.startsWith('/dashboard') ? '工作台'
     : to.path.startsWith('/projects') ? '项目'
       : to.path.startsWith('/batches') ? '批量生产'
+        : to.path.startsWith('/local-video-merge') ? '本地素材拼接'
         : to.path.startsWith('/tasks') ? '任务中心'
           : to.path.startsWith('/voices') ? '音色中心' : '系统设置')
   document.title = `${section} · TubeAIFlow`

@@ -13,7 +13,7 @@ from sqlmodel import Session
 
 from app.config import StoryboardTransitionEffect, get_settings
 from app.models.project import Project
-from app.infrastructure.ffmpeg import probe_duration, run_ffmpeg
+from app.infrastructure.ffmpeg import probe_duration, probe_media, run_ffmpeg
 from app.infrastructure.project_layout import (
     ensure_project_dirs,
     get_final_audio_path,
@@ -257,6 +257,7 @@ def compose_normalized_clips(
     output_path: Path,
     tail_padding: float = VIDEO_TAIL_PADDING,
     project_id: str | None = None,
+    output_duration: float | None = None,
 ) -> None:
     if transition_plan:
         concatenate_clips_with_transitions(
@@ -267,9 +268,16 @@ def compose_normalized_clips(
             output_path,
             tail_padding,
             project_id,
+            output_duration,
         )
         return
-    concatenate_normalized_clips(concat_path, output_path, tail_padding, project_id)
+    concatenate_normalized_clips(
+        concat_path,
+        output_path,
+        tail_padding,
+        project_id,
+        output_duration,
+    )
 
 
 def concatenate_clips_with_transitions(
@@ -280,6 +288,7 @@ def concatenate_clips_with_transitions(
     output_path: Path,
     tail_padding: float = VIDEO_TAIL_PADDING,
     project_id: str | None = None,
+    output_duration: float | None = None,
 ) -> None:
     if len(clip_paths) != len(clip_durations):
         raise ValueError("Clip paths and durations must have the same length")
@@ -313,9 +322,11 @@ def concatenate_clips_with_transitions(
             "-an",
             "-movflags",
             "+faststart",
-            str(output_path),
         ]
     )
+    if output_duration is not None:
+        args.extend(["-t", f"{output_duration:.3f}"])
+    args.append(str(output_path))
     run_ffmpeg(args, project_id)
 
 
@@ -331,7 +342,7 @@ def build_transition_filter(
         raise ValueError("Only one transition can be assigned to a video boundary")
 
     filters = [
-        f"[{index}:v]settb=AVTB,setpts=PTS-STARTPTS[v{index}]"
+        f"[{index}:v]settb=AVTB,setpts=PTS-STARTPTS,setsar=1[v{index}]"
         for index in range(len(clip_durations))
     ]
     current_label = "v0"
@@ -362,7 +373,7 @@ def build_transition_filter(
 
     filters.append(
         f"[{current_label}]tpad=stop_mode=clone:stop_duration={tail_padding:.3f},"
-        f"fps={TARGET_FPS},format=yuv420p[vout]"
+        f"fps={TARGET_FPS},setsar=1,format=yuv420p,setparams=range=tv[vout]"
     )
     return ";\n".join(filters)
 
@@ -372,11 +383,12 @@ def concatenate_normalized_clips(
     output_path: Path,
     tail_padding: float = VIDEO_TAIL_PADDING,
     project_id: str | None = None,
+    output_duration: float | None = None,
 ) -> None:
     # Re-encode the joined stream so every boundary gets a clean timestamp and
     # reference-frame chain. Stream copying can produce a one-frame flash on
     # some hardware decoders even when all input clips use H.264.
-    run_ffmpeg([
+    args = [
         "-y",
         "-f",
         "concat",
@@ -387,7 +399,8 @@ def concatenate_normalized_clips(
         "-map",
         "0:v:0",
         "-vf",
-        f"tpad=stop_mode=clone:stop_duration={tail_padding:.3f}",
+        f"tpad=stop_mode=clone:stop_duration={tail_padding:.3f},"
+        f"setsar=1,format=yuv420p,setparams=range=tv",
         "-c:v",
         "libx264",
         "-preset",
@@ -401,8 +414,11 @@ def concatenate_normalized_clips(
         "-an",
         "-movflags",
         "+faststart",
-        str(output_path),
-    ], project_id)
+    ]
+    if output_duration is not None:
+        args.extend(["-t", f"{output_duration:.3f}"])
+    args.append(str(output_path))
+    run_ffmpeg(args, project_id)
 
 
 def scan_video_files(media_dir: Path) -> list[Path]:
@@ -455,6 +471,37 @@ def build_transition_plan(
         max_per_group=max_per_group,
         duration=duration,
     )
+
+
+def build_full_transition_plan(
+    selected: list[SelectedVideo],
+    effects: list[StoryboardTransitionEffect],
+    duration: float = 0.45,
+) -> list[PlannedTransition]:
+    """Add one configured transition at every usable clip boundary."""
+    enabled = [item for item in effects if item.enabled and item.percentage > 0]
+    if len(selected) < 2 or not enabled:
+        return []
+
+    effect_names = [item.name for item in enabled]
+    effect_weights = [item.percentage for item in enabled]
+    plan = []
+    for boundary in range(1, len(selected)):
+        resolved_duration = _resolve_transition_duration(
+            duration,
+            selected[boundary - 1].clip_duration,
+            selected[boundary].clip_duration,
+        )
+        if resolved_duration < MIN_TRANSITION_DURATION_SECONDS:
+            continue
+        plan.append(
+            PlannedTransition(
+                boundary,
+                random.choices(effect_names, weights=effect_weights, k=1)[0],
+                resolved_duration,
+            )
+        )
+    return plan
 
 
 def build_transition_plan_for_durations(
@@ -572,9 +619,10 @@ def normalize_selected_clips(
         output_path = temp_dir / f"{index:04d}.mp4"
         output_path.unlink(missing_ok=True)
         vf = (
-            f"scale={TARGET_WIDTH}:{TARGET_HEIGHT}:force_original_aspect_ratio=increase,"
+            f"scale={TARGET_WIDTH}:{TARGET_HEIGHT}:"
+            f"force_original_aspect_ratio=increase:out_range=tv,"
             f"crop={TARGET_WIDTH}:{TARGET_HEIGHT},"
-            f"fps={TARGET_FPS},format=yuv420p"
+            f"fps={TARGET_FPS},setsar=1,format=yuv420p,setparams=range=tv"
         )
         run_ffmpeg([
             "-y",
@@ -597,6 +645,7 @@ def normalize_selected_clips(
             "+faststart",
             str(output_path),
         ], project_id)
+        _validate_normalized_clip(output_path, item.source_path)
         temp_paths.append(output_path)
         if progress_path:
             write_video_progress(
@@ -610,6 +659,27 @@ def normalize_selected_clips(
                 message=f"Normalized clip {index} of {len(selected)}",
             )
     return temp_paths
+
+
+def _validate_normalized_clip(output_path: Path, source_path: Path) -> None:
+    metadata = probe_media(output_path)
+    issues = []
+    if metadata.get("width") != TARGET_WIDTH or metadata.get("height") != TARGET_HEIGHT:
+        issues.append(f"size={metadata.get('width')}x{metadata.get('height')}")
+    if metadata.get("sample_aspect_ratio") not in {"1:1", "1/1"}:
+        issues.append(f"SAR={metadata.get('sample_aspect_ratio')}")
+    frame_rate = metadata.get("frame_rate_value")
+    if frame_rate is None or abs(float(frame_rate) - TARGET_FPS) > 0.01:
+        issues.append(f"fps={frame_rate}")
+    if metadata.get("pixel_format") != "yuv420p":
+        issues.append(f"pixel_format={metadata.get('pixel_format')}")
+    if metadata.get("audio_stream_count"):
+        issues.append(f"audio_streams={metadata.get('audio_stream_count')}")
+    if issues:
+        raise RuntimeError(
+            f"Normalized clip is incompatible with final composition: "
+            f"{output_path.name} from {source_path} ({', '.join(issues)})"
+        )
 
 
 def write_video_progress(

@@ -139,8 +139,55 @@ class ImageMotionRenderingTests(unittest.TestCase):
         )
 
         self.assertIn("out_range=tv", value)
-        self.assertIn("format=yuv420p,setparams=range=tv", value)
+        self.assertIn("format=yuv420p,setsar=1,setparams=range=tv", value)
         self.assertIn("trim=end_frame=60", value)
+
+    def test_video_filter_forces_square_sample_aspect_ratio(self) -> None:
+        media = SimpleNamespace(media_type="video", width=1920, height=1080)
+        assignment = SceneAssignment(
+            id="assignment-1",
+            project_id="project-1",
+            scene_id="scene-1",
+            media_shot_id="shot-1",
+        )
+
+        value = scene_renderer._visual_filter(
+            0,
+            media,
+            2.0,
+            1.0,
+            "out",
+            assignment,
+            "source_video",
+            ProjectRenderConfig().video,
+        )
+
+        self.assertIn("format=yuv420p,setsar=1,setparams=range=tv", value)
+
+    def test_scene_quality_rejects_non_square_sample_aspect_ratio(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "scene.mp4"
+            path.write_bytes(b"video")
+            metadata = {
+                "duration_ms": 5000,
+                "width": 1920,
+                "height": 1080,
+                "sample_aspect_ratio": "4201:3840",
+                "codec_name": "h264",
+                "pixel_format": "yuv420p",
+                "frame_rate_value": 30.0,
+                "frame_count": 150,
+                "video_stream_count": 1,
+                "audio_stream_count": 0,
+            }
+            with patch.object(scene_quality_checker, "probe_media", return_value=metadata):
+                with self.assertRaisesRegex(RuntimeError, "像素宽高比不是 1:1"):
+                    scene_quality_checker.check_scene_video(
+                        path,
+                        5.0,
+                        ProjectRenderConfig(),
+                        expected_frame_count=150,
+                    )
 
     def test_scene_filter_uses_absolute_frame_window_for_round_up_boundaries(self) -> None:
         video_config = ProjectRenderConfig().video
@@ -286,12 +333,12 @@ class ImageMotionRenderingTests(unittest.TestCase):
 
         graph = args[args.index("-filter_complex") + 1]
         self.assertIn(
-            "[0:v]settb=AVTB,setpts=PTS-STARTPTS,"
+            "[0:v]settb=AVTB,setpts=PTS-STARTPTS,setsar=1,"
             "tpad=stop_mode=clone:stop_duration=0.450",
             graph,
         )
-        self.assertIn("[1:v]settb=AVTB,setpts=PTS-STARTPTS", graph)
-        self.assertIn("[2:v]settb=AVTB,setpts=PTS-STARTPTS", graph)
+        self.assertIn("[1:v]settb=AVTB,setpts=PTS-STARTPTS,setsar=1", graph)
+        self.assertIn("[2:v]settb=AVTB,setpts=PTS-STARTPTS,setsar=1", graph)
         self.assertIn("xfade=transition=fade:duration=0.450:offset=4.000", graph)
         self.assertIn("xfade=transition=dissolve:duration=0.450:offset=9.000", graph)
         self.assertEqual(args[args.index("-frames:v") + 1], "450")
@@ -317,7 +364,10 @@ class ImageMotionRenderingTests(unittest.TestCase):
                 str(script_path),
             )
             graph = script_path.read_text(encoding="utf-8")
-            self.assertIn("[0:v]settb=AVTB,setpts=PTS-STARTPTS", graph)
+            self.assertIn(
+                "[0:v]settb=AVTB,setpts=PTS-STARTPTS,setsar=1",
+                graph,
+            )
             self.assertIn("xfade=transition=fade", graph)
 
     def test_visual_track_rejects_two_effects_on_same_boundary(self) -> None:

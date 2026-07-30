@@ -22,7 +22,7 @@ from app.services.rendering.render_config import get_project_render_config
 from app.services.rendering.scene_quality_checker import check_scene_video
 
 
-RENDER_TIMING_VERSION = 3
+RENDER_TIMING_VERSION = 4
 
 
 def render_all_scenes(session: Session, project: Project) -> dict:
@@ -415,7 +415,8 @@ def _visual_filter(
             f"zoompan=z='{zoom}':x='{x}':y='{y}':d=1:"
             f"s={target_width}x{target_height}:fps={target_fps},"
             f"trim=end_frame={frames},setpts=PTS-STARTPTS,"
-            f"format={video_config.pixel_format},setparams=range=tv[{output_label}]"
+            f"format={video_config.pixel_format},setsar=1,"
+            f"setparams=range=tv[{output_label}]"
         )
         if media_file.width and media_file.height and media_file.width / media_file.height < 1.2:
             return (
@@ -436,7 +437,8 @@ def _visual_filter(
     finish = (
         f"fps={target_fps},tpad=stop_mode=clone:stop_duration=0.250,"
         f"trim=end_frame={frames},setpts=PTS-STARTPTS,"
-        f"format={video_config.pixel_format},setparams=range=tv[{output_label}]"
+        f"format={video_config.pixel_format},setsar=1,"
+        f"setparams=range=tv[{output_label}]"
     )
     if media_file.width and media_file.height and media_file.width / media_file.height < 1.2:
         return (

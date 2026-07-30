@@ -37,8 +37,19 @@ class VideoServiceTests(unittest.TestCase):
         finally:
             video_service._composing_project_ids.discard(project.id)
 
+    @patch(
+        "app.services.rendering.rough_cut_service.probe_media",
+        return_value={
+            "width": 1920,
+            "height": 1080,
+            "sample_aspect_ratio": "1:1",
+            "frame_rate_value": 30.0,
+            "pixel_format": "yuv420p",
+            "audio_stream_count": 0,
+        },
+    )
     @patch("app.services.rendering.rough_cut_service.run_ffmpeg")
-    def test_normalizing_skips_source_first_frames(self, run_mock) -> None:
+    def test_normalizing_skips_source_first_frames(self, run_mock, _probe_mock) -> None:
         selected = [
             video_service.SelectedVideo(Path("source.mp4"), "source", 2.0, 1.9)
         ]
@@ -49,6 +60,27 @@ class VideoServiceTests(unittest.TestCase):
         args = run_mock.call_args.args[0]
         self.assertEqual(args[args.index("-ss") + 1], "0.100")
         self.assertEqual(args[args.index("-t") + 1], "1.900")
+        self.assertIn("setsar=1", args[args.index("-vf") + 1])
+        self.assertIn("out_range=tv", args[args.index("-vf") + 1])
+        self.assertIn("setparams=range=tv", args[args.index("-vf") + 1])
+
+    @patch(
+        "app.services.rendering.rough_cut_service.probe_media",
+        return_value={
+            "width": 1920,
+            "height": 1080,
+            "sample_aspect_ratio": "6301:5760",
+            "frame_rate_value": 30.0,
+            "pixel_format": "yuv420p",
+            "audio_stream_count": 0,
+        },
+    )
+    def test_normalized_clip_rejects_non_square_sample_aspect_ratio(self, _probe_mock) -> None:
+        with self.assertRaisesRegex(RuntimeError, "SAR=6301:5760"):
+            video_service._validate_normalized_clip(
+                Path("0009.mp4"),
+                Path("source-with-non-square-pixels.mp4"),
+            )
 
     @patch("app.services.rendering.rough_cut_service.run_ffmpeg")
     def test_final_concat_reencodes_without_audio(self, run_mock) -> None:
@@ -60,7 +92,9 @@ class VideoServiceTests(unittest.TestCase):
         self.assertNotIn("copy", args)
         self.assertEqual(args[args.index("-c:v") + 1], "libx264")
         self.assertEqual(args[args.index("-pix_fmt") + 1], "yuv420p")
-        self.assertIn("tpad=stop_mode=clone:stop_duration=0.500", args)
+        final_filter = args[args.index("-vf") + 1]
+        self.assertIn("tpad=stop_mode=clone:stop_duration=0.500", final_filter)
+        self.assertIn("setsar=1", final_filter)
         self.assertEqual(args.count("-i"), 1)
         self.assertIn("-an", args)
         self.assertNotIn("voice.wav", args)
@@ -72,7 +106,10 @@ class VideoServiceTests(unittest.TestCase):
         )
 
         args = run_mock.call_args.args[0]
-        self.assertIn("tpad=stop_mode=clone:stop_duration=0.981", args)
+        self.assertIn(
+            "tpad=stop_mode=clone:stop_duration=0.981",
+            args[args.index("-vf") + 1],
+        )
 
     def test_transition_filter_mixes_xfade_with_hard_cuts(self) -> None:
         filter_graph = video_service.build_transition_filter(
@@ -83,6 +120,11 @@ class VideoServiceTests(unittest.TestCase):
         self.assertIn("xfade=transition=fade:duration=0.450:offset=3.550", filter_graph)
         self.assertIn("[join1][v2]concat=n=2:v=1:a=0[join2]", filter_graph)
         self.assertIn("tpad=stop_mode=clone:stop_duration=0.500", filter_graph)
+        self.assertIn("[0:v]settb=AVTB,setpts=PTS-STARTPTS,setsar=1[v0]", filter_graph)
+        self.assertIn(
+            "fps=30,setsar=1,format=yuv420p,setparams=range=tv[vout]",
+            filter_graph,
+        )
 
     @patch("app.services.rendering.rough_cut_service.run_ffmpeg")
     def test_transition_concat_uses_all_video_inputs_and_filter_script(self, run_mock) -> None:

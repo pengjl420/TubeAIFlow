@@ -87,7 +87,9 @@ def probe_media(media_path: Path) -> dict:
         "-v",
         "error",
         "-show_entries",
-        "format=duration,format_name:stream=index,codec_type,codec_name,width,height,pix_fmt,r_frame_rate,avg_frame_rate,time_base,duration_ts,nb_frames",
+        "format=duration,format_name:stream=index,codec_type,codec_name,width,height,"
+        "sample_aspect_ratio,display_aspect_ratio,pix_fmt,r_frame_rate,avg_frame_rate,"
+        "time_base,duration_ts,nb_frames",
         "-of",
         "json",
         str(media_path),
@@ -121,6 +123,8 @@ def probe_media(media_path: Path) -> dict:
         "duration_ms": round(float(raw_duration) * 1000) if raw_duration else None,
         "width": video_stream.get("width"),
         "height": video_stream.get("height"),
+        "sample_aspect_ratio": video_stream.get("sample_aspect_ratio"),
+        "display_aspect_ratio": video_stream.get("display_aspect_ratio"),
         "codec_name": video_stream.get("codec_name"),
         "pixel_format": video_stream.get("pix_fmt"),
         "frame_rate": frame_rate,

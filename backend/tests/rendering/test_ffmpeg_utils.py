@@ -42,7 +42,9 @@ class FfmpegUtilsTests(unittest.TestCase):
             0,
             '{"format":{"duration":"2.0","format_name":"mov,mp4"},'
             '"streams":[{"codec_type":"video","codec_name":"h264","width":1920,'
-            '"height":1080,"pix_fmt":"yuv420p","avg_frame_rate":"30000/1001",'
+            '"height":1080,"sample_aspect_ratio":"1:1",'
+            '"display_aspect_ratio":"16:9","pix_fmt":"yuv420p",'
+            '"avg_frame_rate":"30000/1001",'
             '"time_base":"1/30000","duration_ts":"60060","nb_frames":"60"},'
             '{"codec_type":"audio","codec_name":"aac"}]}',
             "",
@@ -53,6 +55,8 @@ class FfmpegUtilsTests(unittest.TestCase):
         self.assertEqual(result["video_stream_count"], 1)
         self.assertEqual(result["audio_stream_count"], 1)
         self.assertEqual(result["pixel_format"], "yuv420p")
+        self.assertEqual(result["sample_aspect_ratio"], "1:1")
+        self.assertEqual(result["display_aspect_ratio"], "16:9")
         self.assertEqual(result["time_base"], "1/30000")
         self.assertEqual(result["duration_ts"], 60060)
         self.assertEqual(result["frame_count"], 60)

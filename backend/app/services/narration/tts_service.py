@@ -322,6 +322,8 @@ def _run_cosyvoice_batch(
         settings.cosyvoice_instruction,
         "--max-attempts",
         str(settings.cosyvoice_max_attempts),
+        "--seed-round",
+        str(_next_cosyvoice_seed_round(logs_dir)),
         "--min-chars-per-second",
         str(settings.cosyvoice_min_chars_per_second),
         "--duration-slack-seconds",
@@ -332,6 +334,11 @@ def _run_cosyvoice_batch(
     if settings.cosyvoice_fp16:
         command.append("--fp16")
     _execute_batch_runner(project.id, command, settings.cosyvoice_root, logs_dir, result_path, "CosyVoice")
+
+
+def _next_cosyvoice_seed_round(logs_dir: Path) -> int:
+    """Use archived completed runs to keep retries reproducible but non-repeating."""
+    return len(list(logs_dir.glob("tts_*.log")))
 
 
 def _prepare_batch_files(

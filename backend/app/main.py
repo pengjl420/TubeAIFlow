@@ -5,6 +5,7 @@ from sqlmodel import Session
 from app.api import (
     batches,
     exports,
+    local_video_merge,
     projects,
     quality,
     renders,
@@ -52,6 +53,7 @@ app.include_router(segments.router, prefix="/api")
 app.include_router(tts.router, prefix="/api")
 app.include_router(subtitles.router, prefix="/api")
 app.include_router(exports.router, prefix="/api")
+app.include_router(local_video_merge.router, prefix="/api")
 app.include_router(renders.router, prefix="/api")
 app.include_router(tasks.router, prefix="/api")
 app.include_router(quality.router, prefix="/api")

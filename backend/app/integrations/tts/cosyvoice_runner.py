@@ -40,9 +40,16 @@ def cosyvoice_prompt_text(model_dir: Path, reference_text: str, instruction: str
     return f"{prefix}<|endofprompt|>{reference_text}"
 
 
-def segment_attempt_seed(segment_id: str, text: str, attempt: int) -> int:
-    """Return a stable seed independent of the segment's position in a batch."""
-    material = f"tubeaiflow-cosyvoice-v1\0{segment_id}\0{text}\0{attempt}".encode("utf-8")
+def segment_attempt_seed(
+    segment_id: str,
+    text: str,
+    attempt: int,
+    seed_round: int = 0,
+) -> int:
+    """Return a reproducible seed that changes for each explicit retry round."""
+    material = (
+        f"tubeaiflow-cosyvoice-v2\0{segment_id}\0{text}\0{seed_round}\0{attempt}"
+    ).encode("utf-8")
     return int.from_bytes(hashlib.sha256(material).digest()[:4], "big")
 
 
@@ -111,7 +118,8 @@ def main() -> int:
     parser.add_argument("--speed", type=float, default=1.0)
     parser.add_argument("--instruction", default="You are a helpful assistant.")
     parser.add_argument("--fp16", action="store_true")
-    parser.add_argument("--max-attempts", type=int, default=3)
+    parser.add_argument("--max-attempts", type=int, default=5)
+    parser.add_argument("--seed-round", type=int, default=0)
     parser.add_argument("--min-chars-per-second", type=float, default=2.8)
     parser.add_argument("--duration-slack-seconds", type=float, default=2.0)
     parser.add_argument("--duration-outlier-ratio", type=float, default=1.45)
@@ -153,7 +161,12 @@ def main() -> int:
         attempts = []
         try:
             for attempt in range(1, args.max_attempts + 1):
-                seed = segment_attempt_seed(task["segment_id"], task["text"], attempt)
+                seed = segment_attempt_seed(
+                    task["segment_id"],
+                    task["text"],
+                    attempt,
+                    args.seed_round,
+                )
                 set_all_random_seed(seed)
                 chunks = [
                     item["tts_speech"].cpu()
@@ -181,6 +194,7 @@ def main() -> int:
                 attempts.append(
                     {
                         "attempt": attempt,
+                        "seed_round": args.seed_round,
                         "seed": seed,
                         "duration": round(duration, 3),
                         "rejected": suspicious,

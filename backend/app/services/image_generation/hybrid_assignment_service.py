@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import random
 import uuid
 from pathlib import Path
 
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.infrastructure.ffmpeg import probe_media
@@ -57,7 +59,17 @@ def assign_landscape_scenes(session: Session, project: Project) -> dict:
     if not media_dir.is_dir():
         raise ValueError("Mixed video mode requires a valid landscape material directory")
     source_paths = list_rough_cut_video_files(media_dir)
-    ordered_paths = _rotate_for_project(source_paths, project.id)
+    ordered_paths = _randomize_for_project(source_paths, project.id)
+    used_media_file_ids = set(
+        session.exec(
+            select(MediaShot.media_file_id)
+            .join(
+                SceneAssignment,
+                SceneAssignment.media_shot_id == MediaShot.id,
+            )
+            .where(SceneAssignment.project_id == project.id)
+        ).all()
+    )
 
     assignments = []
     source_cursor = 0
@@ -79,6 +91,8 @@ def assign_landscape_scenes(session: Session, project: Project) -> dict:
             if registered is None:
                 continue
             media_file, shot = registered
+            if media_file.id in used_media_file_ids:
+                continue
             available_ms = max(0, (shot.end_ms or media_file.duration_ms or 0) - shot.start_ms)
             if available_ms <= 0:
                 continue
@@ -101,6 +115,7 @@ def assign_landscape_scenes(session: Session, project: Project) -> dict:
             )
             session.add(assignment)
             assignments.append(assignment)
+            used_media_file_ids.add(media_file.id)
             covered_ms += placement_ms
             sequence_index += 1
         if covered_ms < scene_duration_ms:
@@ -129,11 +144,11 @@ def _spread_selection(scenes: list[VisualScene], target: int) -> list[VisualScen
     return [scenes[index] for index in sorted(set(indexes))]
 
 
-def _rotate_for_project(paths: list[Path], project_id: str) -> list[Path]:
-    if not paths:
-        return paths
-    offset = int(hashlib.sha1(project_id.encode()).hexdigest()[:8], 16) % len(paths)
-    return paths[offset:] + paths[:offset]
+def _randomize_for_project(paths: list[Path], project_id: str) -> list[Path]:
+    shuffled = list(paths)
+    seed = int(hashlib.sha256(project_id.encode()).hexdigest()[:16], 16)
+    random.Random(seed).shuffle(shuffled)
+    return shuffled
 
 
 def _register_video(session: Session, path: Path) -> tuple[MediaFile, MediaShot] | None:
@@ -159,6 +174,15 @@ def _register_video(session: Session, path: Path) -> tuple[MediaFile, MediaShot]
     if not duration_ms or duration_ms <= 0:
         return None
     file_hash = _sha256(resolved)
+    media_file = session.exec(
+        select(MediaFile).where(MediaFile.file_hash == file_hash)
+    ).first()
+    if media_file:
+        shot = session.exec(
+            select(MediaShot).where(MediaShot.media_file_id == media_file.id)
+        ).first()
+        return (media_file, shot) if shot else None
+
     media_file = MediaFile(
         id=f"landscape_media_{provider_asset_id[:20]}",
         provider="local_landscape",
@@ -188,8 +212,20 @@ def _register_video(session: Session, path: Path) -> tuple[MediaFile, MediaShot]
         library_role=LIBRARY_ROLE_LOCAL_LANDSCAPE,
         technical_json=json.dumps(metadata, ensure_ascii=False),
     )
-    session.add_all([media_file, shot])
-    session.flush()
+    try:
+        with session.begin_nested():
+            session.add_all([media_file, shot])
+            session.flush()
+    except IntegrityError:
+        media_file = session.exec(
+            select(MediaFile).where(MediaFile.file_hash == file_hash)
+        ).first()
+        if not media_file:
+            return None
+        shot = session.exec(
+            select(MediaShot).where(MediaShot.media_file_id == media_file.id)
+        ).first()
+        return (media_file, shot) if shot else None
     return media_file, shot
 
 

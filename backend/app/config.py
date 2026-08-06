@@ -61,6 +61,11 @@ class Settings(BaseModel):
     workspace_dir: Path = DEFAULT_WORKSPACE_DIR
     ffmpeg_path: str = "ffmpeg"
     ffprobe_path: str = "ffprobe"
+    duix_base_url: str = "http://127.0.0.1:8383"
+    duix_host_shared_dir: Path = Path(r"D:\duix_avatar_data\face2face")
+    duix_container_shared_dir: str = "/code/data"
+    duix_poll_interval_seconds: float = Field(default=3.0, ge=0.5, le=30)
+    duix_task_timeout_seconds: float = Field(default=43200, ge=60, le=86400)
     premiere_pro_path: Path | None = None
     storyboard_transition_effects: list[StoryboardTransitionEffect] = Field(
         default_factory=default_storyboard_transition_effects
@@ -127,6 +132,7 @@ class Settings(BaseModel):
         "image_generation_config_dir",
         "image_generation_python",
         "premiere_pro_path",
+        "duix_host_shared_dir",
         mode="before",
     )
     @classmethod
@@ -227,6 +233,7 @@ def _normalize_paths(settings: Settings) -> Settings:
         "image_generation_model_path",
         "image_generation_config_dir",
         "image_generation_python",
+        "duix_host_shared_dir",
     ):
         value = getattr(settings, field_name)
         if value is not None:

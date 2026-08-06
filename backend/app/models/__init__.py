@@ -1,4 +1,6 @@
 from app.models.batch import BatchItem, BatchJob
+from app.models.avatar import AvatarClip, AvatarGenerationTask, AvatarProfile
+from app.models.local_video_merge import LocalVideoMergeTask
 from app.models.media import (
     GeneratedImageVariant,
     MediaFile,
@@ -14,7 +16,11 @@ from app.models.task import TaskRun
 __all__ = [
     "BatchItem",
     "BatchJob",
+    "AvatarClip",
+    "AvatarGenerationTask",
+    "AvatarProfile",
     "GeneratedImageVariant",
+    "LocalVideoMergeTask",
     "MediaFile",
     "MediaShot",
     "Project",

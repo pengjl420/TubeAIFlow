@@ -306,6 +306,103 @@ def _apply_migrations() -> None:
         11: [
             "ALTER TABLE scene_assignments ADD COLUMN render_mode VARCHAR NOT NULL DEFAULT 'auto'",
         ],
+        12: [
+            """
+            CREATE TABLE IF NOT EXISTS local_video_merge_tasks (
+                id VARCHAR NOT NULL PRIMARY KEY,
+                media_dir VARCHAR NOT NULL,
+                output_dir VARCHAR NOT NULL,
+                output_filename VARCHAR NOT NULL,
+                target_duration FLOAT NOT NULL,
+                status VARCHAR NOT NULL DEFAULT 'queued',
+                queue_sequence INTEGER NOT NULL,
+                attempt_count INTEGER NOT NULL DEFAULT 0,
+                result_json VARCHAR NOT NULL DEFAULT '{}',
+                error_message VARCHAR,
+                created_at VARCHAR NOT NULL,
+                updated_at VARCHAR NOT NULL,
+                started_at VARCHAR,
+                finished_at VARCHAR
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_local_video_merge_tasks_status "
+            "ON local_video_merge_tasks (status)",
+            "CREATE INDEX IF NOT EXISTS ix_local_video_merge_tasks_queue_sequence "
+            "ON local_video_merge_tasks (queue_sequence)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_local_video_merge_tasks_single_running "
+            "ON local_video_merge_tasks (status) WHERE status = 'running'",
+        ],
+        13: [
+            """
+            CREATE TABLE IF NOT EXISTS avatar_profiles (
+                id VARCHAR NOT NULL PRIMARY KEY,
+                name VARCHAR NOT NULL,
+                template_video_path VARCHAR NOT NULL,
+                duration_ms INTEGER,
+                width INTEGER,
+                height INTEGER,
+                enabled BOOLEAN NOT NULL DEFAULT 1,
+                created_at VARCHAR NOT NULL,
+                updated_at VARCHAR NOT NULL
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_avatar_profiles_enabled ON avatar_profiles (enabled)",
+            """
+            CREATE TABLE IF NOT EXISTS avatar_generation_tasks (
+                id VARCHAR NOT NULL PRIMARY KEY,
+                avatar_profile_id VARCHAR NOT NULL,
+                audio_path VARCHAR NOT NULL,
+                output_filename VARCHAR NOT NULL,
+                chunk_seconds INTEGER NOT NULL DEFAULT 420,
+                audio_duration_ms INTEGER NOT NULL DEFAULT 0,
+                status VARCHAR NOT NULL DEFAULT 'queued',
+                queue_sequence INTEGER NOT NULL,
+                total_chunks INTEGER NOT NULL DEFAULT 0,
+                completed_chunks INTEGER NOT NULL DEFAULT 0,
+                current_chunk INTEGER,
+                progress FLOAT NOT NULL DEFAULT 0,
+                result_path VARCHAR,
+                error_message VARCHAR,
+                created_at VARCHAR NOT NULL,
+                updated_at VARCHAR NOT NULL,
+                started_at VARCHAR,
+                finished_at VARCHAR
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_avatar_generation_tasks_profile ON avatar_generation_tasks (avatar_profile_id)",
+            "CREATE INDEX IF NOT EXISTS ix_avatar_generation_tasks_status ON avatar_generation_tasks (status)",
+            "CREATE INDEX IF NOT EXISTS ix_avatar_generation_tasks_queue ON avatar_generation_tasks (queue_sequence)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_avatar_generation_tasks_running ON avatar_generation_tasks (status) WHERE status = 'running'",
+            """
+            CREATE TABLE IF NOT EXISTS avatar_clips (
+                id VARCHAR NOT NULL PRIMARY KEY,
+                task_id VARCHAR NOT NULL,
+                clip_index INTEGER NOT NULL,
+                start_ms INTEGER NOT NULL,
+                end_ms INTEGER NOT NULL,
+                audio_path VARCHAR NOT NULL,
+                duix_task_code VARCHAR NOT NULL,
+                status VARCHAR NOT NULL DEFAULT 'pending',
+                progress FLOAT NOT NULL DEFAULT 0,
+                output_path VARCHAR,
+                actual_duration_ms INTEGER,
+                error_message VARCHAR,
+                created_at VARCHAR NOT NULL,
+                updated_at VARCHAR NOT NULL
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_avatar_clips_task ON avatar_clips (task_id)",
+            "CREATE INDEX IF NOT EXISTS ix_avatar_clips_status ON avatar_clips (status)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_avatar_clips_task_index ON avatar_clips (task_id, clip_index)",
+        ],
+        14: [
+            "ALTER TABLE avatar_generation_tasks ADD COLUMN context_ms INTEGER NOT NULL DEFAULT 800",
+            "ALTER TABLE avatar_generation_tasks ADD COLUMN continuity_report_path VARCHAR",
+            "ALTER TABLE avatar_clips ADD COLUMN generation_start_ms INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE avatar_clips ADD COLUMN generation_end_ms INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE avatar_clips ADD COLUMN trim_start_ms INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE avatar_clips ADD COLUMN trim_end_ms INTEGER NOT NULL DEFAULT 0",
+        ],
     }
     with engine.begin() as connection:
         connection.exec_driver_sql(

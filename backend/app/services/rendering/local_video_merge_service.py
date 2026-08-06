@@ -82,6 +82,26 @@ def compose_local_video(
     return {**manifest, "manifest_path": str(manifest_path)}
 
 
+def validate_local_video_input(
+    media_dir_value: str,
+    output_dir_value: str,
+    output_filename_value: str,
+    target_duration: float,
+) -> tuple[Path, Path, str]:
+    """Validate a queued request before it is accepted by the API."""
+    if target_duration <= 0:
+        raise ValueError("视频时长必须大于 0 秒")
+    media_dir = _require_directory(media_dir_value, "素材目录")
+    output_dir = _require_directory(output_dir_value, "输出目录")
+    output_filename = _normalize_output_filename(output_filename_value)
+    output_path = (output_dir / output_filename).resolve()
+    if output_path.parent != output_dir:
+        raise ValueError("输出文件名不能包含目录")
+    if output_path.exists():
+        raise ValueError("输出文件已存在，请更换文件名后重试")
+    return media_dir, output_dir, output_filename
+
+
 def _group_by_filename(paths: list[Path]) -> dict[str, list[Path]]:
     groups: dict[str, list[Path]] = {}
     for path in paths:

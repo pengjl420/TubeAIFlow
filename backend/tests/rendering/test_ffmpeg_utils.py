@@ -62,6 +62,25 @@ class FfmpegUtilsTests(unittest.TestCase):
         self.assertEqual(result["frame_count"], 60)
         self.assertAlmostEqual(result["frame_rate_value"], 29.97003, places=4)
 
+    @patch("app.infrastructure.ffmpeg._resolve_tool", return_value="ffmpeg")
+    @patch("app.infrastructure.ffmpeg.subprocess.run")
+    def test_detect_silence_intervals_parses_complete_pairs(
+        self, run_mock, _resolve_mock
+    ) -> None:
+        run_mock.return_value = subprocess.CompletedProcess(
+            [],
+            0,
+            "",
+            "[silencedetect] silence_start: 10.25\n"
+            "[silencedetect] silence_end: 10.85 | silence_duration: 0.60\n"
+            "[silencedetect] silence_start: 42.0\n"
+            "[silencedetect] silence_end: 42.5 | silence_duration: 0.50\n",
+        )
+
+        intervals = ffmpeg.detect_silence_intervals(Path("voice.wav"))
+
+        self.assertEqual(intervals, [(10.25, 10.85), (42.0, 42.5)])
+
 
 if __name__ == "__main__":
     unittest.main()

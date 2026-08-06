@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -77,6 +78,55 @@ def probe_duration(audio_path: Path) -> float:
         raise RuntimeError(result.stderr.strip() or "ffprobe command failed")
     data = json.loads(result.stdout)
     return float(data["format"]["duration"])
+
+
+def detect_silence_intervals(
+    audio_path: Path,
+    *,
+    noise_db: float = -35,
+    minimum_duration: float = 0.35,
+) -> list[tuple[float, float]]:
+    """Return complete silence intervals without decoding audio in business services."""
+    settings = get_settings()
+    command = [
+        _resolve_tool(settings.ffmpeg_path),
+        "-hide_banner",
+        "-nostats",
+        "-i",
+        str(audio_path),
+        "-af",
+        f"silencedetect=noise={noise_db}dB:d={minimum_duration}",
+        "-f",
+        "null",
+        "-",
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError(f"FFmpeg executable was not found: {command[0]}") from exc
+    if result.returncode != 0:
+        logger.error("FFmpeg silence detection failed for %s: %s", audio_path, result.stderr)
+        raise RuntimeError(result.stderr.strip() or "FFmpeg silence detection failed")
+
+    starts = [float(value) for value in re.findall(r"silence_start:\s*([0-9.]+)", result.stderr)]
+    ends = [float(value) for value in re.findall(r"silence_end:\s*([0-9.]+)", result.stderr)]
+    intervals = []
+    end_index = 0
+    for start in starts:
+        while end_index < len(ends) and ends[end_index] < start:
+            end_index += 1
+        if end_index >= len(ends):
+            break
+        intervals.append((start, ends[end_index]))
+        end_index += 1
+    return intervals
 
 
 def probe_media(media_path: Path) -> dict:

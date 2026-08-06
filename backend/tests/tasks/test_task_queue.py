@@ -252,9 +252,13 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertIn("scene_assignments", table_names)
         self.assertIn("media_provider_states", table_names)
         self.assertIn("media_query_cache", table_names)
+        self.assertIn("local_video_merge_tasks", table_names)
+        self.assertIn("avatar_profiles", table_names)
+        self.assertIn("avatar_generation_tasks", table_names)
+        self.assertIn("avatar_clips", table_names)
         self.assertEqual(
             versions,
-            [(1,), (2,), (3,), (4,), (5,), (6,), (7,), (8,), (9,), (10,), (11,)],
+            [(1,), (2,), (3,), (4,), (5,), (6,), (7,), (8,), (9,), (10,), (11,), (12,), (13,), (14,)],
         )
 
     def test_source_subtitle_migration_removes_bilingual_schema_and_config(self) -> None:

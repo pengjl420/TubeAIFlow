@@ -220,6 +220,31 @@ class VoiceProfileTests(unittest.TestCase):
             self.assertEqual(profiles[voice.id]["running_project_count"], 1)
             self.assertEqual(profiles[duplicate.id]["usage_count"], 0)
 
+    def test_language_engine_migration_routes_legacy_english_profile_to_moss(self) -> None:
+        with Session(self.engine) as session:
+            voice = voice_profile_service.create_profile(
+                session,
+                name="英文-旧音色",
+                tts_engine="cosyvoice",
+                language="en-US",
+                reference_audio_text="Reference transcript",
+                source=io.BytesIO(b"audio"),
+                original_filename="voice.wav",
+            )
+            config = voice_profile_service.load_profile_config(voice)
+            config.pop("language")
+            voice.config_json = json.dumps(config, ensure_ascii=False)
+            session.add(voice)
+            session.commit()
+
+            migrated = voice_profile_service.migrate_profile_language_engines(session)
+
+            session.refresh(voice)
+            serialized = voice_profile_service.serialize_profile(voice)
+            self.assertEqual(migrated, 1)
+            self.assertEqual(serialized["language"], "en-US")
+            self.assertEqual(serialized["tts_engine"], "moss_tts")
+
 
 if __name__ == "__main__":
     unittest.main()

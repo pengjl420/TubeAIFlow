@@ -106,6 +106,87 @@ def duration_quality(
     return False, None, seconds_per_character
 
 
+def validate_runtime(torch, onnxruntime) -> None:
+    """Fail early with an actionable error when GPU packages cannot run."""
+    if not torch.cuda.is_available():
+        return
+
+    device_name = torch.cuda.get_device_name(0)
+    capability = torch.cuda.get_device_capability(0)
+    architecture = f"sm_{capability[0]}{capability[1]}"
+    supported_architectures = list(torch.cuda.get_arch_list())
+    if supported_architectures and architecture not in supported_architectures:
+        raise RuntimeError(
+            f"PyTorch {torch.__version__} does not support {device_name} ({architecture}); "
+            f"this build supports {', '.join(supported_architectures)}. Install a PyTorch "
+            "CUDA build that includes the GPU architecture."
+        )
+
+    try:
+        probe = torch.ones(1, device="cuda")
+        probe.add_(1)
+        torch.cuda.synchronize()
+    except Exception as exc:
+        raise RuntimeError(
+            f"CUDA preflight failed for {device_name} ({architecture}) with "
+            f"PyTorch {torch.__version__}: {exc}"
+        ) from exc
+
+    providers = onnxruntime.get_available_providers()
+    if "CUDAExecutionProvider" not in providers:
+        raise RuntimeError(
+            "ONNX Runtime CUDAExecutionProvider is unavailable while CUDA is enabled; "
+            f"available providers: {', '.join(providers)}. Install a CUDA-compatible "
+            "onnxruntime-gpu package."
+        )
+
+
+def initialization_failure_results(tasks: list[dict], error: Exception) -> list[dict]:
+    message = f"CosyVoice initialization failed: {error}"
+    return [
+        {
+            "segment_id": task["segment_id"],
+            "success": False,
+            "error": message,
+            "attempts": [],
+        }
+        for task in tasks
+    ]
+
+
+def use_cached_wetext(cosyvoice_root: Path) -> bool:
+    """Route WeText to its complete local cache without a ModelScope API call."""
+    model_dir = (
+        cosyvoice_root
+        / "model_cache"
+        / "modelscope"
+        / "hub"
+        / "pengzhendong"
+        / "wetext"
+    )
+    required_files = (
+        model_dir / "en" / "tn" / "tagger.fst",
+        model_dir / "en" / "tn" / "verbalizer.fst",
+        model_dir / "zh" / "tn" / "tagger.fst",
+        model_dir / "zh" / "tn" / "verbalizer.fst",
+        model_dir / "zh" / "tn" / "verbalizer_remove_erhua.fst",
+    )
+    if not all(path.is_file() for path in required_files):
+        return False
+
+    import modelscope
+
+    remote_snapshot_download = modelscope.snapshot_download
+
+    def snapshot_download(model_id, *args, **kwargs):
+        if model_id == "pengzhendong/wetext":
+            return str(model_dir)
+        return remote_snapshot_download(model_id, *args, **kwargs)
+
+    modelscope.snapshot_download = snapshot_download
+    return True
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cosyvoice-root", required=True)
@@ -125,31 +206,48 @@ def main() -> int:
     parser.add_argument("--duration-outlier-ratio", type=float, default=1.45)
     args = parser.parse_args()
 
-    cosyvoice_root = Path(args.cosyvoice_root).resolve()
-    sys.path.insert(0, str(cosyvoice_root / "third_party" / "Matcha-TTS"))
-    sys.path.insert(0, str(cosyvoice_root))
-
-    import torch
-    import torchaudio
-    from cosyvoice.cli.cosyvoice import AutoModel
-    from cosyvoice.utils.common import set_all_random_seed
-
-    model_dir = Path(args.model_dir).resolve()
-    model = AutoModel(model_dir=str(model_dir), fp16=args.fp16)
-    prompt_text = cosyvoice_prompt_text(model_dir, args.reference_text.strip(), args.instruction)
-    prompt_audio = str(Path(args.voice).resolve())
-    zero_shot_spk_id = "tubeaiflow_reference"
-    model.add_zero_shot_spk(prompt_text, prompt_audio, zero_shot_spk_id)
-
     tasks = json.loads(Path(args.batch_file).resolve().read_text(encoding="utf-8"))
     result_file = Path(args.result_file).resolve()
     progress_file = Path(args.progress_file).resolve()
     results = []
-    accepted_seconds_per_character = []
     total = len(tasks)
     segment_ids = [task["segment_id"] for task in tasks]
     write_json(result_file, results)
     write_json(progress_file, progress_payload(total, segment_ids, results, None, None, "running"))
+
+    cosyvoice_root = Path(args.cosyvoice_root).resolve()
+    sys.path.insert(0, str(cosyvoice_root / "third_party" / "Matcha-TTS"))
+    sys.path.insert(0, str(cosyvoice_root))
+
+    try:
+        import onnxruntime
+        import torch
+        import torchaudio
+
+        use_cached_wetext(cosyvoice_root)
+        from cosyvoice.cli.cosyvoice import AutoModel
+        from cosyvoice.utils.common import set_all_random_seed
+
+        validate_runtime(torch, onnxruntime)
+        model_dir = Path(args.model_dir).resolve()
+        model = AutoModel(model_dir=str(model_dir), fp16=args.fp16)
+        prompt_text = cosyvoice_prompt_text(
+            model_dir, args.reference_text.strip(), args.instruction
+        )
+        prompt_audio = str(Path(args.voice).resolve())
+        zero_shot_spk_id = "tubeaiflow_reference"
+        model.add_zero_shot_spk(prompt_text, prompt_audio, zero_shot_spk_id)
+    except Exception as exc:
+        results = initialization_failure_results(tasks, exc)
+        write_json(result_file, results)
+        write_json(
+            progress_file,
+            progress_payload(total, segment_ids, results, None, None, "failed"),
+        )
+        print(results[0]["error"] if results else str(exc), file=sys.stderr)
+        return 1
+
+    accepted_seconds_per_character = []
 
     for index, task in enumerate(tasks, start=1):
         output_path = Path(task["output_path"]).resolve()

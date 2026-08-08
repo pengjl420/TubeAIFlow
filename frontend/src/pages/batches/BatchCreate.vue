@@ -11,6 +11,7 @@ import { selectDirectory } from '../../api/projects'
 import { listVoices, type VoiceProfile } from '../../api/voices'
 import { showToast, usePageFeedback } from '../../services/feedback'
 import type { SegmentationMode, StoryboardMode, VideoGenerationMode } from '../../types/project'
+import { voiceTagText } from '../../utils/tts'
 
 const router = useRouter()
 const today = new Date().toISOString().slice(0, 10).replace(/-/g, '')
@@ -114,7 +115,7 @@ onMounted(async () => {
       </article>
 
       <article class="create-card settings-card"><h2><i>2</i>统一生产配置</h2><div class="settings-grid">
-        <label class="setting"><span><Headphones/>系统音色 <b>*</b></span><select v-model="voiceProfileId"><option value="">请选择系统音色</option><option v-for="voice in voices" :key="voice.id" :value="voice.id">{{ voice.name }} · {{ voice.tts_engine }}</option></select></label>
+        <label class="setting"><span><Headphones/>系统音色 <b>*</b></span><select v-model="voiceProfileId"><option value="">请选择系统音色</option><option v-for="voice in voices" :key="voice.id" :value="voice.id">{{ voice.name }} · {{ voiceTagText(voice.tts_engine, voice.language) }}</option></select></label>
         <div class="setting"><span><Folder/>输出目录 <b>*</b></span><div class="path-input"><input v-model="outputDir" readonly placeholder="请选择输出文件夹"/><button @click="chooseFolder('output')"><Folder :size="16"/></button></div></div>
         <label class="setting"><span><Scissors/>切段方式 <b>*</b></span><select v-model="segmentationMode"><option value="ai">AI 自动切段（推荐）</option><option value="newline">按换行切段</option></select></label>
         <label class="setting"><span><Monitor/>视频模式 <b>*</b></span><select v-model="videoMode"><option value="ai_generated_images">本地 AI 分镜图片视频</option><option value="ai_landscape_mix">AI 分镜 + 风景素材混合</option><option value="landscape">风景素材拼接</option><option value="none">仅生成完整配音</option></select></label>

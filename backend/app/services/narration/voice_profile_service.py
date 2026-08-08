@@ -15,8 +15,13 @@ from app.shared.time import utc_now_iso
 
 
 SUPPORTED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".m4a"}
-SUPPORTED_TTS_ENGINES = {"qwen3_tts", "cosyvoice"}
+SUPPORTED_TTS_ENGINES = {"qwen3_tts", "index_tts", "moss_tts", "cosyvoice"}
 SUPPORTED_VOICE_LANGUAGES = {"zh-CN", "en-US", "yue-HK"}
+RECOMMENDED_ENGINE_BY_LANGUAGE = {
+    "zh-CN": "index_tts",
+    "en-US": "moss_tts",
+    "yue-HK": "cosyvoice",
+}
 WINDOWS_RESERVED_NAMES = {
     "CON",
     "PRN",
@@ -244,6 +249,40 @@ def migrate_profile_directories(session: Session) -> int:
         profile.updated_at = utc_now_iso()
         session.add(profile)
         _synchronize_projects(session, profile)
+        migrated += 1
+    if migrated:
+        session.commit()
+    return migrated
+
+
+def migrate_profile_language_engines(session: Session) -> int:
+    """Upgrade pre-language profiles to the language-specific engine routing."""
+    migrated = 0
+    for profile in session.exec(select(VoiceProfile)).all():
+        config = load_profile_config(profile)
+        configured_language = str(config.get("language") or "")
+        if configured_language in SUPPORTED_VOICE_LANGUAGES:
+            language = configured_language
+        elif "粤语" in profile.name or "粵語" in profile.name:
+            language = "yue-HK"
+        elif "英文" in profile.name or "english" in profile.name.lower():
+            language = "en-US"
+        else:
+            language = "zh-CN"
+        current_engine = str(config.get("tts_engine") or "qwen3_tts").strip().lower()
+        target_engine = (
+            "qwen3_tts"
+            if current_engine == "qwen3_tts"
+            else RECOMMENDED_ENGINE_BY_LANGUAGE[language]
+        )
+        if configured_language == language and current_engine == target_engine:
+            continue
+        config["language"] = language
+        config["tts_engine"] = target_engine
+        profile.config_json = json.dumps(config, ensure_ascii=False)
+        profile.updated_at = utc_now_iso()
+        session.add(profile)
+        _synchronize_projects(session, profile, force_reset=current_engine != target_engine)
         migrated += 1
     if migrated:
         session.commit()

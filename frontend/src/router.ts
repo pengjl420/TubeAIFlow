@@ -5,6 +5,7 @@ const BatchDetail = () => import('./pages/batches/BatchDetail.vue')
 const BatchList = () => import('./pages/batches/BatchList.vue')
 const Dashboard = () => import('./pages/Dashboard.vue')
 const LocalVideoMerge = () => import('./pages/LocalVideoMerge.vue')
+const VoiceGeneration = () => import('./pages/VoiceGeneration.vue')
 const AvatarStudio = () => import('./pages/AvatarStudio.vue')
 const ProjectCreate = () => import('./pages/projects/ProjectCreate.vue')
 const ProjectDelivery = () => import('./pages/projects/ProjectDelivery.vue')
@@ -45,6 +46,7 @@ const router = createRouter({
     { path: '/batches/new', component: BatchCreate },
     { path: '/batches/:id', component: BatchDetail },
     { path: '/local-video-merge', component: LocalVideoMerge, meta: { title: '本地素材拼接' } },
+    { path: '/voice-generation', component: VoiceGeneration, meta: { title: '配音生成' } },
     { path: '/avatars', component: AvatarStudio, meta: { title: '数字人合成' } },
     { path: '/tasks', component: TaskCenter },
     { path: '/voices', component: VoiceProfiles },
@@ -65,6 +67,7 @@ router.afterEach((to) => {
     : to.path.startsWith('/projects') ? '项目'
       : to.path.startsWith('/batches') ? '批量生产'
       : to.path.startsWith('/local-video-merge') ? '本地素材拼接'
+        : to.path.startsWith('/voice-generation') ? '配音生成'
         : to.path.startsWith('/avatars') ? '数字人合成'
         : to.path.startsWith('/tasks') ? '任务中心'
           : to.path.startsWith('/voices') ? '音色中心' : '系统设置')

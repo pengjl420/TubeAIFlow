@@ -34,8 +34,8 @@ from app.services.narration.text_cleaner import clean_script
 from app.shared.time import elapsed_seconds, utc_now_iso
 
 
-DEFAULT_TTS_ENGINE = "qwen3_tts"
-SUPPORTED_TTS_ENGINES = {DEFAULT_TTS_ENGINE, "cosyvoice"}
+DEFAULT_TTS_ENGINE = "index_tts"
+SUPPORTED_TTS_ENGINES = {DEFAULT_TTS_ENGINE, "moss_tts", "cosyvoice", "qwen3_tts"}
 SEGMENTATION_MODE_NEWLINE = "newline"
 SEGMENTATION_MODE_AI = "ai"
 SUPPORTED_SEGMENTATION_MODES = {SEGMENTATION_MODE_NEWLINE, SEGMENTATION_MODE_AI}
@@ -495,6 +495,7 @@ def update_project_settings(
     normalized_tts_engine = tts_engine.strip().lower()
     normalized_reference_audio_text = reference_audio_text.strip()
     normalized_cosyvoice_speed = 1.0
+    normalized_voice_language = "zh-CN"
     if voice_profile_id.strip():
         from app.services.narration import voice_profile_service
 
@@ -505,6 +506,7 @@ def update_project_settings(
         normalized_tts_engine = str(profile_config.get("tts_engine") or DEFAULT_TTS_ENGINE)
         normalized_reference_audio_text = str(profile_config.get("reference_audio_text") or "").strip()
         normalized_cosyvoice_speed = voice_profile_service.profile_cosyvoice_speed(profile_config)
+        normalized_voice_language = voice_profile_service.profile_language(profile_config)
     if normalized_tts_engine not in SUPPORTED_TTS_ENGINES:
         raise ValueError("Unsupported TTS engine")
     if normalized_tts_engine == "cosyvoice" and not normalized_reference_audio_text:
@@ -544,6 +546,7 @@ def update_project_settings(
     config["tts_engine"] = normalized_tts_engine
     config["reference_audio_text"] = normalized_reference_audio_text
     config["cosyvoice_speed"] = normalized_cosyvoice_speed
+    config["voice_language"] = normalized_voice_language
     config["include_video"] = include_video
     config["video_mode"] = resolved_video_mode
     config.pop("semantic_review_mode", None)
@@ -562,6 +565,7 @@ def update_project_settings(
             raise ValueError("所选系统音色的参考音频文件不存在")
         config["voice_profile_id"] = selected_profile.id
         config["voice_profile_name"] = selected_profile.name
+        config["voice_language"] = normalized_voice_language
         config["tts_engine"] = normalized_tts_engine
         config["reference_audio_text"] = normalized_reference_audio_text
         config["cosyvoice_speed"] = normalized_cosyvoice_speed

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   AlertTriangle,
   AudioLines,
@@ -37,12 +37,13 @@ import {
 } from '../../api/voices'
 import AudioPlayer from '../../components/common/AudioPlayer.vue'
 import { confirmAction, showToast, usePageFeedback } from '../../services/feedback'
+import { DEFAULT_ENGINE_BY_LANGUAGE, TTS_ENGINE_LABELS } from '../../utils/tts'
 
 const voices = ref<VoiceProfile[]>([])
 const selectedVoiceId = ref('')
 const drawerOpen = ref(false)
 const name = ref('')
-const ttsEngine = ref<VoiceTtsEngine>('qwen3_tts')
+const ttsEngine = ref<VoiceTtsEngine>('index_tts')
 const language = ref<VoiceLanguage>('zh-CN')
 const referenceAudioText = ref('')
 const cosyvoiceSpeed = ref(1)
@@ -100,8 +101,14 @@ const previewUrl = computed(() => {
 })
 
 function engineLabel(engine: VoiceTtsEngine) {
-  return engine === 'cosyvoice' ? 'CosyVoice' : 'Qwen3-TTS'
+  return TTS_ENGINE_LABELS[engine]
 }
+
+watch(language, (value) => {
+  if (!selectedVoice.value || ttsEngine.value !== 'qwen3_tts') {
+    ttsEngine.value = DEFAULT_ENGINE_BY_LANGUAGE[value]
+  }
+})
 
 function languageLabel(value: VoiceLanguage) {
   return value === 'en-US' ? '英文' : value === 'yue-HK' ? '粤语' : '中文'
@@ -152,7 +159,7 @@ function openEditor(voice: VoiceProfile) {
 function openCreate() {
   selectedVoiceId.value = ''
   name.value = ''
-  ttsEngine.value = 'qwen3_tts'
+  ttsEngine.value = 'index_tts'
   language.value = 'zh-CN'
   referenceAudioText.value = ''
   cosyvoiceSpeed.value = 1
@@ -228,7 +235,7 @@ async function duplicateVoice(voice: VoiceProfile | null = selectedVoice.value) 
 function showCompatibility() {
   showToast({
     title: '引擎兼容说明',
-    description: 'Qwen3-TTS 支持无参考文本克隆；CosyVoice 必须填写参考音频逐字稿。两种引擎均建议使用清晰、无背景音乐的 WAV、MP3、FLAC 或 M4A 音频。',
+    description: '中文默认 IndexTTS，英文默认 MOSS-TTS，粤语默认 CosyVoice；Qwen3-TTS 作为兼容引擎保留。CosyVoice 必须填写参考音频逐字稿。',
     tone: 'info',
   })
 }
@@ -269,7 +276,7 @@ async function batchImport(event: Event) {
     try {
       await createVoice({
         name: filenameWithoutExtension(file.name),
-        tts_engine: 'qwen3_tts',
+        tts_engine: 'index_tts',
         language: 'zh-CN',
         reference_audio_text: '',
         cosyvoice_speed: 1,
@@ -340,7 +347,7 @@ onBeforeUnmount(() => { if (previewUrl.value.startsWith('blob:')) URL.revokeObje
 
     <div class="voice-toolbar">
       <label class="voice-search"><Search :size="16" /><input v-model="search" type="search" placeholder="搜索音色名称、文件或引擎…" @input="page = 1" /></label>
-      <select v-model="engineFilter" @change="page = 1"><option value="">配音引擎</option><option value="qwen3_tts">Qwen3-TTS</option><option value="cosyvoice">CosyVoice</option></select>
+      <select v-model="engineFilter" @change="page = 1"><option value="">配音引擎</option><option value="index_tts">IndexTTS</option><option value="moss_tts">MOSS-TTS</option><option value="cosyvoice">CosyVoice</option><option value="qwen3_tts">Qwen3-TTS（兼容）</option></select>
       <select v-model="languageFilter" aria-label="语言筛选" @change="page = 1"><option value="">全部语言</option><option value="zh-CN">中文</option><option value="en-US">英文</option><option value="yue-HK">粤语</option></select>
       <select v-model="textFilter" @change="page = 1"><option value="">参考文本状态</option><option value="ready">已上传参考文本</option><option value="missing">缺少参考文本</option></select>
       <label class="exception-toggle"><span>只看异常</span><input v-model="onlyExceptions" type="checkbox" @change="page = 1" /><i></i></label>
@@ -388,7 +395,7 @@ onBeforeUnmount(() => { if (previewUrl.value.startsWith('blob:')) URL.revokeObje
         <div class="drawer-content">
           <section class="drawer-section"><h2><i>1</i>基本信息</h2>
             <label class="drawer-field wide"><span>音色名称</span><input v-model="name" maxlength="120" placeholder="例如：纪录片女声" /></label>
-            <div class="drawer-field-row"><label class="drawer-field"><span>配音引擎</span><select v-model="ttsEngine"><option value="qwen3_tts">Qwen3-TTS</option><option value="cosyvoice">CosyVoice</option></select></label><label class="drawer-field"><span>语言</span><select v-model="language"><option value="zh-CN">中文</option><option value="en-US">英文</option><option value="yue-HK">粤语</option></select></label></div>
+            <div class="drawer-field-row"><label class="drawer-field"><span>配音引擎</span><select v-model="ttsEngine"><option :value="DEFAULT_ENGINE_BY_LANGUAGE[language]">{{ engineLabel(DEFAULT_ENGINE_BY_LANGUAGE[language]) }}（推荐）</option><option value="qwen3_tts">Qwen3-TTS（兼容）</option></select></label><label class="drawer-field"><span>语言</span><select v-model="language"><option value="zh-CN">中文</option><option value="en-US">英文</option><option value="yue-HK">粤语</option></select></label></div>
             <div class="tag-row"><span>标签</span><div><b v-for="tag in tags" :key="tag">{{ tag }} <button type="button" :aria-label="`删除标签 ${tag}`" @click="removeTag(tag)"><X :size="10" /></button></b><input v-model="newTag" maxlength="20" placeholder="添加标签" @keyup.enter="addTag" /><button type="button" aria-label="添加标签" :disabled="!newTag.trim() || tags.length >= 8" @click="addTag"><Plus :size="12" /></button></div></div>
           </section>
 

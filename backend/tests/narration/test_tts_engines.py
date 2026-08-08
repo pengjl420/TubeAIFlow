@@ -11,8 +11,10 @@ from app.services.narration import tts_service
 from app.integrations.tts.cosyvoice_runner import (
     cosyvoice_prompt_text,
     duration_quality,
+    initialization_failure_results,
     segment_attempt_seed,
     spoken_character_count,
+    validate_runtime,
 )
 
 
@@ -122,10 +124,10 @@ class TtsEngineTests(unittest.TestCase):
             batch = json.loads((logs_dir / "tts_batch.json").read_text(encoding="utf-8"))
             self.assertEqual(batch[0]["text"], "需要合成的文本")
 
-    def test_removed_index_engine_is_migrated_to_qwen(self) -> None:
-        project = Project(id="p1", name="Legacy", config_json='{"tts_engine": "index_tts"}')
+    def test_index_engine_is_preserved(self) -> None:
+        project = Project(id="p1", name="Chinese", config_json='{"tts_engine": "index_tts"}')
 
-        self.assertEqual(tts_service._project_tts_engine(project), "qwen3_tts")
+        self.assertEqual(tts_service._project_tts_engine(project), "index_tts")
 
     def test_cosyvoice_requires_reference_transcript(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -217,6 +219,37 @@ class TtsEngineTests(unittest.TestCase):
             self.assertEqual(command[command.index("--max-attempts") + 1], "3")
             self.assertEqual(command[command.index("--seed-round") + 1], "0")
             self.assertIn("--fp16", command)
+            env = run.call_args.kwargs["env"]
+            self.assertEqual(
+                env["MODELSCOPE_CACHE"],
+                str(cosyvoice_root / "model_cache" / "modelscope"),
+            )
+            self.assertEqual(
+                env["HF_HOME"],
+                str(cosyvoice_root / "model_cache" / "huggingface"),
+            )
+
+    def test_cosyvoice_runtime_preflight_reports_unsupported_gpu(self) -> None:
+        cuda = SimpleNamespace(
+            is_available=lambda: True,
+            get_device_name=lambda _index: "Test GPU",
+            get_device_capability=lambda _index: (12, 0),
+            get_arch_list=lambda: ["sm_90"],
+        )
+        torch = SimpleNamespace(cuda=cuda, __version__="2.3.1+cu121")
+
+        with self.assertRaisesRegex(RuntimeError, r"does not support Test GPU \(sm_120\)"):
+            validate_runtime(torch, SimpleNamespace())
+
+    def test_cosyvoice_initialization_failure_is_recorded_for_every_segment(self) -> None:
+        results = initialization_failure_results(
+            [{"segment_id": "0001"}, {"segment_id": "0002"}],
+            RuntimeError("CUDA preflight failed"),
+        )
+
+        self.assertEqual([item["segment_id"] for item in results], ["0001", "0002"])
+        self.assertTrue(all(item["success"] is False for item in results))
+        self.assertTrue(all("CUDA preflight failed" in item["error"] for item in results))
 
     def test_cosyvoice_seed_is_stable_and_attempt_specific(self) -> None:
         first = segment_attempt_seed("0192", "第一次只談錢", 1)

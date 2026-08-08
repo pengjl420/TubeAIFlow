@@ -6,7 +6,7 @@ Current scope:
 
 - Import and clean a raw transcript
 - Split Chinese text into TTS-friendly segments
-- Generate segmented voice audio with Qwen3-TTS (default) or CosyVoice
+- Generate segmented voice audio with IndexTTS (Chinese), MOSS-TTS (English), CosyVoice (Cantonese), or Qwen3-TTS (compatibility)
 - Generate timeline JSON from real audio durations
 - Generate SRT subtitle files from real audio timing
 - Generate structured visual scenes for local image generation
@@ -27,6 +27,7 @@ From the project root, double-click:
 
 - `Start_TubeAIFlow.bat` to start the backend and frontend
 - `Restart_TubeAIFlow.bat` to stop the running app, then start again
+- `Start_TTS_WebUI.bat index_tts|moss_tts|cosyvoice` to run one engine's standalone WebUI
 
 The start script uses the existing backend virtual environment without requiring a
 system-wide Python on `PATH`. If the environment does not exist, Python 3.12 is required
@@ -70,11 +71,11 @@ npm run build
 ## Notes
 
 - Runtime configuration is managed on the **System Settings** page and stored locally in SQLite.
-- Qwen3-TTS inference shares `backend/.venv`; CosyVoice keeps an isolated Python
-  environment because its Torch, CUDA, and Python requirements may conflict.
+- IndexTTS uses `D:\index-tts\python310`; MOSS-TTS and CosyVoice use their own isolated
+  environments. Qwen3-TTS remains compatible with the existing backend environment.
 - API keys are never returned to the frontend after they are saved.
 - Generated project files live under `backend/workspace/projects/{project_id}` by default.
-- FFmpeg, ffprobe, Qwen3-TTS, CosyVoice, DeepSeek, workspace, host, and port are configured on the System Settings page.
+- FFmpeg, ffprobe, all four TTS engines, DeepSeek, workspace, host, and port are configured on the System Settings page.
 - PRPROJ export retains the Final Cut Pro X FCPXML, converts the timeline to Premiere-compatible Final Cut Pro 7 XML, and then uses Adobe Premiere Pro's `openFCPXML()` API to create the native project. Configure the Premiere executable under **System Settings → Basic & Storage** when Windows App Paths and standard installation folders do not detect it automatically. FCPXML and Premiere XML export do not require Premiere.
 - AI image assignments support stable automatic motion presets. Network stock search, semantic vector retrieval, candidate review, and manual material approval are not part of the video workflow.
 - Every intermediate scene and `renders/visual_track.mp4` is validated with ffprobe and must contain exactly one H.264 video stream, 30 FPS CFR, yuv420p, and no audio stream under the default render profile.

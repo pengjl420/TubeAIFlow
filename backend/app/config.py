@@ -116,6 +116,21 @@ class Settings(BaseModel):
     cosyvoice_min_chars_per_second: float = Field(default=2.8, gt=0, le=10)
     cosyvoice_duration_slack_seconds: float = Field(default=3.0, ge=0, le=10)
     cosyvoice_duration_outlier_ratio: float = Field(default=1.45, gt=1, le=3)
+    index_tts_root: Path | None = Path(r"D:\index-tts")
+    index_tts_python: Path | None = Path(r"D:\index-tts\python310\python.exe")
+    index_tts_model_dir: Path | None = Path(r"D:\index-tts\checkpoints")
+    index_tts_device: str = "cuda:0"
+    index_tts_max_text_tokens_per_sentence: int = Field(default=120, ge=20, le=400)
+    moss_tts_root: Path | None = Path(r"D:\MOSS-TTS")
+    moss_tts_python: Path | None = Path(r"D:\MOSS-TTS\.venv\Scripts\python.exe")
+    moss_tts_model_dir: Path | None = Path(r"D:\MOSS-TTS\models\MOSS-TTS-Local-Transformer-v1.5")
+    moss_tts_codec_dir: Path | None = Path(
+        r"D:\MOSS-TTS\models\cache\hub\models--OpenMOSS-Team--MOSS-Audio-Tokenizer-v2"
+        r"\snapshots\f6e20e543b33d2c252a7ef71bdf8aa71e5ff9169"
+    )
+    moss_tts_device: str = "cuda:0"
+    moss_tts_dtype: str = "bfloat16"
+    moss_tts_max_new_tokens: int = Field(default=7500, ge=128, le=12000)
     subtitle_max_display_units: int = Field(default=22, ge=8, le=80)
     subtitle_min_cue_duration_ms: int = Field(default=1000, ge=300, le=5000)
     subtitle_max_cue_duration_ms: int = Field(default=6000, ge=1000, le=15000)
@@ -128,6 +143,13 @@ class Settings(BaseModel):
         "cosyvoice_root",
         "cosyvoice_python",
         "cosyvoice_model_dir",
+        "index_tts_root",
+        "index_tts_python",
+        "index_tts_model_dir",
+        "moss_tts_root",
+        "moss_tts_python",
+        "moss_tts_model_dir",
+        "moss_tts_codec_dir",
         "image_generation_model_path",
         "image_generation_config_dir",
         "image_generation_python",
@@ -155,6 +177,14 @@ class Settings(BaseModel):
         dtype = str(value or "").strip().lower()
         if dtype not in {"bfloat16", "float16", "float32"}:
             raise ValueError("Unsupported Qwen3-TTS dtype")
+        return dtype
+
+    @field_validator("moss_tts_dtype")
+    @classmethod
+    def validate_moss_tts_dtype(cls, value):
+        dtype = str(value or "").strip().lower()
+        if dtype not in {"bfloat16", "float16", "float32"}:
+            raise ValueError("Unsupported MOSS-TTS dtype")
         return dtype
 
     @model_validator(mode="before")
@@ -191,7 +221,7 @@ class Settings(BaseModel):
             raise ValueError("Minimum subtitle cue duration must be shorter than maximum duration")
         return self
 
-    @field_validator("qwen_tts_device", "qwen_tts_language")
+    @field_validator("qwen_tts_device", "qwen_tts_language", "index_tts_device", "moss_tts_device")
     @classmethod
     def non_empty_qwen_setting(cls, value):
         text = str(value or "").strip()
@@ -230,6 +260,13 @@ def _normalize_paths(settings: Settings) -> Settings:
         "cosyvoice_root",
         "cosyvoice_python",
         "cosyvoice_model_dir",
+        "index_tts_root",
+        "index_tts_python",
+        "index_tts_model_dir",
+        "moss_tts_root",
+        "moss_tts_python",
+        "moss_tts_model_dir",
+        "moss_tts_codec_dir",
         "image_generation_model_path",
         "image_generation_config_dir",
         "image_generation_python",
@@ -243,7 +280,7 @@ def _normalize_paths(settings: Settings) -> Settings:
 
 def _ensure_workspace(settings: Settings) -> None:
     settings.workspace_dir.mkdir(parents=True, exist_ok=True)
-    for name in ("projects", "voices", "templates"):
+    for name in ("projects", "voices", "voice_generations", "templates"):
         (settings.workspace_dir / name).mkdir(parents=True, exist_ok=True)
 
 

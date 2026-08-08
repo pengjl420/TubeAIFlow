@@ -403,6 +403,35 @@ def _apply_migrations() -> None:
             "ALTER TABLE avatar_clips ADD COLUMN trim_start_ms INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE avatar_clips ADD COLUMN trim_end_ms INTEGER NOT NULL DEFAULT 0",
         ],
+        15: [
+            """
+            CREATE TABLE IF NOT EXISTS voice_generation_tasks (
+                id VARCHAR NOT NULL PRIMARY KEY,
+                voice_profile_id VARCHAR NOT NULL,
+                voice_profile_name VARCHAR NOT NULL,
+                text VARCHAR NOT NULL,
+                output_filename VARCHAR NOT NULL,
+                output_path VARCHAR,
+                duration FLOAT,
+                status VARCHAR NOT NULL DEFAULT 'queued',
+                queue_sequence INTEGER NOT NULL,
+                attempt_count INTEGER NOT NULL DEFAULT 0,
+                error_message VARCHAR,
+                created_at VARCHAR NOT NULL,
+                updated_at VARCHAR NOT NULL,
+                started_at VARCHAR,
+                finished_at VARCHAR
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_voice_generation_tasks_profile "
+            "ON voice_generation_tasks (voice_profile_id)",
+            "CREATE INDEX IF NOT EXISTS ix_voice_generation_tasks_status "
+            "ON voice_generation_tasks (status)",
+            "CREATE INDEX IF NOT EXISTS ix_voice_generation_tasks_queue "
+            "ON voice_generation_tasks (queue_sequence)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_voice_generation_tasks_running "
+            "ON voice_generation_tasks (status) WHERE status = 'running'",
+        ],
     }
     with engine.begin() as connection:
         connection.exec_driver_sql(

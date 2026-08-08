@@ -15,6 +15,7 @@ import {
   Search,
   Settings2,
   WandSparkles,
+  Mic2,
 } from 'lucide-vue-next'
 
 import { listProjects } from './api/projects'
@@ -34,6 +35,7 @@ const navigation = [
   { to: '/projects', label: '项目', icon: FolderKanban },
   { to: '/batches', label: '批量生产', icon: Layers3 },
   { to: '/local-video-merge', label: '素材拼接', icon: Merge },
+  { to: '/voice-generation', label: '配音生成', icon: Mic2 },
   { to: '/avatars', label: '数字人合成', icon: CircleUserRound },
   { to: '/tasks', label: '任务中心', icon: ListTodo },
   { to: '/voices', label: '音色中心', icon: AudioLines },

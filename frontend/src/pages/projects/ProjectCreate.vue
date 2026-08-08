@@ -6,6 +6,7 @@ import { createProject, selectDirectory } from '../../api/projects'
 import { listVoices, type VoiceProfile } from '../../api/voices'
 import { usePageFeedback } from '../../services/feedback'
 import type { SegmentationMode, StoryboardMode, VideoGenerationMode } from '../../types/project'
+import { voiceTagText } from '../../utils/tts'
 
 const router = useRouter()
 const name = ref('')
@@ -125,7 +126,7 @@ onMounted(async () => {
           <select v-model="voiceProfileId">
             <option value="">请选择已配置的参考音频</option>
             <option v-for="voice in voices" :key="voice.id" :value="voice.id">
-              {{ voice.name }} · {{ voice.tts_engine }}
+              {{ voice.name }} · {{ voiceTagText(voice.tts_engine, voice.language) }}
             </option>
           </select>
           <span class="muted">

@@ -60,6 +60,18 @@ export interface SystemSettings {
   cosyvoice_min_chars_per_second: number
   cosyvoice_duration_slack_seconds: number
   cosyvoice_duration_outlier_ratio: number
+  index_tts_root: string | null
+  index_tts_python: string | null
+  index_tts_model_dir: string | null
+  index_tts_device: string
+  index_tts_max_text_tokens_per_sentence: number
+  moss_tts_root: string | null
+  moss_tts_python: string | null
+  moss_tts_model_dir: string | null
+  moss_tts_codec_dir: string | null
+  moss_tts_device: string
+  moss_tts_dtype: 'bfloat16' | 'float16' | 'float32'
+  moss_tts_max_new_tokens: number
 }
 
 export interface FfmpegStatus {

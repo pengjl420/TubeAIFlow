@@ -1,6 +1,6 @@
 import { apiClient, unwrap } from './client'
 
-export type VoiceTtsEngine = 'qwen3_tts' | 'cosyvoice'
+export type VoiceTtsEngine = 'index_tts' | 'moss_tts' | 'cosyvoice' | 'qwen3_tts'
 export type VoiceLanguage = 'zh-CN' | 'en-US' | 'yue-HK'
 
 export interface VoiceProfile {

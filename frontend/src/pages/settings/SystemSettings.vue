@@ -4,7 +4,6 @@ import { useRoute } from 'vue-router'
 import { Download, RefreshCw, Save } from 'lucide-vue-next'
 
 import { rememberApiAddress } from '../../api/client'
-import { selectDirectory } from '../../api/projects'
 import {
   clearSystemSecret,
   getFfmpegStatus,
@@ -15,6 +14,7 @@ import {
   type FfmpegStatus,
   type PremiereStatus,
   type SystemSettings,
+  selectDirectory,
 } from '../../api/settings'
 import { usePageFeedback } from '../../services/feedback'
 

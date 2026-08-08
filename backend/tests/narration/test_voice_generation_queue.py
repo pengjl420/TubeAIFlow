@@ -1,13 +1,14 @@
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from sqlmodel import Session, SQLModel, create_engine
 
 from app.models.narration import VoiceProfile
 from app.models.voice_generation import VoiceGenerationTask
-from app.services.narration import voice_generation_queue
+from app.services.narration import tts_service, voice_generation_queue
 
 
 class VoiceGenerationQueueTests(unittest.TestCase):
@@ -28,7 +29,7 @@ class VoiceGenerationQueueTests(unittest.TestCase):
         self.engine.dispose()
         self.temp_dir.cleanup()
 
-    def test_enqueue_keeps_whole_text_and_normalizes_wav_filename(self) -> None:
+    def test_enqueue_keeps_transcript_and_exposes_newline_segments(self) -> None:
         with Session(self.engine) as session:
             session.add(VoiceProfile(
                 id="voice", name="Narrator", reference_audio_path=str(self.reference_audio)
@@ -44,7 +45,19 @@ class VoiceGenerationQueueTests(unittest.TestCase):
             self.assertEqual(task.text, "第一句。\n第二句。")
             self.assertEqual(task.output_filename, "完整配音.wav")
             self.assertEqual(task.status, "queued")
-            self.assertEqual(voice_generation_queue.serialize_task(session, task)["queue_position"], 1)
+            serialized = voice_generation_queue.serialize_task(session, task)
+            self.assertEqual(serialized["queue_position"], 1)
+            self.assertEqual(serialized["segment_count"], 2)
+            self.assertEqual(
+                [item["filename"] for item in serialized["segments"]],
+                ["完整配音_0001.wav", "完整配音_0002.wav"],
+            )
+
+    def test_split_transcript_uses_only_line_breaks_and_ignores_blank_lines(self) -> None:
+        self.assertEqual(
+            voice_generation_queue.split_transcript_lines("第一句。第二句！\n\n  第三行  \r\n"),
+            ["第一句。第二句！", "第三行"],
+        )
 
     def test_worker_processes_fifo_and_persists_audio_result(self) -> None:
         with Session(self.engine) as session:
@@ -63,11 +76,12 @@ class VoiceGenerationQueueTests(unittest.TestCase):
 
         calls: list[str] = []
 
-        def fake_generate(task_id, _profile, _text, filename):
+        def fake_generate(task_id, _profile, texts, filename):
             calls.append(task_id)
-            return {"output_path": str(Path(self.temp_dir.name) / filename), "duration": 2.5}
+            self.assertEqual(texts, [task_id])
+            return {"output_path": str(Path(self.temp_dir.name) / filename), "duration": 2.5, "segments": []}
 
-        with patch.object(voice_generation_queue.tts_service, "generate_single_audio", side_effect=fake_generate):
+        with patch.object(voice_generation_queue.tts_service, "generate_segmented_audio", side_effect=fake_generate):
             self.assertTrue(voice_generation_queue.process_next_task())
             self.assertTrue(voice_generation_queue.process_next_task())
             self.assertFalse(voice_generation_queue.process_next_task())
@@ -91,6 +105,39 @@ class VoiceGenerationQueueTests(unittest.TestCase):
                     text="字" * 50001,
                     output_filename="too-long.wav",
                 )
+
+    def test_segmented_generation_names_segments_from_output_and_merges_full_audio(self) -> None:
+        profile = VoiceProfile(
+            id="voice", name="Narrator", reference_audio_path=str(self.reference_audio)
+        )
+
+        def fake_batch(_engine, _project, _reference, segments, audio_dir, _logs_dir):
+            for segment in segments:
+                (audio_dir / f"{segment.segment_id}.wav").write_bytes(b"wav")
+
+        def fake_ffmpeg(args):
+            Path(args[-1]).write_bytes(b"merged")
+
+        with (
+            patch.object(tts_service, "get_settings", return_value=SimpleNamespace(workspace_dir=Path(self.temp_dir.name))),
+            patch.object(tts_service.voice_profile_service, "load_profile_config", return_value={}),
+            patch.object(tts_service.voice_profile_service, "profile_language", return_value="zh-CN"),
+            patch.object(tts_service.voice_profile_service, "profile_cosyvoice_speed", return_value=1.0),
+            patch.object(tts_service, "_validate_configuration", return_value=("qwen3_tts", self.reference_audio)),
+            patch.object(tts_service, "_run_tts_batch", side_effect=fake_batch),
+            patch.object(tts_service, "run_ffmpeg", side_effect=fake_ffmpeg),
+            patch.object(tts_service, "probe_duration", return_value=1.25),
+        ):
+            result = tts_service.generate_segmented_audio(
+                "task", profile, ["第一行", "第二行"], "人物开场白.wav"
+            )
+
+        self.assertEqual(Path(result["output_path"]).name, "人物开场白.wav")
+        self.assertEqual(
+            [item["filename"] for item in result["segments"]],
+            ["人物开场白_0001.wav", "人物开场白_0002.wav"],
+        )
+        self.assertTrue(Path(result["output_path"]).is_file())
 
 
 if __name__ == "__main__":

@@ -14,7 +14,7 @@ from app.models.project import Project
 from app.models.narration import Segment
 from app.models.narration import VoiceProfile
 from app.infrastructure import gpu_resource, process_runner as task_control
-from app.infrastructure.ffmpeg import probe_duration
+from app.infrastructure.ffmpeg import probe_duration, run_ffmpeg
 from app.infrastructure.project_layout import ensure_project_dirs, get_project_work_dir, load_project_config
 from app.shared.time import utc_now_iso
 from app.services.narration import voice_profile_service
@@ -67,6 +67,98 @@ def generate_single_audio(
         raise RuntimeError(f"{_engine_label(engine)} did not create the requested audio file")
     duration = probe_duration(output_path)
     return {"output_path": str(output_path), "duration": duration}
+
+
+def generate_segmented_audio(
+    task_id: str,
+    profile: VoiceProfile,
+    texts: list[str],
+    output_filename: str,
+) -> dict:
+    """Generate one WAV per non-empty transcript line, then merge them in order."""
+    if not texts:
+        raise ValueError("逐字稿按换行切分后没有可生成的文本")
+
+    settings = get_settings()
+    profile_config = voice_profile_service.load_profile_config(profile)
+    output_dir = (settings.workspace_dir / "voice_generations" / task_id).resolve()
+    segment_dir = output_dir / "segments"
+    logs_dir = output_dir / "logs"
+    segment_dir.mkdir(parents=True, exist_ok=True)
+    logs_dir.mkdir(parents=True, exist_ok=True)
+
+    output_stem = Path(output_filename).stem
+    project = Project(
+        id=f"voice-generation-{task_id}",
+        name=profile.name,
+        reference_audio_path=profile.reference_audio_path,
+        config_json=json.dumps(
+            {
+                "tts_engine": str(profile_config.get("tts_engine") or "qwen3_tts"),
+                "voice_language": voice_profile_service.profile_language(profile_config),
+                "reference_audio_text": str(profile_config.get("reference_audio_text") or ""),
+                "cosyvoice_speed": voice_profile_service.profile_cosyvoice_speed(profile_config),
+            },
+            ensure_ascii=False,
+        ),
+    )
+    segments = [
+        Segment(
+            id=f"{task_id}-{index:04d}",
+            segment_id=f"{output_stem}_{index:04d}",
+            project_id=project.id,
+            segment_index=index,
+            text=content,
+        )
+        for index, content in enumerate(texts, start=1)
+    ]
+    engine, reference_audio_path = _validate_configuration(project, segments)
+    for segment in segments:
+        (segment_dir / f"{segment.segment_id}.wav").unlink(missing_ok=True)
+    _write_initial_progress(logs_dir / "tts_progress.json", segments)
+    _run_tts_batch(engine, project, reference_audio_path, segments, segment_dir, logs_dir)
+
+    segment_results = []
+    for segment in segments:
+        segment_path = segment_dir / f"{segment.segment_id}.wav"
+        if not segment_path.is_file():
+            raise RuntimeError(f"{_engine_label(engine)} 未生成分段音频：{segment_path.name}")
+        segment_results.append(
+            {
+                "index": segment.segment_index,
+                "text": segment.text,
+                "filename": segment_path.name,
+                "output_path": str(segment_path),
+                "duration": probe_duration(segment_path),
+            }
+        )
+
+    output_path = output_dir / output_filename
+    output_path.unlink(missing_ok=True)
+    concat_path = logs_dir / "segments.txt"
+    concat_path.write_text(
+        "\n".join(
+            "file '" + Path(item["output_path"]).as_posix().replace("'", r"'\''") + "'"
+            for item in segment_results
+        ),
+        encoding="utf-8",
+    )
+    run_ffmpeg([
+        "-y", "-f", "concat", "-safe", "0", "-i", str(concat_path),
+        "-c", "copy", str(output_path),
+    ])
+    if not output_path.is_file():
+        raise RuntimeError("FFmpeg 未生成合并后的完整音频")
+
+    result = {
+        "output_path": str(output_path),
+        "duration": probe_duration(output_path),
+        "segments": segment_results,
+    }
+    (output_dir / "segments.json").write_text(
+        json.dumps(segment_results, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return result
 
 
 def generate_project_tts(session: Session, project: Project) -> list[Segment]:

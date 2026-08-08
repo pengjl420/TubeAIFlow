@@ -1,4 +1,5 @@
 import logging
+import json
 import re
 import threading
 import uuid
@@ -8,6 +9,7 @@ from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.database import engine
+from app.config import get_settings
 from app.models.voice_generation import VoiceGenerationTask
 from app.services.narration import tts_service, voice_profile_service
 from app.shared.time import elapsed_seconds, utc_now_iso
@@ -18,6 +20,11 @@ _worker_thread: threading.Thread | None = None
 _worker_lock = threading.Lock()
 _wake_event = threading.Event()
 _INVALID_FILENAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def split_transcript_lines(text: str) -> list[str]:
+    """Split only on line breaks; blank lines do not create TTS requests."""
+    return [line.strip() for line in str(text or "").splitlines() if line.strip()]
 
 
 def normalize_output_filename(value: str) -> str:
@@ -80,6 +87,33 @@ def serialize_task(session: Session, task: VoiceGenerationTask) -> dict:
     data["queue_position"] = queue_position
     data["duration_seconds"] = elapsed_seconds(task.started_at, task.finished_at)
     data["audio_url"] = f"/api/tools/voice-generation/tasks/{task.id}/audio" if task.output_path else None
+    lines = split_transcript_lines(task.text)
+    output_dir = get_settings().workspace_dir / "voice_generations" / task.id
+    manifest_path = output_dir / "segments.json"
+    segment_results = []
+    if manifest_path.is_file():
+        try:
+            loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, list):
+                segment_results = loaded
+        except (OSError, json.JSONDecodeError):
+            logger.warning("Cannot read voice generation segment manifest: %s", manifest_path)
+    result_by_index = {int(item.get("index", 0)): item for item in segment_results if isinstance(item, dict)}
+    stem = Path(task.output_filename).stem
+    data["segments"] = [
+        {
+            "index": index,
+            "text": line,
+            "filename": f"{stem}_{index:04d}.wav",
+            "duration": result_by_index.get(index, {}).get("duration"),
+            "audio_url": (
+                f"/api/tools/voice-generation/tasks/{task.id}/segments/{index}/audio"
+                if index in result_by_index else None
+            ),
+        }
+        for index, line in enumerate(lines, start=1)
+    ]
+    data["segment_count"] = len(lines)
     return data
 
 
@@ -126,8 +160,8 @@ def process_next_task() -> bool:
             profile = voice_profile_service.get_profile(session, task.voice_profile_id)
             if not profile:
                 raise ValueError("参考音色已被删除")
-            result = tts_service.generate_single_audio(
-                task.id, profile, task.text, task.output_filename
+            result = tts_service.generate_segmented_audio(
+                task.id, profile, split_transcript_lines(task.text), task.output_filename
             )
         except Exception as exc:
             logger.exception("Voice generation task %s failed", task_id)

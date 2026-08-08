@@ -5,6 +5,7 @@ from sqlmodel import Session
 from app.config import Settings
 from app.database import get_session
 from app.services.settings import system_settings_service
+from app.services.projects import native_dialog_service
 
 
 router = APIRouter(tags=["settings"])
@@ -16,6 +17,20 @@ class SystemSettingsUpdate(Settings):
 
 class ClearSecretRequest(BaseModel):
     field: str
+
+
+class DirectoryPickerRequest(BaseModel):
+    initial_path: str | None = None
+    title: str = "选择文件夹"
+
+
+@router.post("/tools/select-directory")
+def select_directory(payload: DirectoryPickerRequest) -> dict:
+    try:
+        selected = native_dialog_service.select_directory(payload.initial_path, payload.title)
+        return {"success": True, "data": {"path": selected}}
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(status_code=500, detail={"success": False, "error": str(exc)}) from exc
 
 
 @router.get("/settings")

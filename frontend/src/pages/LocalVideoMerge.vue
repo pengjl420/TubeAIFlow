@@ -7,7 +7,7 @@ import {
   listLocalVideoMergeTasks,
   type LocalVideoMergeTask,
 } from '../api/localVideoMerge'
-import { selectDirectory } from '../api/projects'
+import { selectDirectory } from '../api/settings'
 import { showToast, usePageFeedback } from '../services/feedback'
 
 const mediaDir = ref('')

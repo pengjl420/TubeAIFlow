@@ -1,20 +1,31 @@
 # TubeAIFlow
 
-TubeAIFlow is a local web app for voiceover, subtitles, locally generated storyboard images, landscape rough cuts, and FFmpeg video synthesis.
+TubeAIFlow is currently a local, tool-oriented web app for segmented voice generation,
+local video merging, and digital-human synthesis. Project management, batch production,
+and the global task center are intentionally outside the current product scope.
 
-Current scope:
+Current voice-generation workflow:
 
-- Import and clean a raw transcript
-- Split Chinese text into TTS-friendly segments
-- Generate segmented voice audio with IndexTTS (Chinese), MOSS-TTS (English), CosyVoice (Cantonese), or Qwen3-TTS (compatibility)
-- Generate timeline JSON from real audio durations
-- Generate SRT subtitle files from real audio timing
-- Generate structured visual scenes for local image generation
-- Generate local storyboard images and assign them directly to scenes
-- Turn generated images into deterministic FFmpeg motion shots
-- Render resumable scene videos and a video-only `visual_track.mp4`
-- Mix the visual track with narration and run final-output QA
-- Export FCPXML editable timelines and Premiere PRPROJ projects, plus manifests and reports
+1. Select a saved voice profile and enter an output WAV filename.
+2. Paste the transcript with one desired TTS segment per line.
+3. Click **Generate Voice**. Blank lines are ignored; punctuation and text length never
+   create additional segments.
+4. The selected engine generates each line in order. IndexTTS, MOSS-TTS, CosyVoice,
+   and Qwen3-TTS all use this same segmented workflow.
+5. FFmpeg merges the generated WAV files in their original order.
+6. The page retains and exposes both the individual segment WAVs and the complete WAV.
+
+For an output filename such as `人物开场白.wav`, artifacts are stored as:
+
+```text
+backend/workspace/voice_generations/{task_id}/
+  人物开场白.wav
+  segments/
+    人物开场白_0001.wav
+    人物开场白_0002.wav
+  segments.json
+  logs/
+```
 
 ## Local URLs
 
@@ -74,14 +85,10 @@ npm run build
 - IndexTTS uses `D:\index-tts\python310`; MOSS-TTS and CosyVoice use their own isolated
   environments. Qwen3-TTS remains compatible with the existing backend environment.
 - API keys are never returned to the frontend after they are saved.
-- Generated project files live under `backend/workspace/projects/{project_id}` by default.
-- FFmpeg, ffprobe, all four TTS engines, DeepSeek, workspace, host, and port are configured on the System Settings page.
-- PRPROJ export retains the Final Cut Pro X FCPXML, converts the timeline to Premiere-compatible Final Cut Pro 7 XML, and then uses Adobe Premiere Pro's `openFCPXML()` API to create the native project. Configure the Premiere executable under **System Settings → Basic & Storage** when Windows App Paths and standard installation folders do not detect it automatically. FCPXML and Premiere XML export do not require Premiere.
-- AI image assignments support stable automatic motion presets. Network stock search, semantic vector retrieval, candidate review, and manual material approval are not part of the video workflow.
-- Every intermediate scene and `renders/visual_track.mp4` is validated with ffprobe and must contain exactly one H.264 video stream, 30 FPS CFR, yuv420p, and no audio stream under the default render profile.
-- Project render settings may be stored in `config.render.video` and `config.render.policy`; missing values use the validated 1920×1080, 30 FPS defaults.
+- Generated voice files live under `backend/workspace/voice_generations/{task_id}` by default.
+- FFmpeg, ffprobe, all four TTS engines, workspace, host, and port are configured on the System Settings page.
 - On Windows 10/11 64-bit, the System Settings page can automatically download the latest FFmpeg release essentials build, verify its published SHA-256 checksum, install only `ffmpeg.exe` and `ffprobe.exe` under `workspace/tools/ffmpeg`, and save both absolute paths to SQLite. The downloaded tools are local runtime files and are not committed to Git.
 - The automatic FFmpeg installer uses the Windows builds linked by the FFmpeg project and currently downloads the GPLv3 Gyan essentials build from `https://www.gyan.dev/ffmpeg/builds/`.
-- Qwen3-TTS voice cloning works best when the project includes an accurate transcript of the reference audio. Without it, TubeAIFlow automatically uses speaker-embedding-only mode.
+- Qwen3-TTS voice cloning works best when the voice profile includes an accurate transcript of the reference audio. Without it, TubeAIFlow automatically uses speaker-embedding-only mode.
 - CosyVoice uses zero-shot cloning and requires an exact transcript of the reference audio. Fun-CosyVoice 3 prompt formatting is handled automatically.
 - Host and port changes take effect after restarting the app.

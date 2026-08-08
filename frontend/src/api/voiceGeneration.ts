@@ -22,6 +22,16 @@ export interface VoiceGenerationTask {
   started_at: string | null
   finished_at: string | null
   duration_seconds: number | null
+  segment_count: number
+  segments: VoiceGenerationSegment[]
+}
+
+export interface VoiceGenerationSegment {
+  index: number
+  text: string
+  filename: string
+  duration: number | null
+  audio_url: string | null
 }
 
 export interface VoiceGenerationInput {
@@ -44,6 +54,13 @@ export function voiceGenerationAudioUrl(task: VoiceGenerationTask, download = fa
   if (!task.audio_url) return ''
 
   const url = new URL(task.audio_url, `${API_BASE_URL}/`)
+  if (download) url.searchParams.set('download', 'true')
+  return url.toString()
+}
+
+export function voiceGenerationSegmentAudioUrl(segment: VoiceGenerationSegment, download = false) {
+  if (!segment.audio_url) return ''
+  const url = new URL(segment.audio_url, `${API_BASE_URL}/`)
   if (download) url.searchParams.set('download', 'true')
   return url.toString()
 }

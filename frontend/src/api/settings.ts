@@ -1,5 +1,14 @@
 import { apiClient, unwrap } from './client'
 
+export async function selectDirectory(initialPath: string, title: string): Promise<string | null> {
+  const result = unwrap<{ path: string | null }>(await apiClient.post(
+    '/tools/select-directory',
+    { initial_path: initialPath || null, title },
+    { timeout: 0 },
+  ))
+  return result.path
+}
+
 export type StoryboardTransitionName = 'fade' | 'dissolve' | 'fadeblack' | 'smoothleft' | 'smoothright'
 
 export interface StoryboardTransitionEffect {

@@ -51,3 +51,22 @@ def get_audio(task_id: str, download: bool = False, session: Session = Depends(g
     disposition = "attachment" if download else "inline"
     return FileResponse(path, media_type="audio/wav", filename=task.output_filename,
                         content_disposition_type=disposition)
+
+
+@router.get("/tasks/{task_id}/segments/{segment_index}/audio")
+def get_segment_audio(
+    task_id: str,
+    segment_index: int,
+    download: bool = False,
+    session: Session = Depends(get_session),
+):
+    task = session.get(VoiceGenerationTask, task_id)
+    if not task or task.status != "completed" or segment_index < 1:
+        raise HTTPException(status_code=404, detail={"success": False, "error": "分段音频不存在"})
+    filename = f"{Path(task.output_filename).stem}_{segment_index:04d}.wav"
+    path = Path(task.output_path).parent / "segments" / filename if task.output_path else Path()
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail={"success": False, "error": "分段音频不存在"})
+    disposition = "attachment" if download else "inline"
+    return FileResponse(path, media_type="audio/wav", filename=filename,
+                        content_disposition_type=disposition)

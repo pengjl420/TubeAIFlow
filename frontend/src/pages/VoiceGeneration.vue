@@ -1,16 +1,19 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { AudioLines, CheckCircle2, Clock3, Download, Loader2, Play, RefreshCw, XCircle } from 'lucide-vue-next'
+import { AudioLines, CheckCircle2, Clock3, Download, Loader2, Pause, Play, RefreshCw, RotateCcw, Trash2, XCircle } from 'lucide-vue-next'
 import { listVoices, type VoiceProfile } from '../api/voices'
 import { voiceTagText } from '../utils/tts'
 import {
   createVoiceGenerationTask,
+  deleteVoiceGenerationTask,
   listVoiceGenerationTasks,
+  pauseVoiceGenerationTask,
+  resumeVoiceGenerationTask,
   voiceGenerationAudioUrl,
   voiceGenerationSegmentAudioUrl,
   type VoiceGenerationTask,
 } from '../api/voiceGeneration'
-import { showToast, usePageFeedback } from '../services/feedback'
+import { confirmAction, showToast, usePageFeedback } from '../services/feedback'
 
 const voices = ref<VoiceProfile[]>([])
 const tasks = ref<VoiceGenerationTask[]>([])
@@ -19,6 +22,7 @@ const text = ref('')
 const outputFilename = ref('配音.wav')
 const submitting = ref(false)
 const loading = ref(false)
+const operatingTaskId = ref('')
 const error = ref('')
 let pollTimer: number | undefined
 usePageFeedback(error, undefined, { errorTitle: '配音生成失败' })
@@ -79,7 +83,57 @@ async function submitTask() {
 function statusText(task: VoiceGenerationTask) {
   if (task.status === 'running') return '逐段生成中'
   if (task.status === 'queued') return task.queue_position ? `排队第 ${task.queue_position} 位` : '排队中'
+  if (task.status === 'paused') return '已暂停'
   return task.status === 'completed' ? '生成完成' : '生成失败'
+}
+
+function replaceTask(task: VoiceGenerationTask) {
+  tasks.value = tasks.value.map(item => item.id === task.id ? task : item)
+}
+
+async function pauseTask(task: VoiceGenerationTask) {
+  operatingTaskId.value = task.id
+  try {
+    replaceTask(await pauseVoiceGenerationTask(task.id))
+    showToast({ title: '任务已暂停', description: '恢复后会重新加入队列。', tone: 'success' })
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '暂停任务失败'
+  } finally {
+    operatingTaskId.value = ''
+  }
+}
+
+async function resumeTask(task: VoiceGenerationTask) {
+  operatingTaskId.value = task.id
+  try {
+    replaceTask(await resumeVoiceGenerationTask(task.id))
+    showToast({ title: '任务已恢复', description: '任务已重新加入生成队列。', tone: 'success' })
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '恢复任务失败'
+  } finally {
+    operatingTaskId.value = ''
+  }
+}
+
+async function deleteTask(task: VoiceGenerationTask) {
+  const confirmed = await confirmAction({
+    title: '删除配音任务',
+    description: `确定删除“${task.output_filename}”吗？`,
+    detail: task.output_path ? '任务记录和生成文件将移入系统回收站。' : '该任务记录将被永久删除。',
+    confirmText: '删除任务',
+    tone: 'danger',
+  })
+  if (!confirmed) return
+  operatingTaskId.value = task.id
+  try {
+    await deleteVoiceGenerationTask(task.id)
+    tasks.value = tasks.value.filter(item => item.id !== task.id)
+    showToast({ title: '任务已删除', description: '生成文件（如有）已移入系统回收站。', tone: 'success' })
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '删除任务失败'
+  } finally {
+    operatingTaskId.value = ''
+  }
 }
 
 const formatDate = (value: string | null) => value ? new Date(value).toLocaleString() : '—'
@@ -155,7 +209,7 @@ onBeforeUnmount(() => {
       <div v-else class="task-list">
         <div v-for="task in tasks" :key="task.id" class="task-row">
           <span class="status-icon" :class="task.status">
-            <Loader2 v-if="task.status === 'running'" class="spin" :size="19" /><Clock3 v-else-if="task.status === 'queued'" :size="19" /><CheckCircle2 v-else-if="task.status === 'completed'" :size="19" /><XCircle v-else :size="19" />
+            <Loader2 v-if="task.status === 'running'" class="spin" :size="19" /><Clock3 v-else-if="task.status === 'queued'" :size="19" /><Pause v-else-if="task.status === 'paused'" :size="19" /><CheckCircle2 v-else-if="task.status === 'completed'" :size="19" /><XCircle v-else :size="19" />
           </span>
           <div class="task-main">
             <div><strong>{{ task.output_filename }}</strong><span>{{ task.voice_profile_name }}</span><span>{{ voiceTagText(task.tts_engine, task.language) }}</span><span>{{ taskSegmentCount(task) }} 段</span></div>
@@ -171,7 +225,14 @@ onBeforeUnmount(() => {
               </div>
             </details>
           </div>
-          <div class="task-meta"><b :class="task.status">{{ statusText(task) }}</b><span>完整音频 {{ formatDuration(task.duration) }}</span><span>{{ formatDate(task.created_at) }}</span></div>
+          <div class="task-meta">
+            <b :class="task.status">{{ statusText(task) }}</b><span>完整音频 {{ formatDuration(task.duration) }}</span><span>{{ formatDate(task.created_at) }}</span>
+            <div class="task-actions">
+              <button v-if="task.status === 'queued' || task.status === 'running'" type="button" :disabled="operatingTaskId === task.id" title="暂停任务" @click="pauseTask(task)"><Pause :size="14" />暂停</button>
+              <button v-if="task.status === 'paused'" type="button" :disabled="operatingTaskId === task.id" title="恢复任务" @click="resumeTask(task)"><RotateCcw :size="14" />恢复</button>
+              <button type="button" class="danger" :disabled="operatingTaskId === task.id || task.status === 'running'" :title="task.status === 'running' ? '请先暂停任务' : '删除任务'" @click="deleteTask(task)"><Trash2 :size="14" />删除</button>
+            </div>
+          </div>
         </div>
       </div>
     </article>
@@ -259,6 +320,7 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.status-icon.paused{background:#fff7df;color:#b57900}.task-meta b.paused{color:#b57900}.task-actions{display:flex;gap:6px;margin-top:4px}.task-actions button{align-items:center;background:#f7f9fc;border:1px solid #dce3ec;border-radius:6px;color:#46556b;display:flex;font-size:10px;gap:4px;padding:5px 8px}.task-actions button:hover:not(:disabled){border-color:#8ba5ca;color:#075bf5}.task-actions button.danger{color:#c73743}.task-actions button.danger:hover:not(:disabled){border-color:#e1a4aa;color:#a91f2b}.task-actions button:disabled{cursor:not-allowed;opacity:.45}
 
 @media(max-width:750px){
   .voice-page .form-grid .field > small,

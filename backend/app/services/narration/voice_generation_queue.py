@@ -10,6 +10,8 @@ from sqlmodel import Session, select
 
 from app.database import engine
 from app.config import get_settings
+from app.infrastructure import process_runner as task_control
+from app.infrastructure.recycle_bin import move_existing_to_recycle_bin
 from app.models.voice_generation import VoiceGenerationTask
 from app.services.narration import tts_service, voice_profile_service
 from app.shared.time import elapsed_seconds, utc_now_iso
@@ -18,6 +20,7 @@ from app.shared.time import elapsed_seconds, utc_now_iso
 logger = logging.getLogger(__name__)
 _worker_thread: threading.Thread | None = None
 _worker_lock = threading.Lock()
+_queue_state_lock = threading.Lock()
 _wake_event = threading.Event()
 _INVALID_FILENAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -124,6 +127,52 @@ def list_tasks(session: Session, limit: int = 100) -> list[dict]:
     return [serialize_task(session, task) for task in tasks]
 
 
+def pause_task(session: Session, task: VoiceGenerationTask) -> VoiceGenerationTask:
+    with _queue_state_lock:
+        session.refresh(task)
+        if task.status not in {"queued", "running"}:
+            raise ValueError("只有排队中或生成中的任务可以暂停")
+        was_running = task.status == "running"
+        task.status = "paused"
+        task.updated_at = utc_now_iso()
+        session.add(task)
+        session.commit()
+        session.refresh(task)
+    if was_running:
+        task_control.cancel(_runtime_id(task.id))
+    return task
+
+
+def resume_task(session: Session, task: VoiceGenerationTask) -> VoiceGenerationTask:
+    with _queue_state_lock:
+        session.refresh(task)
+        if task.status != "paused":
+            raise ValueError("只有已暂停的任务可以恢复")
+        last_sequence = session.exec(select(func.max(VoiceGenerationTask.queue_sequence))).one()
+        task.status = "queued"
+        task.queue_sequence = int(last_sequence or 0) + 1
+        task.started_at = None
+        task.finished_at = None
+        task.error_message = None
+        task.updated_at = utc_now_iso()
+        session.add(task)
+        session.commit()
+        session.refresh(task)
+    return task
+
+
+def delete_task(session: Session, task: VoiceGenerationTask) -> list[str]:
+    with _queue_state_lock:
+        session.refresh(task)
+        if task.status == "running" or task_control.status(_runtime_id(task.id))["running"]:
+            raise ValueError("任务进程尚未停止，请先暂停并等待片刻后再删除")
+        output_dir = (get_settings().workspace_dir / "voice_generations" / task.id).resolve()
+        recycled = move_existing_to_recycle_bin([output_dir])
+        session.delete(task)
+        session.commit()
+    return recycled
+
+
 def recover_interrupted_tasks(session: Session) -> int:
     tasks = list(session.exec(select(VoiceGenerationTask).where(
         VoiceGenerationTask.status == "running"
@@ -142,36 +191,43 @@ def recover_interrupted_tasks(session: Session) -> int:
 
 def process_next_task() -> bool:
     with Session(engine) as session:
-        task = session.exec(select(VoiceGenerationTask).where(
-            VoiceGenerationTask.status == "queued"
-        ).order_by(VoiceGenerationTask.queue_sequence, VoiceGenerationTask.created_at)).first()
-        if not task:
-            return False
-        now = utc_now_iso()
-        task.status = "running"
-        task.attempt_count += 1
-        task.started_at = now
-        task.updated_at = now
-        task.error_message = None
-        session.add(task)
-        session.commit()
-        task_id = task.id
+        with _queue_state_lock:
+            task = session.exec(select(VoiceGenerationTask).where(
+                VoiceGenerationTask.status == "queued"
+            ).order_by(VoiceGenerationTask.queue_sequence, VoiceGenerationTask.created_at)).first()
+            if not task:
+                return False
+            now = utc_now_iso()
+            task.status = "running"
+            task.attempt_count += 1
+            task.started_at = now
+            task.updated_at = now
+            task.error_message = None
+            session.add(task)
+            session.commit()
+            task_id = task.id
+        session.refresh(task)
+        if task.status == "paused":
+            return True
         try:
             profile = voice_profile_service.get_profile(session, task.voice_profile_id)
             if not profile:
                 raise ValueError("参考音色已被删除")
-            result = tts_service.generate_segmented_audio(
-                task.id, profile, split_transcript_lines(task.text), task.output_filename
-            )
+            with task_control.controlled(_runtime_id(task.id), "tts"):
+                result = tts_service.generate_segmented_audio(
+                    task.id, profile, split_transcript_lines(task.text), task.output_filename
+                )
         except Exception as exc:
-            logger.exception("Voice generation task %s failed", task_id)
+            if not isinstance(exc, task_control.TaskCancelledError):
+                logger.exception("Voice generation task %s failed", task_id)
             session.rollback()
             current = session.get(VoiceGenerationTask, task_id)
             if current:
                 finished = utc_now_iso()
-                current.status = "failed"
-                current.error_message = str(exc)[-4000:]
-                current.finished_at = finished
+                if current.status != "paused":
+                    current.status = "failed"
+                    current.error_message = str(exc)[-4000:]
+                    current.finished_at = finished
                 current.updated_at = finished
                 session.add(current)
                 session.commit()
@@ -179,10 +235,11 @@ def process_next_task() -> bool:
             current = session.get(VoiceGenerationTask, task_id)
             if current:
                 finished = utc_now_iso()
-                current.status = "completed"
-                current.output_path = result["output_path"]
-                current.duration = result["duration"]
-                current.finished_at = finished
+                if current.status != "paused":
+                    current.status = "completed"
+                    current.output_path = result["output_path"]
+                    current.duration = result["duration"]
+                    current.finished_at = finished
                 current.updated_at = finished
                 session.add(current)
                 session.commit()
@@ -204,6 +261,10 @@ def recover_and_start_worker() -> None:
     with Session(engine) as session:
         recover_interrupted_tasks(session)
     wake_worker()
+
+
+def _runtime_id(task_id: str) -> str:
+    return f"voice-generation-{task_id}"
 
 
 def _worker_loop() -> None:

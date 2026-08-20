@@ -1,4 +1,5 @@
 from datetime import datetime
+import json
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session
@@ -48,8 +49,24 @@ def create_srt(
         "data": {
             "srt_path": str(srt_path),
             "segments": len(segments),
+            "alignment_qa": srt_service.read_alignment_outputs(project)["qa"],
         },
     }
+
+
+@router.get("/projects/{project_id}/subtitles/alignment")
+def get_subtitle_alignment(
+    project_id: str,
+    session: Session = Depends(get_session),
+) -> dict:
+    project = project_service.get_project(session, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
+    try:
+        data = srt_service.read_alignment_outputs(project)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=404, detail={"success": False, "error": str(exc)}) from exc
+    return {"success": True, "data": data}
 
 
 def _load_segments_for_srt(session: Session, project_id: str):

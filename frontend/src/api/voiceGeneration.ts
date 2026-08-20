@@ -1,6 +1,6 @@
 import { API_BASE_URL, apiClient, unwrap } from './client'
 
-export type VoiceGenerationStatus = 'queued' | 'running' | 'completed' | 'failed'
+export type VoiceGenerationStatus = 'queued' | 'running' | 'paused' | 'completed' | 'failed'
 
 export interface VoiceGenerationTask {
   id: string
@@ -47,6 +47,20 @@ export async function createVoiceGenerationTask(input: VoiceGenerationInput) {
 export async function listVoiceGenerationTasks(limit = 100) {
   return unwrap<VoiceGenerationTask[]>(
     await apiClient.get('/tools/voice-generation/tasks', { params: { limit } }),
+  )
+}
+
+export async function pauseVoiceGenerationTask(taskId: string) {
+  return unwrap<VoiceGenerationTask>(await apiClient.post(`/tools/voice-generation/tasks/${taskId}/pause`))
+}
+
+export async function resumeVoiceGenerationTask(taskId: string) {
+  return unwrap<VoiceGenerationTask>(await apiClient.post(`/tools/voice-generation/tasks/${taskId}/resume`))
+}
+
+export async function deleteVoiceGenerationTask(taskId: string) {
+  return unwrap<{ id: string; recycled_paths: string[] }>(
+    await apiClient.delete(`/tools/voice-generation/tasks/${taskId}`),
   )
 }
 

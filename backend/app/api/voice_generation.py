@@ -40,6 +40,42 @@ def list_tasks(limit: int = Query(default=100, ge=1, le=500), session: Session =
     return {"success": True, "data": voice_generation_queue.list_tasks(session, limit)}
 
 
+def _get_task_or_404(session: Session, task_id: str) -> VoiceGenerationTask:
+    task = session.get(VoiceGenerationTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail={"success": False, "error": "配音任务不存在"})
+    return task
+
+
+@router.post("/tasks/{task_id}/pause")
+def pause_task(task_id: str, session: Session = Depends(get_session)) -> dict:
+    try:
+        task = voice_generation_queue.pause_task(session, _get_task_or_404(session, task_id))
+        return {"success": True, "data": voice_generation_queue.serialize_task(session, task)}
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail={"success": False, "error": str(exc)}) from exc
+
+
+@router.post("/tasks/{task_id}/resume")
+def resume_task(task_id: str, session: Session = Depends(get_session)) -> dict:
+    try:
+        task = voice_generation_queue.resume_task(session, _get_task_or_404(session, task_id))
+        data = voice_generation_queue.serialize_task(session, task)
+        voice_generation_queue.wake_worker()
+        return {"success": True, "data": data}
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail={"success": False, "error": str(exc)}) from exc
+
+
+@router.delete("/tasks/{task_id}")
+def delete_task(task_id: str, session: Session = Depends(get_session)) -> dict:
+    try:
+        recycled = voice_generation_queue.delete_task(session, _get_task_or_404(session, task_id))
+        return {"success": True, "data": {"id": task_id, "recycled_paths": recycled}}
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail={"success": False, "error": str(exc)}) from exc
+
+
 @router.get("/tasks/{task_id}/audio")
 def get_audio(task_id: str, download: bool = False, session: Session = Depends(get_session)):
     task = session.get(VoiceGenerationTask, task_id)

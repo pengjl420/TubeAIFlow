@@ -22,6 +22,11 @@ export interface SystemSettings {
   subtitle_min_cue_duration_ms: number
   subtitle_max_cue_duration_ms: number
   subtitle_target_characters_per_second: number
+  subtitle_alignment_enabled: boolean
+  subtitle_whisper_model_path: string | null
+  subtitle_whisper_device: string
+  subtitle_whisper_compute_type: 'float16' | 'int8_float16' | 'int8' | 'float32'
+  subtitle_whisper_beam_size: number
   app_host: string
   app_port: number
   workspace_dir: string

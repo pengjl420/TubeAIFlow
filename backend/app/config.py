@@ -135,6 +135,11 @@ class Settings(BaseModel):
     subtitle_min_cue_duration_ms: int = Field(default=1000, ge=300, le=5000)
     subtitle_max_cue_duration_ms: int = Field(default=6000, ge=1000, le=15000)
     subtitle_target_characters_per_second: float = Field(default=7.0, ge=1, le=20)
+    subtitle_alignment_enabled: bool = True
+    subtitle_whisper_model_path: Path | None = None
+    subtitle_whisper_device: str = "cuda"
+    subtitle_whisper_compute_type: Literal["float16", "int8_float16", "int8", "float32"] = "float16"
+    subtitle_whisper_beam_size: int = Field(default=5, ge=1, le=20)
 
     @field_validator(
         "qwen_tts_root",
@@ -155,6 +160,7 @@ class Settings(BaseModel):
         "image_generation_python",
         "premiere_pro_path",
         "duix_host_shared_dir",
+        "subtitle_whisper_model_path",
         mode="before",
     )
     @classmethod
@@ -271,6 +277,7 @@ def _normalize_paths(settings: Settings) -> Settings:
         "image_generation_config_dir",
         "image_generation_python",
         "duix_host_shared_dir",
+        "subtitle_whisper_model_path",
     ):
         value = getattr(settings, field_name)
         if value is not None:

@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { Bot, CircleGauge, Database, Image, Mic2, MonitorCog, RotateCcw } from 'lucide-vue-next'
+import { Bot, Captions, CircleGauge, Database, Image, Mic2, MonitorCog, RotateCcw } from 'lucide-vue-next'
 
 const navigation = [
   { path: 'general', label: '基础与存储', icon: Database },
   { path: 'ai-services', label: 'AI 服务', icon: Bot },
   { path: 'tts', label: '配音引擎', icon: Mic2 },
+  { path: 'subtitles', label: '字幕对齐', icon: Captions },
   { path: 'image-generation', label: '图片生成', icon: Image },
   { path: 'render', label: '渲染与编码', icon: MonitorCog },
   { path: 'transitions', label: '转场策略', icon: RotateCcw },

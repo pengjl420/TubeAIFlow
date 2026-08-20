@@ -59,6 +59,52 @@ class VoiceGenerationQueueTests(unittest.TestCase):
             ["第一句。第二句！", "第三行"],
         )
 
+    def test_pause_and_resume_queued_task(self) -> None:
+        with Session(self.engine) as session:
+            task = VoiceGenerationTask(
+                id="task", voice_profile_id="voice", voice_profile_name="Narrator",
+                text="text", output_filename="voice.wav", queue_sequence=1,
+            )
+            session.add(task)
+            session.commit()
+
+            voice_generation_queue.pause_task(session, task)
+            self.assertEqual(task.status, "paused")
+            self.assertIsNone(voice_generation_queue.serialize_task(session, task)["queue_position"])
+
+            voice_generation_queue.resume_task(session, task)
+            self.assertEqual(task.status, "queued")
+            self.assertEqual(voice_generation_queue.serialize_task(session, task)["queue_position"], 1)
+
+    def test_delete_non_running_task_removes_record(self) -> None:
+        with Session(self.engine) as session:
+            task = VoiceGenerationTask(
+                id="task", voice_profile_id="voice", voice_profile_name="Narrator",
+                text="text", output_filename="voice.wav", queue_sequence=1, status="paused",
+            )
+            session.add(task)
+            session.commit()
+
+            with (
+                patch.object(voice_generation_queue, "get_settings", return_value=SimpleNamespace(workspace_dir=Path(self.temp_dir.name))),
+                patch.object(voice_generation_queue, "move_existing_to_recycle_bin", return_value=[]) as recycle,
+            ):
+                self.assertEqual(voice_generation_queue.delete_task(session, task), [])
+
+            self.assertIsNone(session.get(VoiceGenerationTask, "task"))
+            recycle.assert_called_once()
+
+    def test_delete_rejects_running_task(self) -> None:
+        with Session(self.engine) as session:
+            task = VoiceGenerationTask(
+                id="task", voice_profile_id="voice", voice_profile_name="Narrator",
+                text="text", output_filename="voice.wav", queue_sequence=1, status="running",
+            )
+            session.add(task)
+            session.commit()
+            with self.assertRaisesRegex(ValueError, "先暂停"):
+                voice_generation_queue.delete_task(session, task)
+
     def test_worker_processes_fifo_and_persists_audio_result(self) -> None:
         with Session(self.engine) as session:
             session.add(VoiceProfile(
@@ -90,6 +136,32 @@ class VoiceGenerationQueueTests(unittest.TestCase):
         with Session(self.engine) as session:
             self.assertEqual(session.get(VoiceGenerationTask, "first").status, "completed")
             self.assertEqual(session.get(VoiceGenerationTask, "second").duration, 2.5)
+
+    def test_pausing_running_task_keeps_paused_status(self) -> None:
+        with Session(self.engine) as session:
+            session.add(VoiceProfile(
+                id="voice", name="Narrator", reference_audio_path=str(self.reference_audio)
+            ))
+            session.add(VoiceGenerationTask(
+                id="task", voice_profile_id="voice", voice_profile_name="Narrator",
+                text="text", output_filename="voice.wav", queue_sequence=1,
+            ))
+            session.commit()
+
+        def fake_generate(*_args):
+            with Session(self.engine) as pause_session:
+                running = pause_session.get(VoiceGenerationTask, "task")
+                self.assertEqual(running.status, "running")
+                voice_generation_queue.pause_task(pause_session, running)
+            return {"output_path": "ignored.wav", "duration": 1.0, "segments": []}
+
+        with patch.object(voice_generation_queue.tts_service, "generate_segmented_audio", side_effect=fake_generate):
+            self.assertTrue(voice_generation_queue.process_next_task())
+
+        with Session(self.engine) as session:
+            task = session.get(VoiceGenerationTask, "task")
+            self.assertEqual(task.status, "paused")
+            self.assertIsNone(task.finished_at)
 
     def test_rejects_text_longer_than_fifty_thousand_characters(self) -> None:
         with Session(self.engine) as session:

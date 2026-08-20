@@ -23,3 +23,7 @@ librosa==0.11.0
 onnxruntime==1.27.0
 soundfile==0.14.0
 sox==1.5.0
+
+# Offline ASR timing anchors for transcript-preserving subtitle alignment.
+# Models are deployed separately and are never downloaded at runtime.
+faster-whisper==1.2.1

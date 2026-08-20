@@ -96,6 +96,7 @@ def _validate_paths(settings: Settings) -> None:
         "moss_tts_model_dir",
         "moss_tts_codec_dir",
         "image_generation_config_dir",
+        "subtitle_whisper_model_path",
     ):
         path: Path | None = getattr(settings, field_name)
         if path is not None and not path.is_dir():

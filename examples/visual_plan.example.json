@@ -1,0 +1,35 @@
+{
+  "project_id": "demo",
+  "duration_ms": 36000,
+  "visuals": [
+    {
+      "visual_id": "vis_0001",
+      "scene_id": "scene_0001",
+      "start_ms": 0,
+      "end_ms": 11000,
+      "trigger_ms": 0,
+      "priority": "medium",
+      "voiceover": "真正重要的并不是变化本身，而是变化发生的速度。",
+      "context_before": "",
+      "context_after": "",
+      "core_claim": "变化的速度比变化本身更重要。",
+      "visual_purpose": "解释抽象的变化速度。",
+      "visual_type": "conceptual_illustration",
+      "renderer": "flux2_klein_4b",
+      "fact_risk": "low",
+      "visual_brief": {
+        "subject": "two contrasting rates of change",
+        "action": "one progression rapidly overtakes another",
+        "environment": "clean editorial setting",
+        "semantic_message": "speed changes the impact of change",
+        "composition": "wide single-focus composition"
+      },
+      "prompt": "Create a cinematic editorial visual.",
+      "negative_prompt": "No watermark. No logo. No random text.",
+      "generation": {"width": 1344, "height": 768, "candidates": 2, "seed_base": 38190421},
+      "layout": "full_bleed",
+      "animation": "kenburns_slow_push",
+      "subtitle_safe_zone": 0.18
+    }
+  ]
+}

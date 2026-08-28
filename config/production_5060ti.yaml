@@ -1,0 +1,96 @@
+hardware:
+  target_gpu: "RTX 5060 Ti 16GB"
+  system_ram_gb: 32
+  max_gpu_jobs: 1
+  parallel_large_models: false
+  min_free_ram_gb: 5
+  min_free_vram_gb: 1
+
+video:
+  width: 1920
+  height: 1080
+  fps: 30
+  subtitle_safe_zone: 0.18
+
+semantic:
+  provider: llamacpp
+  model: qwen3-8b-q4_k_m
+  model_path: models/llm/qwen3-8b-q4_k_m/Qwen3-8B-Q4_K_M.gguf
+  base_url: http://127.0.0.1:18090
+  timeout_seconds: 180
+  context_tokens: 16384
+  thinking: false
+  temperature: 0.3
+  chunk_minutes: [2, 4]
+  local_context_before_sec: 15
+  local_context_after_sec: 15
+
+embedding:
+  model: BAAI/bge-m3
+  model_path: models/embedding/bge-m3-onnx
+  device: cpu
+  max_length: 512
+
+segmentation:
+  target_scene_sec: [8, 18]
+  min_scene_sec: 5
+  max_scene_sec: 30
+
+selection:
+  candidate_threshold: 0.62
+  target_visuals_per_minute: 1.8
+  soft_max_visuals_per_minute: 3
+  hard_max_visuals_per_minute: 4
+  min_generated_visual_gap_sec: 10
+  max_same_visual_type_in_row: 2
+  max_same_layout_in_row: 2
+  duplicate_embedding_threshold: 0.92
+
+image:
+  provider: comfyui
+  default_model: flux2-klein-4b
+  base_url: http://127.0.0.1:8188
+  workflow_path: workflows/flux2_klein_scene_api.json
+  diffusion_model_path: models/image_generation/flux2-klein-4b-fp8/flux-2-klein-4b-fp8.safetensors
+  text_encoder_path: models/image_generation/flux2-klein-4b-fp8/text_encoder/qwen_3_4b_fp8_mixed.safetensors
+  vae_path: models/image_generation/flux2-klein-4b-fp8/vae/flux2-vae.safetensors
+  timeout_seconds: 900
+  precision: fp8
+  width: 1344
+  height: 768
+  batch_size: 1
+  candidates_normal: 2
+  candidates_high: 3
+  qwen_image_enabled: false
+
+qc:
+  vision_model: qwen3-vl-4b-instruct
+  quantization: bf16
+  model_path: models/vision/qwen3-vl-4b-instruct-bf16
+  max_new_tokens: 512
+  semantic_match_min: 4
+  max_retries: 2
+  reject_random_text: true
+  reject_watermark: true
+  reject_unapproved_logo: true
+
+render:
+  preview_codec: h264_nvenc
+  final_codec: libx264
+  final_crf: 18
+  final_preset: medium
+  audio_codec: aac
+  audio_bitrate: 192k
+  pixel_format: yuv420p
+  fade_sec: 0.3
+  zoom_min: 1.02
+  zoom_max: 1.06
+
+cache:
+  enabled: true
+  hash_algorithm: sha256
+
+runtime:
+  resume: true
+  keep_raw_llm_output_on_error: true
+  save_all_generations: true

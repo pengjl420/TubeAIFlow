@@ -1,0 +1,5 @@
+tubeaiflow_flux2:
+  base_path: D:/TubeAIFlow/models/image_generation/flux2-klein-4b-fp8
+  diffusion_models: .
+  text_encoders: text_encoder
+  vae: vae

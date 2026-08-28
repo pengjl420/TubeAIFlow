@@ -34,3 +34,4 @@ dist/
 *.mov
 *.mkv
 *.avi
+/tests/fixtures/*/work/

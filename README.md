@@ -79,6 +79,56 @@ cd ..\frontend
 npm run build
 ```
 
+## Semantic visual-enrichment AI models
+
+The visual-enrichment pipeline supports both deterministic dry runs and real local AI
+inference. Models are stored by responsibility instead of being mixed in one directory:
+
+```text
+models/
+  llm/qwen3-8b-q4_k_m/                 # semantic analysis through llama.cpp
+  embedding/bge-m3-onnx/               # CPU semantic embeddings
+  image_generation/flux2-klein-4b-fp8/ # diffusion, text encoder, and VAE subfolders
+  vision/qwen3-vl-4b-instruct-bf16/    # generated-image quality control on Windows
+```
+
+Download and checksum the pinned official model revisions, then install the two local
+model servers:
+
+```powershell
+backend\.venv\Scripts\python.exe scripts\download_visual_models.py
+backend\.venv\Scripts\python.exe scripts\install_llama_cpp.py
+backend\.venv\Scripts\python.exe scripts\install_comfyui.py
+```
+
+The RTX 5060 Ti profile permits only one large GPU workload. Start semantic analysis or
+image generation as needed and stop it before switching to the other service:
+
+```powershell
+backend\.venv\Scripts\python.exe scripts\start_visual_model_service.py semantic
+backend\.venv\Scripts\python.exe scripts\start_visual_model_service.py image
+```
+
+Run the real stages serially: use the semantic service for `--stage semantic`, stop it;
+use the image service for `--stage generate`, stop it; then run `--stage qc` to load
+Qwen3-VL directly. The CPU-only plan and timeline stages need no model service. These
+providers are configured in `config/production_5060ti.yaml`.
+The FLUX.2 API workflow is `workflows/flux2_klein_scene_api.json`; ComfyUI reads the
+three image-model component types through `config/comfyui_extra_model_paths.yaml`.
+
+For a deterministic pipeline check that loads no model, use:
+
+```powershell
+python run.py `
+  --project tests/fixtures/demo `
+  --config config/production_5060ti.yaml `
+  --dry-run
+```
+
+Run one stage with `--stage ingest|semantic|plan|generate|qc|timeline|render`. Use
+`--resume` to reuse SHA256-verified artifacts or `--force` to rebuild current artifacts.
+Provider generations remain append-only in the project's `work/pipeline.db`.
+
 ## Notes
 
 - Runtime configuration is managed on the **System Settings** page and stored locally in SQLite.

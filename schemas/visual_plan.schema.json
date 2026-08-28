@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VisualPlan",
+  "type": "object",
+  "required": ["project_id", "duration_ms", "visuals"],
+  "properties": {
+    "project_id": {"type": "string", "minLength": 1},
+    "duration_ms": {"type": "integer", "minimum": 1},
+    "visuals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "visual_id", "scene_id", "start_ms", "end_ms", "priority", "voiceover",
+          "core_claim", "visual_purpose", "visual_type", "renderer", "fact_risk",
+          "layout", "animation"
+        ],
+        "properties": {
+          "visual_id": {"type": "string"},
+          "scene_id": {"type": "string"},
+          "start_ms": {"type": "integer", "minimum": 0},
+          "end_ms": {"type": "integer", "minimum": 1},
+          "trigger_ms": {"type": "integer", "minimum": 0},
+          "priority": {"enum": ["low", "medium", "high"]},
+          "voiceover": {"type": "string"},
+          "context_before": {"type": "string"},
+          "context_after": {"type": "string"},
+          "core_claim": {"type": "string"},
+          "visual_purpose": {"type": "string"},
+          "visual_type": {
+            "enum": [
+              "cinematic_scene", "conceptual_illustration", "comparison", "flow_diagram",
+              "architecture_diagram", "timeline", "bar_chart", "line_chart", "pie_chart",
+              "map", "fact_card", "quote_card", "keyword_card", "list_card",
+              "object_cutout", "none"
+            ]
+          },
+          "renderer": {"enum": ["flux2_klein_4b", "svg", "matplotlib", "pillow", "none"]},
+          "fact_risk": {"enum": ["none", "low", "medium", "high"]},
+          "visual_brief": {"type": "object", "additionalProperties": true},
+          "prompt": {"type": "string"},
+          "negative_prompt": {"type": "string"},
+          "generation": {
+            "type": "object",
+            "properties": {
+              "width": {"type": "integer"},
+              "height": {"type": "integer"},
+              "candidates": {"type": "integer", "minimum": 1, "maximum": 4},
+              "seed_base": {"type": "integer"}
+            }
+          },
+          "layout": {
+            "enum": [
+              "full_bleed", "center_card", "left_card", "right_card", "split_left",
+              "split_right", "chart_center", "diagram_center", "object_overlay_left",
+              "object_overlay_right"
+            ]
+          },
+          "animation": {
+            "enum": [
+              "fade_only", "kenburns_slow_push", "kenburns_slow_pull",
+              "pan_left_to_right", "pan_right_to_left", "card_slide_left",
+              "card_slide_right", "card_fade_scale"
+            ]
+          },
+          "subtitle_safe_zone": {"type": "number", "minimum": 0, "maximum": 0.4}
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

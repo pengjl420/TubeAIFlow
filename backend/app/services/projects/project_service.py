@@ -245,7 +245,7 @@ def delete_project(session: Session, project: Project) -> dict:
     if active_task or project.status in GENERATING_STATUSES:
         raise ValueError("生成中的项目请先强制停止，确认停止后再删除")
 
-    artifact_paths = _project_artifact_paths(project)
+    artifact_paths = _prepare_project_deletion(session, project)
     recycled_paths = move_existing_to_recycle_bin(artifact_paths)
 
     batch_items = list(
@@ -302,6 +302,31 @@ def delete_project(session: Session, project: Project) -> dict:
 
     session.commit()
     return {"project_id": project.id, "recycled_paths": recycled_paths}
+
+
+def _prepare_project_deletion(session: Session, project: Project) -> list[Path]:
+    """Persist deletion intent before moving recoverable files out of place.
+
+    A retry can safely finish the database cleanup when the process exits after
+    recycling files or when recycling only succeeds for a subset of paths.
+    """
+    config = load_project_config(project)
+    deletion = config.get("_deletion")
+    if isinstance(deletion, dict) and isinstance(deletion.get("artifact_paths"), list):
+        artifact_paths = [Path(str(path)) for path in deletion["artifact_paths"]]
+    else:
+        artifact_paths = _project_artifact_paths(project)
+        config["_deletion"] = {
+            "requested_at": utc_now_iso(),
+            "artifact_paths": [str(path) for path in artifact_paths],
+        }
+        project.config_json = json.dumps(config, ensure_ascii=False)
+    project.status = "deleting"
+    project.updated_at = utc_now_iso()
+    session.add(project)
+    session.commit()
+    session.refresh(project)
+    return artifact_paths
 
 
 def _project_artifact_paths(project: Project) -> list[Path]:

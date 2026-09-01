@@ -74,6 +74,8 @@ if (Test-PortListening -Port $FrontendPort) {
 New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
 $frontendOutput = Join-Path $logDirectory "frontend.stdout.log"
 $frontendError = Join-Path $logDirectory "frontend.stderr.log"
+$backendOutput = Join-Path $logDirectory "backend.stdout.log"
+$backendError = Join-Path $logDirectory "backend.stderr.log"
 
 $backendProcess = $null
 $frontendProcess = $null
@@ -84,6 +86,8 @@ try {
         -ArgumentList @("-m", "app.run") `
         -WorkingDirectory $backendDirectory `
         -WindowStyle Hidden `
+        -RedirectStandardOutput $backendOutput `
+        -RedirectStandardError $backendError `
         -PassThru
 
     $env:VITE_API_PORT = [string]$BackendPort
@@ -98,7 +102,7 @@ try {
 
     Start-Sleep -Milliseconds 800
     if ($backendProcess.HasExited) {
-        throw "The backend exited during startup. Check the backend command window for details."
+        throw "The backend exited during startup. See $backendError"
     }
     if ($frontendProcess.HasExited) {
         throw "The frontend exited during startup. See $frontendError"
@@ -114,7 +118,7 @@ try {
 
     Write-Host "Backend started in the background (PID $($backendProcess.Id), port $BackendPort)."
     Write-Host "Frontend started in the background (PID $($frontendProcess.Id), port $FrontendPort)."
-    Write-Host "Frontend logs: $logDirectory"
+    Write-Host "Service logs: $logDirectory"
 }
 catch {
     Stop-StartedProcess -Process $frontendProcess

@@ -1,30 +1,5 @@
---extra-index-url https://download.pytorch.org/whl/cu128
-
-fastapi==0.115.6
-uvicorn[standard]==0.34.0
-sqlmodel==0.0.22
-httpx==0.28.1
-python-multipart==0.0.20
-PyYAML==6.0.3
-Send2Trash==1.8.3
-accelerate==1.12.0
-numpy==2.3.5
-pillow==11.3.0
-diffusers==0.36.0
-safetensors==0.8.0
-torch==2.8.0+cu128
-torchvision==0.23.0+cu128
-torchaudio==2.8.0+cu128
-transformers==4.57.3
-
-# Qwen3-TTS runtime. The source checkout and model stay configurable, while
-# inference shares this backend environment to avoid a duplicate CUDA stack.
-einops==0.8.2
-librosa==0.11.0
-onnxruntime==1.27.0
-soundfile==0.14.0
-sox==1.5.0
-
-# Offline ASR timing anchors for transcript-preserving subtitle alignment.
-# Models are deployed separately and are never downloaded at runtime.
-faster-whisper==1.2.1
+# Compatibility install used by the Windows launcher.  CI and cloud-provider-only
+# environments can install requirements-core.txt without the multi-gigabyte CUDA stack.
+-r requirements-core.txt
+-r requirements-local-ai-cu128.txt
+-r requirements-tts-asr.txt

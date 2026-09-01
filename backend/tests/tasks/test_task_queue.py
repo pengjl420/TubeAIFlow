@@ -7,6 +7,7 @@ from unittest.mock import patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine as create_sqlalchemy_engine, inspect
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, SQLModel, create_engine
 
 from app import database
@@ -127,6 +128,41 @@ class TaskQueueTests(unittest.TestCase):
             )
 
             self.assertEqual(project.status, "video_in_progress")
+
+    def test_worker_uses_persisted_project_config_snapshot(self) -> None:
+        with Session(self.engine) as session:
+            project = Project(
+                id="project",
+                name="Project",
+                config_json='{"tts_engine":"qwen3_tts","output_filename":"original"}',
+            )
+            session.add(project)
+            session.commit()
+            task = task_service.enqueue_project_task(session, project, include_video=False)
+            snapshot = json.loads(task.config_snapshot_json)
+            self.assertEqual(snapshot["format_version"], 1)
+            self.assertNotIn("deepseek_api_key", snapshot["settings"])
+
+            project.config_json = '{"tts_engine":"moss_tts","output_filename":"changed"}'
+            session.add(project)
+            session.commit()
+
+        observed: list[str] = []
+
+        def fake_generation(_session, queued_project, _stage, _include_video, update_stage):
+            from app.infrastructure.project_layout import load_project_config
+
+            observed.append(load_project_config(queued_project)["tts_engine"])
+            update_stage("completed")
+
+        with patch.object(
+            task_worker.narration_generation,
+            "run_project_generation",
+            side_effect=fake_generation,
+        ):
+            self.assertTrue(task_worker.process_next_task())
+
+        self.assertEqual(observed, ["qwen3_tts"])
 
     def test_restart_compensation_keeps_current_stage_and_checkpoint(self) -> None:
         with Session(self.engine) as session:
@@ -258,8 +294,28 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertIn("avatar_clips", table_names)
         self.assertEqual(
             versions,
-            [(1,), (2,), (3,), (4,), (5,), (6,), (7,), (8,), (9,), (10,), (11,), (12,), (13,), (14,), (15,)],
+            [(1,), (2,), (3,), (4,), (5,), (6,), (7,), (8,), (9,), (10,), (11,), (12,), (13,), (14,), (15,), (16,)],
         )
+
+    def test_migration_rejects_new_orphaned_project_records(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            engine = create_sqlalchemy_engine(f"sqlite:///{Path(directory) / 'integrity.db'}")
+            try:
+                with engine.begin() as connection:
+                    connection.exec_driver_sql(
+                        "CREATE TABLE projects (id VARCHAR PRIMARY KEY, name VARCHAR NOT NULL)"
+                    )
+                with patch.object(database, "engine", engine):
+                    database._apply_migrations()
+                with self.assertRaises(IntegrityError):
+                    with engine.begin() as connection:
+                        connection.exec_driver_sql(
+                            "INSERT INTO subtitle_cues "
+                            "(id, project_id, source_segment_id, cue_index, start_ms, end_ms, text, created_at, updated_at) "
+                            "VALUES ('cue', 'missing', 'segment', 0, 0, 1000, 'text', 'now', 'now')"
+                        )
+            finally:
+                engine.dispose()
 
     def test_source_subtitle_migration_removes_bilingual_schema_and_config(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

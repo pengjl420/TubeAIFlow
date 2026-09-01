@@ -6,13 +6,53 @@ const DEFAULT_API_BASE_URL = `http://127.0.0.1:${launchPort || '18080'}/api`
 // earlier run that used the preferred port.
 export const API_BASE_URL = launchPort
   ? DEFAULT_API_BASE_URL
-  : localStorage.getItem('tube_api_base_url') || DEFAULT_API_BASE_URL
+  : (typeof localStorage !== 'undefined' && localStorage.getItem('tube_api_base_url')) || DEFAULT_API_BASE_URL
 
 interface ApiEnvelope<T> {
   success: boolean
   data?: T
   error?: string
   code?: string
+}
+
+export class ApiError extends Error {
+  readonly code?: string
+  readonly status?: number
+  readonly details?: unknown
+
+  constructor(message: string, options: { code?: string, status?: number, details?: unknown } = {}) {
+    super(message)
+    this.name = 'ApiError'
+    this.code = options.code
+    this.status = options.status
+    this.details = options.details
+  }
+}
+
+interface AxiosLikeError {
+  message?: string
+  response?: {
+    status?: number
+    data?: {
+      detail?: { error?: string, code?: string }
+      error?: string
+      code?: string
+      [key: string]: unknown
+    }
+  }
+}
+
+export function toApiError(error: AxiosLikeError): ApiError {
+  const data = error.response?.data
+  const message = data?.detail?.error
+    || data?.error
+    || error.message
+    || '请求失败'
+  return new ApiError(message, {
+    code: data?.detail?.code || data?.code,
+    status: error.response?.status,
+    details: data,
+  })
 }
 
 export interface EngineHealth {
@@ -33,16 +73,12 @@ export function rememberApiAddress(host: string, port: number): void {
 }
 
 apiClient.interceptors.response.use(undefined, (error) => {
-  const message = error.response?.data?.detail?.error
-    || error.response?.data?.error
-    || error.message
-    || '请求失败'
-  return Promise.reject(new Error(message))
+  return Promise.reject(toApiError(error))
 })
 
 export function unwrap<T>(response: { data: ApiEnvelope<T> }): T {
   if (!response.data.success) {
-    throw new Error(response.data.error || '请求失败')
+    throw new ApiError(response.data.error || '请求失败', { code: response.data.code })
   }
   if (response.data.data === undefined) {
     throw new Error('服务器返回了空数据')

@@ -6,6 +6,7 @@ from typing import BinaryIO
 import uvicorn
 
 from app.config import BASE_DIR, get_settings
+from app.infrastructure.logging_config import configure_logging
 
 
 LOCK_PATH = BASE_DIR / "workspace" / "backend.lock"
@@ -20,6 +21,8 @@ def main() -> None:
     try:
         configure_event_loop()
         settings = get_settings()
+        log_path = configure_logging(getattr(settings, "workspace_dir", BASE_DIR / "workspace"))
+        print(f"TubeAiFolw Engine log: {log_path}")
         port = int(os.environ.get("APP_PORT_OVERRIDE") or settings.app_port)
         uvicorn.run(
             "app.main:app",

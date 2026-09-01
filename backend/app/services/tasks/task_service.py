@@ -6,6 +6,7 @@ from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.infrastructure.project_layout import load_project_config
+from app.config import get_settings
 from app.models.project import Project
 from app.models.task import TaskRun
 from app.shared.time import elapsed_seconds, utc_now_iso
@@ -23,6 +24,23 @@ VIDEO_STAGES = {
     "quality_check",
 }
 _enqueue_lock = threading.Lock()
+_SECRET_SUFFIXES = ("_api_key", "_token", "_secret", "_password")
+
+
+def build_config_snapshot(project: Project) -> str:
+    settings = {
+        key: value
+        for key, value in get_settings().model_dump(mode="json").items()
+        if not key.lower().endswith(_SECRET_SUFFIXES)
+    }
+    return json.dumps(
+        {
+            "format_version": 1,
+            "project": load_project_config(project),
+            "settings": settings,
+        },
+        ensure_ascii=False,
+    )
 
 
 def enqueue_project_task(
@@ -61,7 +79,7 @@ def enqueue_project_task(
                 {"current_stage": current_stage, "stage_history": []},
                 ensure_ascii=False,
             ),
-            config_snapshot_json=json.dumps(load_project_config(project), ensure_ascii=False),
+            config_snapshot_json=build_config_snapshot(project),
             created_at=now,
             updated_at=now,
         )

@@ -3,11 +3,14 @@ import logging
 import os
 import threading
 import uuid
+from contextlib import ExitStack
 
 from sqlmodel import Session, select
 
 from app.database import engine
+from app.config import use_settings_snapshot
 from app.infrastructure import process_runner as runtime_control
+from app.infrastructure.project_layout import use_project_config_snapshot
 from app.models.batch import BatchItem, BatchJob
 from app.models.project import Project
 from app.models.task import TaskRun
@@ -247,23 +250,27 @@ def process_next_task() -> bool:
                 raise runtime_control.TaskCancelledError("Task was stopped by the user")
 
         try:
-            if task.workflow == "narration_generation":
-                narration_generation.run_project_generation(
-                    session,
-                    project,
-                    task.current_stage,
-                    task.include_video,
-                    update_stage,
-                )
-            elif task.workflow == "video_synthesis":
-                video_synthesis.run_video_synthesis(
-                    session,
-                    project,
-                    task.current_stage,
-                    update_stage,
-                )
-            else:
-                raise ValueError(f"Unknown workflow: {task.workflow}")
+            project_snapshot, settings_snapshot = _load_config_snapshot(task)
+            with ExitStack() as stack:
+                stack.enter_context(use_project_config_snapshot(project.id, project_snapshot))
+                stack.enter_context(use_settings_snapshot(settings_snapshot))
+                if task.workflow == "narration_generation":
+                    narration_generation.run_project_generation(
+                        session,
+                        project,
+                        task.current_stage,
+                        task.include_video,
+                        update_stage,
+                    )
+                elif task.workflow == "video_synthesis":
+                    video_synthesis.run_video_synthesis(
+                        session,
+                        project,
+                        task.current_stage,
+                        update_stage,
+                    )
+                else:
+                    raise ValueError(f"Unknown workflow: {task.workflow}")
         except runtime_control.TaskCancelledError as exc:
             session.rollback()
             _cancel_task(session, task.id, str(exc))
@@ -473,6 +480,25 @@ def _load_batch_config(batch: BatchJob) -> dict:
     except (TypeError, json.JSONDecodeError):
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def _load_config_snapshot(task: TaskRun) -> tuple[dict | None, dict | None]:
+    """Read both current and legacy task snapshots without breaking old queues."""
+    try:
+        data = json.loads(task.config_snapshot_json or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return None, None
+    if not isinstance(data, dict):
+        return None, None
+    if data.get("format_version") == 1:
+        project = data.get("project")
+        settings = data.get("settings")
+        return (
+            project if isinstance(project, dict) else None,
+            settings if isinstance(settings, dict) else None,
+        )
+    # Version 0 stored the project config directly.
+    return data, None
 
 
 def _sync_project_descriptor(project: Project | None) -> None:

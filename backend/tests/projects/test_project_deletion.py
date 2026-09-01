@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -94,6 +95,41 @@ class ProjectDeletionTests(unittest.TestCase):
                 project_service.delete_project(session, project)
 
             self.assertIsNotNone(session.get(Project, project.id))
+
+    def test_failed_recycle_persists_retryable_deletion_intent(self) -> None:
+        output = self.root / "output"
+        output.mkdir()
+        artifact = output / "delete-me.mp4"
+        artifact.write_bytes(b"video")
+        project = Project(
+            id="project-retry-delete",
+            name="Delete me",
+            status="completed",
+            output_dir=str(output),
+            config_json='{"output_filename":"delete-me"}',
+        )
+        with Session(self.engine) as session:
+            session.add(project)
+            session.commit()
+            with (
+                patch.object(
+                    project_service,
+                    "get_settings",
+                    return_value=SimpleNamespace(workspace_dir=self.root / "workspace"),
+                ),
+                patch.object(
+                    project_service,
+                    "move_existing_to_recycle_bin",
+                    side_effect=OSError("recycle unavailable"),
+                ),
+            ):
+                with self.assertRaisesRegex(OSError, "recycle unavailable"):
+                    project_service.delete_project(session, project)
+
+            persisted = session.get(Project, project.id)
+            self.assertEqual(persisted.status, "deleting")
+            deletion = json.loads(persisted.config_json)["_deletion"]
+            self.assertIn(str(artifact), deletion["artifact_paths"])
 
 
 if __name__ == "__main__":

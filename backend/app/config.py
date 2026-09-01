@@ -1,4 +1,7 @@
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -25,6 +28,9 @@ DEFAULT_IMAGE_CONFIG_DIR = (
     / "diffusers_config"
 ).resolve()
 DATABASE_PATH = DEFAULT_WORKSPACE_DIR / "app.db"
+_SETTINGS_OVERRIDE: ContextVar[dict | None] = ContextVar(
+    "tubeaifolw_settings_override", default=None
+)
 
 STORYBOARD_TRANSITION_NAMES = (
     "fade",
@@ -292,7 +298,7 @@ def _ensure_workspace(settings: Settings) -> None:
 
 
 @lru_cache
-def get_settings() -> Settings:
+def _get_live_settings() -> Settings:
     settings = Settings()
     try:
         from sqlmodel import Session
@@ -321,5 +327,33 @@ def get_settings() -> Settings:
     return settings
 
 
+def get_settings() -> Settings:
+    """Return live settings with an optional task-scoped reproducibility snapshot.
+
+    Secrets are deliberately absent from persisted task snapshots.  They are
+    resolved from the current secure credential store and merged into the
+    captured non-secret settings only while a task is running.
+    """
+    live = _get_live_settings()
+    override = _SETTINGS_OVERRIDE.get()
+    if not override:
+        return live
+    data = live.model_dump(mode="python")
+    data.update(override)
+    for field_name in data:
+        if field_name.lower().endswith(("_api_key", "_token", "_secret", "_password")):
+            data[field_name] = getattr(live, field_name, data[field_name])
+    return _normalize_paths(Settings.model_validate(data))
+
+
+@contextmanager
+def use_settings_snapshot(values: dict | None) -> Iterator[None]:
+    token = _SETTINGS_OVERRIDE.set(dict(values) if values else None)
+    try:
+        yield
+    finally:
+        _SETTINGS_OVERRIDE.reset(token)
+
+
 def clear_settings_cache() -> None:
-    get_settings.cache_clear()
+    _get_live_settings.cache_clear()

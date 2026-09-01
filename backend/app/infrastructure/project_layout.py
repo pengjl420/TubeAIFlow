@@ -1,9 +1,17 @@
 import json
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
 from app.models.project import Project
 from app.infrastructure.file_storage import project_dir
+
+
+_PROJECT_CONFIG_OVERRIDES: ContextVar[dict[str, dict] | None] = ContextVar(
+    "tubeaifolw_project_config_overrides", default=None
+)
 
 
 def get_project_output_dir(project: Project, workspace_dir: Path) -> Path:
@@ -94,6 +102,9 @@ def safe_filename_stem(value: str) -> str:
 
 
 def load_project_config(project: Project) -> dict:
+    overrides = _PROJECT_CONFIG_OVERRIDES.get()
+    if overrides and project.id in overrides:
+        return dict(overrides[project.id])
     if not project.config_json:
         return {}
     try:
@@ -101,3 +112,15 @@ def load_project_config(project: Project) -> dict:
     except json.JSONDecodeError:
         return {}
     return data if isinstance(data, dict) else {}
+
+
+@contextmanager
+def use_project_config_snapshot(project_id: str, values: dict | None) -> Iterator[None]:
+    current = dict(_PROJECT_CONFIG_OVERRIDES.get() or {})
+    if values is not None:
+        current[project_id] = dict(values)
+    token = _PROJECT_CONFIG_OVERRIDES.set(current or None)
+    try:
+        yield
+    finally:
+        _PROJECT_CONFIG_OVERRIDES.reset(token)

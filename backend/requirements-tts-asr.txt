@@ -1,0 +1,7 @@
+# Optional local TTS and offline subtitle-alignment runtimes.
+einops==0.8.2
+librosa==0.11.0
+onnxruntime==1.27.0
+soundfile==0.14.0
+sox==1.5.0
+faster-whisper==1.2.1

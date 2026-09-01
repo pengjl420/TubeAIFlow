@@ -1,0 +1,11 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+extend-select = ["C901"]
+
+[tool.ruff.lint.mccabe]
+# Existing workflow code is being reduced incrementally; prevent regressions
+# above the current quality-check baseline while avoiding a risky bulk rewrite.
+max-complexity = 25

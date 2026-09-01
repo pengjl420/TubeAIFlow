@@ -44,9 +44,9 @@ From the project root, double-click:
 
 The start script uses the existing backend virtual environment without requiring a
 system-wide Python on `PATH`. If the environment does not exist, Python 3.12 is required
-once to create it. The launcher installs missing dependencies, keeps one visible backend
-command window for runtime logs, and starts the frontend without another persistent window.
-It records both process IDs and writes frontend output to `backend/workspace/logs`. Restart
+once to create it. The launcher installs missing dependencies and starts both services in
+the background. It records both process IDs and writes rotating Engine logs plus backend
+and frontend process output to `backend/workspace/logs`. Restart
 uses the recorded process trees plus listener ports, so the previous instance is stopped
 before new processes are created.
 Backend runtime configuration is loaded from the local SQLite system settings table.
@@ -60,6 +60,11 @@ python -m venv .venv
 pip install -r requirements.txt
 python -m app.run
 ```
+
+`requirements.txt` remains the full Windows local-AI installation. Environments that only
+need the Engine and cloud Providers can install `requirements-core.txt`; local CUDA models
+and TTS/ASR integrations are split into `requirements-local-ai-cu128.txt` and
+`requirements-tts-asr.txt`.
 
 ## Frontend
 
@@ -78,6 +83,7 @@ pytest -q
 ruff check app tests
 
 cd ..\frontend
+npm test
 npm run build
 ```
 

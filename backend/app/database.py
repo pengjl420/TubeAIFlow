@@ -1,16 +1,19 @@
 from collections.abc import Generator
 from datetime import datetime, timezone
 import json
+import logging
 import shutil
 import sqlite3
 from pathlib import Path
 
+from sqlalchemy import event
 from sqlmodel import Session, SQLModel, create_engine
 
 from app.config import DATABASE_PATH
 
 
-LATEST_SCHEMA_VERSION = 15
+LATEST_SCHEMA_VERSION = 16
+logger = logging.getLogger(__name__)
 
 
 DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -18,6 +21,13 @@ engine = create_engine(
     f"sqlite:///{DATABASE_PATH}",
     connect_args={"check_same_thread": False, "timeout": 30},
 )
+
+
+@event.listens_for(engine, "connect")
+def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
 
 
 TASK_RUN_MIGRATION = """
@@ -439,6 +449,7 @@ def _apply_migrations() -> None:
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_voice_generation_tasks_running "
             "ON voice_generation_tasks (status) WHERE status = 'running'",
         ],
+        16: [],
     }
     with engine.begin() as connection:
         connection.exec_driver_sql(
@@ -458,6 +469,8 @@ def _apply_migrations() -> None:
                 connection.exec_driver_sql(statement)
             if version == 3:
                 _migrate_source_subtitles(connection)
+            if version == 16:
+                _install_referential_integrity_triggers(connection)
             connection.exec_driver_sql(
                 "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
                 (version, utc_now_iso()),
@@ -550,6 +563,83 @@ def _migrate_source_subtitles(connection) -> None:
         )
 
 
+def _install_referential_integrity_triggers(connection) -> None:
+    """Protect new writes while legacy tables transition to native foreign keys."""
+    relationships = (
+        ("segments", "project_id", "projects", "id"),
+        ("task_runs", "project_id", "projects", "id"),
+        ("subtitle_cues", "project_id", "projects", "id"),
+        ("visual_scenes", "project_id", "projects", "id"),
+        ("media_shots", "media_file_id", "media_files", "id"),
+        ("media_keyframes", "media_shot_id", "media_shots", "id"),
+        ("scene_assignments", "project_id", "projects", "id"),
+        ("scene_assignments", "scene_id", "visual_scenes", "id"),
+        ("scene_assignments", "media_shot_id", "media_shots", "id"),
+        ("generated_image_variants", "project_id", "projects", "id"),
+        ("generated_image_variants", "scene_id", "visual_scenes", "id"),
+        ("batch_items", "batch_id", "batch_jobs", "id"),
+        ("batch_items", "project_id", "projects", "id"),
+        ("avatar_generation_tasks", "avatar_profile_id", "avatar_profiles", "id"),
+        ("avatar_clips", "task_id", "avatar_generation_tasks", "id"),
+        ("voice_generation_tasks", "voice_profile_id", "voice_profiles", "id"),
+    )
+    tables = {
+        row[0]
+        for row in connection.exec_driver_sql(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).fetchall()
+    }
+    for child, child_column, parent, parent_column in relationships:
+        if child not in tables or parent not in tables:
+            continue
+        key = f"{child}_{child_column}_{parent}"
+        for operation in ("INSERT", "UPDATE OF " + child_column):
+            suffix = "insert" if operation == "INSERT" else "update"
+            connection.exec_driver_sql(
+                f"""
+                CREATE TRIGGER IF NOT EXISTS fk_{key}_{suffix}
+                BEFORE {operation} ON {child}
+                FOR EACH ROW
+                WHEN NEW.{child_column} IS NOT NULL
+                  AND NOT EXISTS (
+                    SELECT 1 FROM {parent} WHERE {parent_column} = NEW.{child_column}
+                  )
+                BEGIN
+                    SELECT RAISE(ABORT, 'referential integrity: {child}.{child_column}');
+                END
+                """
+            )
+
+
+def _referential_integrity_violations(connection) -> list[str]:
+    checks = (
+        ("segments", "project_id", "projects"),
+        ("task_runs", "project_id", "projects"),
+        ("subtitle_cues", "project_id", "projects"),
+        ("visual_scenes", "project_id", "projects"),
+        ("media_shots", "media_file_id", "media_files"),
+        ("scene_assignments", "scene_id", "visual_scenes"),
+        ("scene_assignments", "media_shot_id", "media_shots"),
+    )
+    tables = {
+        row[0]
+        for row in connection.exec_driver_sql(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).fetchall()
+    }
+    violations = []
+    for child, column, parent in checks:
+        if child not in tables or parent not in tables:
+            continue
+        count = connection.exec_driver_sql(
+            f"SELECT COUNT(*) FROM {child} c LEFT JOIN {parent} p ON p.id = c.{column} "
+            f"WHERE c.{column} IS NOT NULL AND p.id IS NULL"
+        ).scalar_one()
+        if count:
+            violations.append(f"{child}.{column}: {count}")
+    return violations
+
+
 def create_db_and_tables() -> None:
     # Import all models before create_all so new databases receive the full schema.
     import app.models  # noqa: F401
@@ -558,6 +648,8 @@ def create_db_and_tables() -> None:
     try:
         _apply_migrations()
         SQLModel.metadata.create_all(engine)
+        with engine.begin() as connection:
+            _install_referential_integrity_triggers(connection)
         _validate_database()
     except Exception:
         engine.dispose()
@@ -606,6 +698,12 @@ def _validate_database() -> None:
         if int(version) != LATEST_SCHEMA_VERSION:
             raise RuntimeError(
                 f"Database schema version is {version}, expected {LATEST_SCHEMA_VERSION}"
+            )
+        violations = _referential_integrity_violations(connection)
+        if violations:
+            logger.warning(
+                "Legacy orphaned database references require repair: %s",
+                ", ".join(violations),
             )
 
 

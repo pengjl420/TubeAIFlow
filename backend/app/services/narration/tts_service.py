@@ -8,7 +8,7 @@ from pathlib import Path
 
 from sqlmodel import Session, select
 
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.integrations.tts.runner_io import write_json
 from app.models.project import Project
 from app.providers import provider_registry
@@ -289,71 +289,93 @@ def _validate_configuration(project: Project, segments: list[Segment]) -> tuple[
     if not reference_audio_path.is_file():
         raise ValueError("项目配置的参考音频文件不存在，请重新上传参考音频")
     engine = _project_tts_engine(project)
+    required_paths = _required_engine_paths(settings, engine)
+    for name, path in required_paths.items():
+        if path is None or not path.exists():
+            raise ValueError(f"{name} is not configured or does not exist: {path}")
+    _validate_engine_assets(settings, project, engine)
+    return engine, reference_audio_path
+
+
+def _required_engine_paths(settings: Settings, engine: str) -> dict[str, Path | None]:
     if engine == "qwen3_tts":
-        required_paths = {
+        return {
             "QWEN_TTS_ROOT": settings.qwen_tts_root,
             "QWEN_TTS_PYTHON": settings.qwen_tts_python,
             "QWEN_TTS_MODEL_DIR": settings.qwen_tts_model_dir,
         }
-    elif engine == "cosyvoice":
-        required_paths = {
+    if engine == "cosyvoice":
+        return {
             "COSYVOICE_ROOT": settings.cosyvoice_root,
             "COSYVOICE_PYTHON": settings.cosyvoice_python,
             "COSYVOICE_MODEL_DIR": settings.cosyvoice_model_dir,
         }
-    elif engine == "index_tts":
-        required_paths = {
+    if engine == "index_tts":
+        return {
             "INDEX_TTS_ROOT": settings.index_tts_root,
             "INDEX_TTS_PYTHON": settings.index_tts_python,
             "INDEX_TTS_MODEL_DIR": settings.index_tts_model_dir,
         }
-    elif engine == "moss_tts":
-        required_paths = {
+    if engine == "moss_tts":
+        return {
             "MOSS_TTS_ROOT": settings.moss_tts_root,
             "MOSS_TTS_PYTHON": settings.moss_tts_python,
             "MOSS_TTS_MODEL_DIR": settings.moss_tts_model_dir,
             "MOSS_TTS_CODEC_DIR": settings.moss_tts_codec_dir,
         }
-    else:
-        raise ValueError(f"Unsupported TTS engine: {engine}")
+    raise ValueError(f"Unsupported TTS engine: {engine}")
 
-    for name, path in required_paths.items():
-        if path is None or not path.exists():
-            raise ValueError(f"{name} is not configured or does not exist: {path}")
+
+def _validate_engine_assets(settings: Settings, project: Project, engine: str) -> None:
     if engine == "qwen3_tts":
-        if not (settings.qwen_tts_root / "qwen_tts").is_dir():
-            raise ValueError("Qwen3-TTS source package is missing under qwen_tts_root")
-        model_config_path = settings.qwen_tts_model_dir / "config.json"
-        if not model_config_path.is_file():
-            raise ValueError("Qwen3-TTS model config is missing")
-        try:
-            model_config = json.loads(model_config_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise ValueError("Qwen3-TTS model config cannot be read") from exc
-        if model_config.get("tts_model_type") != "base":
-            raise ValueError("Qwen3-TTS voice cloning requires a Base model")
+        _validate_qwen_assets(settings)
     elif engine == "cosyvoice":
-        if not (settings.cosyvoice_root / "cosyvoice").is_dir():
-            raise ValueError("CosyVoice source package is missing under cosyvoice_root")
-        model_configs = ("cosyvoice3.yaml", "cosyvoice2.yaml", "cosyvoice.yaml")
-        if not any((settings.cosyvoice_model_dir / name).is_file() for name in model_configs):
-            raise ValueError("CosyVoice model config is missing")
-        if not _project_reference_audio_text(project):
-            raise ValueError("CosyVoice zero-shot voice cloning requires the reference audio transcript")
+        _validate_cosyvoice_assets(settings, project)
     elif engine == "index_tts":
-        if not (settings.index_tts_root / "indextts" / "infer.py").is_file():
-            raise ValueError("IndexTTS source package is missing")
-        for name in ("bigvgan_generator.pth", "bpe.model", "gpt.pth", "config.yaml"):
-            if not (settings.index_tts_model_dir / name).is_file():
-                raise ValueError(f"IndexTTS model file is missing: {name}")
+        _validate_index_assets(settings)
     elif engine == "moss_tts":
-        if not (settings.moss_tts_root / "moss_tts_local_v1.5" / "streaming.py").is_file():
-            raise ValueError("MOSS-TTS Local v1.5 source package is missing")
-        if not (settings.moss_tts_model_dir / "config.json").is_file():
-            raise ValueError("MOSS-TTS model config is missing")
-        if not (settings.moss_tts_codec_dir / "config.json").is_file():
-            raise ValueError("MOSS-TTS audio tokenizer config is missing")
-    return engine, reference_audio_path
+        _validate_moss_assets(settings)
+
+
+def _validate_qwen_assets(settings: Settings) -> None:
+    if not (settings.qwen_tts_root / "qwen_tts").is_dir():
+        raise ValueError("Qwen3-TTS source package is missing under qwen_tts_root")
+    model_config_path = settings.qwen_tts_model_dir / "config.json"
+    if not model_config_path.is_file():
+        raise ValueError("Qwen3-TTS model config is missing")
+    try:
+        model_config = json.loads(model_config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("Qwen3-TTS model config cannot be read") from exc
+    if model_config.get("tts_model_type") != "base":
+        raise ValueError("Qwen3-TTS voice cloning requires a Base model")
+
+
+def _validate_cosyvoice_assets(settings: Settings, project: Project) -> None:
+    if not (settings.cosyvoice_root / "cosyvoice").is_dir():
+        raise ValueError("CosyVoice source package is missing under cosyvoice_root")
+    model_configs = ("cosyvoice3.yaml", "cosyvoice2.yaml", "cosyvoice.yaml")
+    if not any((settings.cosyvoice_model_dir / name).is_file() for name in model_configs):
+        raise ValueError("CosyVoice model config is missing")
+    if not _project_reference_audio_text(project):
+        raise ValueError("CosyVoice zero-shot voice cloning requires the reference audio transcript")
+
+
+def _validate_index_assets(settings: Settings) -> None:
+    if not (settings.index_tts_root / "indextts" / "infer.py").is_file():
+        raise ValueError("IndexTTS source package is missing")
+    for name in ("bigvgan_generator.pth", "bpe.model", "gpt.pth", "config.yaml"):
+        if not (settings.index_tts_model_dir / name).is_file():
+            raise ValueError(f"IndexTTS model file is missing: {name}")
+
+
+def _validate_moss_assets(settings: Settings) -> None:
+    if not (settings.moss_tts_root / "moss_tts_local_v1.5" / "streaming.py").is_file():
+        raise ValueError("MOSS-TTS Local v1.5 source package is missing")
+    if not (settings.moss_tts_model_dir / "config.json").is_file():
+        raise ValueError("MOSS-TTS model config is missing")
+    if not (settings.moss_tts_codec_dir / "config.json").is_file():
+        raise ValueError("MOSS-TTS audio tokenizer config is missing")
 
 
 def _project_tts_engine(project: Project) -> str:

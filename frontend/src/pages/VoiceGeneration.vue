@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { AudioLines, CheckCircle2, Clock3, Download, Loader2, Pause, Play, RefreshCw, RotateCcw, Trash2, XCircle } from 'lucide-vue-next'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { AudioLines, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Download, Loader2, Pause, Play, RefreshCw, RotateCcw, Search, Trash2, XCircle } from 'lucide-vue-next'
 import { listVoices, type VoiceProfile } from '../api/voices'
 import { voiceTagText } from '../utils/tts'
 import {
@@ -23,6 +23,11 @@ const outputFilename = ref('配音.wav')
 const submitting = ref(false)
 const loading = ref(false)
 const operatingTaskId = ref('')
+const taskSearch = ref('')
+const statusFilter = ref('all')
+const taskPage = ref(1)
+const pageSize = ref(10)
+const lastUpdatedAt = ref<Date | null>(null)
 const error = ref('')
 let pollTimer: number | undefined
 usePageFeedback(error, undefined, { errorTitle: '配音生成失败' })
@@ -30,6 +35,15 @@ usePageFeedback(error, undefined, { errorTitle: '配音生成失败' })
 const transcriptLines = computed(() => text.value.split(/\r\n|\n|\r/).map(line => line.trim()).filter(Boolean))
 const ready = computed(() => Boolean(voiceProfileId.value && transcriptLines.value.length && outputFilename.value.trim()))
 const activeCount = computed(() => tasks.value.filter(task => ['queued', 'running'].includes(task.status)).length)
+const filteredTasks = computed(() => {
+  const query = taskSearch.value.trim().toLocaleLowerCase()
+  const priority: Record<string, number> = { running: 0, queued: 1, paused: 2, failed: 3, completed: 4 }
+  return tasks.value.filter(task => statusFilter.value === 'all' || task.status === statusFilter.value)
+    .filter(task => !query || [task.output_filename, task.voice_profile_name, task.text].some(value => value.toLocaleLowerCase().includes(query)))
+    .slice().sort((a, b) => (priority[a.status] ?? 9) - (priority[b.status] ?? 9) || new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+})
+const totalPages = computed(() => Math.max(1, Math.ceil(filteredTasks.value.length / pageSize.value)))
+const pagedTasks = computed(() => filteredTasks.value.slice((taskPage.value - 1) * pageSize.value, taskPage.value * pageSize.value))
 
 function taskSegments(task: VoiceGenerationTask) {
   return task.segments || []
@@ -45,6 +59,7 @@ async function loadPage(silent = false) {
     const [voiceItems, taskItems] = await Promise.all([listVoices(), listVoiceGenerationTasks()])
     voices.value = voiceItems
     tasks.value = taskItems
+    lastUpdatedAt.value = new Date()
     if (!voiceProfileId.value && voiceItems.length) voiceProfileId.value = voiceItems[0].id
   } catch (err) {
     if (!silent) error.value = err instanceof Error ? err.message : '页面数据加载失败'
@@ -139,9 +154,12 @@ async function deleteTask(task: VoiceGenerationTask) {
 const formatDate = (value: string | null) => value ? new Date(value).toLocaleString() : '—'
 const formatDuration = (value: number | null) => value === null ? '—' : `${value.toFixed(1)} 秒`
 
+watch([taskSearch, statusFilter, pageSize], () => { taskPage.value = 1 })
+watch(totalPages, value => { if (taskPage.value > value) taskPage.value = value })
+
 onMounted(async () => {
   await loadPage()
-  pollTimer = window.setInterval(() => void loadPage(true), 2500)
+  pollTimer = window.setInterval(() => { if (!document.hidden && activeCount.value > 0) void loadPage(true) }, 2500)
 })
 onBeforeUnmount(() => {
   if (pollTimer !== undefined) window.clearInterval(pollTimer)
@@ -169,12 +187,12 @@ onBeforeUnmount(() => {
           </label>
           <label class="field">
             <span>输出音频文件名 <b>*</b></span>
-            <input v-model="outputFilename" maxlength="200" placeholder="例如：人物开场白.wav" />
+            <input v-model="outputFilename" maxlength="200" aria-label="输出音频文件名" placeholder="例如：人物开场白.wav" />
             <small>完整音频保留该名称；分段命名为“人物开场白_0001.wav”。</small>
           </label>
           <label class="field wide">
             <span>逐字稿文本 <b>*</b><em>{{ text.length }} / 50000 · {{ transcriptLines.length }} 段</em></span>
-            <textarea v-model="text" maxlength="50000" rows="12" placeholder="每行输入一个需要单独生成的配音段落……" />
+            <textarea v-model="text" maxlength="50000" rows="12" aria-label="逐字稿文本" placeholder="每行输入一个需要单独生成的配音段落……" />
             <small>仅以换行符作为分段边界；空行会被忽略，不按标点或字数二次切分。</small>
           </label>
         </div>
@@ -202,12 +220,18 @@ onBeforeUnmount(() => {
 
     <article class="panel task-panel">
       <header>
-        <span class="panel-icon purple"><AudioLines :size="21" /></span><div><h2>生成记录</h2><p>状态每 2.5 秒自动刷新。</p></div>
+        <span class="panel-icon purple"><AudioLines :size="21" /></span><div><h2>生成记录</h2><p>{{ activeCount ? '任务运行期间自动刷新' : '当前没有运行中的任务' }}<span v-if="lastUpdatedAt"> · {{ lastUpdatedAt.toLocaleTimeString() }} 更新</span></p></div>
         <button class="refresh" type="button" :disabled="loading" @click="loadPage()"><RefreshCw :class="{ spin: loading }" :size="15" />{{ loading ? '刷新中' : '刷新' }}</button>
       </header>
+      <div v-if="tasks.length" class="task-toolbar">
+        <label><Search :size="16" /><input v-model="taskSearch" type="search" aria-label="搜索配音任务" placeholder="搜索文件、音色或文本…" /></label>
+        <select v-model="statusFilter" aria-label="配音任务状态筛选"><option value="all">全部状态</option><option value="running">正在生成</option><option value="queued">排队中</option><option value="paused">已暂停</option><option value="failed">失败</option><option value="completed">已完成</option></select>
+        <span>{{ filteredTasks.length }} 个匹配任务</span>
+      </div>
       <div v-if="!tasks.length" class="empty">尚未生成配音。</div>
+      <div v-else-if="!pagedTasks.length" class="empty">没有匹配的配音任务。</div>
       <div v-else class="task-list">
-        <div v-for="task in tasks" :key="task.id" class="task-row">
+        <div v-for="task in pagedTasks" :key="task.id" class="task-row">
           <span class="status-icon" :class="task.status">
             <Loader2 v-if="task.status === 'running'" class="spin" :size="19" /><Clock3 v-else-if="task.status === 'queued'" :size="19" /><Pause v-else-if="task.status === 'paused'" :size="19" /><CheckCircle2 v-else-if="task.status === 'completed'" :size="19" /><XCircle v-else :size="19" />
           </span>
@@ -235,6 +259,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </div>
+      <footer v-if="filteredTasks.length" class="task-pagination"><span>共 {{ filteredTasks.length }} 条</span><label>每页 <select v-model="pageSize" aria-label="每页配音任务数"><option :value="10">10</option><option :value="20">20</option><option :value="50">50</option></select></label><button type="button" :disabled="taskPage <= 1" aria-label="上一页" @click="taskPage--"><ChevronLeft :size="16" /></button><strong>{{ taskPage }} / {{ totalPages }}</strong><button type="button" :disabled="taskPage >= totalPages" aria-label="下一页" @click="taskPage++"><ChevronRight :size="16" /></button></footer>
     </article>
   </section>
 </template>
@@ -335,4 +360,8 @@ onBeforeUnmount(() => {
     flex: 0 0 auto;
   }
 }
+</style>
+
+<style scoped>
+.task-toolbar{align-items:center;display:flex;gap:9px;margin-bottom:12px}.task-toolbar>label{align-items:center;border:1px solid #dce3ec;border-radius:8px;color:#8290a3;display:flex;height:38px;padding:0 10px;width:min(360px,45%)}.task-toolbar input{border:0;min-width:0;outline:0;padding:0 8px;width:100%}.task-toolbar select,.task-pagination select{background:#fff;border:1px solid #dce3ec;border-radius:7px;min-height:38px;padding:0 28px 0 10px}.task-toolbar>span{color:#7a8699;font-size:11px;margin-left:auto}.task-pagination{align-items:center;border-top:1px solid #edf0f4;display:flex;gap:9px;margin-top:14px;padding-top:12px}.task-pagination>span{color:#718096;font-size:12px;margin-right:auto}.task-pagination label{align-items:center;color:#718096;display:flex;font-size:11px;gap:6px}.task-pagination select{min-height:32px}.task-pagination button{align-items:center;background:#fff;border:1px solid #dce3ec;border-radius:6px;color:#536078;display:flex;height:34px;justify-content:center;min-height:34px;width:34px}.task-pagination strong{font-size:11px}@media(max-width:650px){.task-toolbar{align-items:stretch;display:grid;grid-template-columns:1fr 140px}.task-toolbar>label{width:100%}.task-toolbar>span{grid-column:1/-1;margin:0}.task-pagination{flex-wrap:wrap}.task-pagination>span{flex-basis:100%}}
 </style>

@@ -332,7 +332,7 @@ onBeforeUnmount(() => { if (previewUrl.value.startsWith('blob:')) URL.revokeObje
         <button class="voice-outline" type="button" :disabled="importing" @click="batchInput?.click()">
           <Upload :size="17" /> {{ importing ? '导入中…' : '批量导入' }}
         </button>
-        <input ref="batchInput" hidden multiple type="file" accept="audio/wav,audio/mpeg,audio/flac,audio/mp4,.wav,.mp3,.flac,.m4a" @change="batchImport" />
+        <input ref="batchInput" hidden multiple type="file" accept="audio/wav,audio/mpeg,audio/flac,audio/mp4,.wav,.mp3,.flac,.m4a" aria-label="批量导入音色文件" @change="batchImport" />
         <button class="voice-help" type="button" @click="showCompatibility"><CircleHelp :size="17" /> 引擎兼容说明</button>
       </div>
     </header>
@@ -346,11 +346,11 @@ onBeforeUnmount(() => { if (previewUrl.value.startsWith('blob:')) URL.revokeObje
     </div>
 
     <div class="voice-toolbar">
-      <label class="voice-search"><Search :size="16" /><input v-model="search" type="search" placeholder="搜索音色名称、文件或引擎…" @input="page = 1" /></label>
-      <select v-model="engineFilter" @change="page = 1"><option value="">配音引擎</option><option value="index_tts">IndexTTS</option><option value="moss_tts">MOSS-TTS</option><option value="cosyvoice">CosyVoice</option><option value="qwen3_tts">Qwen3-TTS（兼容）</option></select>
+      <label class="voice-search"><Search :size="16" /><input v-model="search" type="search" aria-label="搜索音色" placeholder="搜索音色名称、文件或引擎…" @input="page = 1" /></label>
+      <select v-model="engineFilter" aria-label="配音引擎筛选" @change="page = 1"><option value="">配音引擎</option><option value="index_tts">IndexTTS</option><option value="moss_tts">MOSS-TTS</option><option value="cosyvoice">CosyVoice</option><option value="qwen3_tts">Qwen3-TTS（兼容）</option></select>
       <select v-model="languageFilter" aria-label="语言筛选" @change="page = 1"><option value="">全部语言</option><option value="zh-CN">中文</option><option value="en-US">英文</option><option value="yue-HK">粤语</option></select>
-      <select v-model="textFilter" @change="page = 1"><option value="">参考文本状态</option><option value="ready">已上传参考文本</option><option value="missing">缺少参考文本</option></select>
-      <label class="exception-toggle"><span>只看异常</span><input v-model="onlyExceptions" type="checkbox" @change="page = 1" /><i></i></label>
+      <select v-model="textFilter" aria-label="参考文本状态筛选" @change="page = 1"><option value="">参考文本状态</option><option value="ready">已上传参考文本</option><option value="missing">缺少参考文本</option></select>
+      <label class="exception-toggle"><span>只看异常</span><input v-model="onlyExceptions" type="checkbox" aria-label="只看异常音色" @change="page = 1" /><i></i></label>
       <button class="icon-button" title="刷新" type="button" @click="load()"><RefreshCw :size="16" /></button>
       <button class="icon-button" title="重置筛选" type="button" @click="resetFilters"><Settings2 :size="16" /></button>
     </div>
@@ -378,8 +378,8 @@ onBeforeUnmount(() => { if (previewUrl.value.startsWith('blob:')) URL.revokeObje
       </article>
       <footer class="voice-pagination">
         <span>共 {{ filteredVoices.length }} 条</span>
-        <div><button type="button" :disabled="page <= 1" @click="page--"><ChevronLeft :size="15" /></button><span class="active">{{ page }}</span><span>/ {{ totalPages }}</span><button type="button" :disabled="page >= totalPages" @click="page++"><ChevronRight :size="15" /></button></div>
-        <select v-model="pageSize" @change="page = 1"><option :value="10">10 条/页</option><option :value="20">20 条/页</option><option :value="50">50 条/页</option></select>
+        <div><button type="button" :disabled="page <= 1" aria-label="上一页" @click="page--"><ChevronLeft :size="15" /></button><span class="active">{{ page }}</span><span>/ {{ totalPages }}</span><button type="button" :disabled="page >= totalPages" aria-label="下一页" @click="page++"><ChevronRight :size="15" /></button></div>
+        <select v-model="pageSize" aria-label="每页音色数" @change="page = 1"><option :value="10">10 条/页</option><option :value="20">20 条/页</option><option :value="50">50 条/页</option></select>
       </footer>
     </div>
 
@@ -404,7 +404,7 @@ onBeforeUnmount(() => { if (previewUrl.value.startsWith('blob:')) URL.revokeObje
               <div class="reference-file"><span><strong>{{ audioFile?.name || selectedVoice?.original_filename || '尚未选择音频' }}</strong><small>{{ audioFile ? `${(audioFile.size / 1024 / 1024).toFixed(1)} MB` : 'WAV / MP3 / FLAC / M4A' }}</small></span><div><button type="button" @click="audioInput?.click()">{{ selectedVoice ? '更换音频' : '选择音频' }}</button><a v-if="selectedVoice" :href="audioUrl(selectedVoice)" :download="selectedVoice.original_filename"><Download :size="14" /> 下载原文件</a></div></div>
               <AudioPlayer v-if="previewUrl" :key="previewUrl" :src="previewUrl" />
               <button v-else class="audio-drop" type="button" @click="audioInput?.click()"><FileAudio :size="25" /><span>选择参考音频文件</span></button>
-              <input ref="audioInput" hidden type="file" accept="audio/wav,audio/mpeg,audio/flac,audio/mp4,.wav,.mp3,.flac,.m4a" @change="selectAudio" />
+              <input ref="audioInput" hidden type="file" accept="audio/wav,audio/mpeg,audio/flac,audio/mp4,.wav,.mp3,.flac,.m4a" aria-label="选择参考音频文件" @change="selectAudio" />
             </div>
           </section>
 

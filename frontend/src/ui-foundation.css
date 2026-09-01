@@ -1,0 +1,101 @@
+:root {
+  --primary: #075bf5;
+  --primary-hover: #004de4;
+  --primary-soft: #eef3ff;
+  --ink: #172033;
+  --ink-soft: #68758a;
+  --surface: #ffffff;
+  --surface-soft: #f7f9fc;
+  --line: #e1e7ef;
+  --line-strong: #cfd8e5;
+  --danger: #d74855;
+  --warning: #b8750b;
+  --success: #079b6a;
+  --radius-sm: 7px;
+  --radius-md: 10px;
+  --radius-lg: 13px;
+  --shadow-card: 0 5px 22px rgba(42, 57, 83, .045);
+}
+
+body { color: var(--ink); background: #f5f8fb; }
+button, input, textarea, select { font-size: max(12px, 1em); }
+button { min-height: 36px; }
+small, .muted { line-height: 1.45; }
+
+.taf-side-nav { gap: 12px; }
+.taf-side-nav .nav-group { display: grid; gap: 3px; }
+.taf-side-nav .nav-group-label { color: #9aa4b4; font-size: 10px; font-weight: 750; letter-spacing: .08em; padding: 0 14px 5px; }
+.taf-side-nav a { min-height: 43px; }
+
+.taf-page-heading { margin-bottom: 20px; }
+.taf-page-heading h1 { line-height: 1.18; }
+.taf-page-heading p { line-height: 1.55; }
+
+/* Shared production-page density: readable for long Windows desktop sessions. */
+.taf-main .voice-page-header p,
+.taf-main .voice-metric small,
+.taf-main .voice-metric em,
+.taf-main .voice-toolbar input,
+.taf-main .voice-toolbar select,
+.taf-main .voice-table-head,
+.taf-main .voice-table-row,
+.taf-main .voice-pagination,
+.taf-main .voice-bottom-cards small { font-size: 12px; }
+.taf-main .voice-table-row { min-height: 64px; }
+.taf-main .voice-badge,
+.taf-main .voice-language,
+.taf-main .voice-date,
+.taf-main .table-audio .audio-player-time { font-size: 10px; }
+.taf-main .voice-row-actions button,
+.taf-main .voice-pagination button { height: 34px; min-height: 34px; min-width: 34px; }
+.taf-main .voice-metrics { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+
+.settings-design-shell .settings-design-page input:not([type=checkbox]),
+.settings-design-shell .settings-design-page select,
+.settings-design-shell .settings-design-page textarea { font-size: 12px; min-height: 36px; }
+.settings-design-shell .form-list label,
+.settings-design-shell .form-grid label,
+.settings-design-shell .transition-table .table-head,
+.settings-design-shell .transition-table label { font-size: 11px; }
+.settings-design-shell .input-action button,
+.settings-design-shell .ghost-button { font-size: 11px; min-height: 36px; }
+.settings-design-shell .setting-card h3 { font-size: 14px; }
+
+@media (max-width: 1250px) {
+  .taf-main .voice-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .taf-main .voice-metric:nth-child(4), .taf-main .voice-metric:nth-child(5) { min-height: 92px; }
+}
+
+@media (max-width: 1180px) and (min-width: 901px) {
+  .settings-workspace { grid-template-columns: 174px minmax(0, 1fr) !important; }
+  .setting-grid.two, .setting-grid.three { grid-template-columns: 1fr !important; }
+  .form-list label { grid-template-columns: 126px minmax(0, 1fr) !important; }
+}
+
+@media (max-width: 900px) and (min-width: 681px) {
+  .taf-side-nav .nav-group-label { display: none; }
+  .taf-side-nav { gap: 5px; }
+  .taf-side-nav a { position: relative; }
+  .taf-side-nav a:hover::after, .taf-side-nav a:focus-visible::after {
+    background: #172033; border-radius: 6px; color: #fff; content: attr(title); font-size: 11px;
+    left: 64px; padding: 6px 8px; position: absolute; white-space: nowrap; z-index: 40;
+  }
+  .settings-workspace { display: block !important; }
+  .setting-grid.two, .setting-grid.three { grid-template-columns: 1fr !important; }
+}
+
+@media (max-width: 680px) {
+  .taf-side-nav { align-items: stretch; display: grid; gap: 0; grid-template-columns: repeat(6, minmax(0, 1fr)); width: 100%; }
+  .taf-side-nav .nav-group { display: contents; }
+  .taf-side-nav .nav-group-label { display: none; }
+  .taf-side-nav a:nth-child(n) { display: flex; }
+  .taf-side-nav a { min-width: 0; padding-inline: 2px !important; }
+  .taf-side-nav .nav-label { display: block !important; flex: none; font-size: 8px; line-height: 10px; max-width: 100%; min-height: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .taf-topbar .topbar-engine-state { display: none !important; }
+  .taf-topbar strong { font-size: 13px; }
+  .taf-topbar span { font-size: 10px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+}

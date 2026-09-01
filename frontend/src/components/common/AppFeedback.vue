@@ -4,10 +4,18 @@ import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { dismissToast, feedbackState, resolveConfirm } from '../../services/feedback'
 
 const confirmButton = ref<HTMLButtonElement | null>(null)
+const dialogCard = ref<HTMLElement | null>(null)
 let previousFocus: HTMLElement | null = null
 
 function handleKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape' && feedbackState.confirm) resolveConfirm(false)
+  if (event.key !== 'Tab' || !feedbackState.confirm || !dialogCard.value) return
+  const focusable = Array.from(dialogCard.value.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'))
+  if (!focusable.length) return
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
 }
 
 watch(
@@ -63,6 +71,7 @@ onBeforeUnmount(() => {
     <Transition name="app-dialog">
       <div v-if="feedbackState.confirm" class="app-dialog-backdrop" @mousedown.self="resolveConfirm(false)">
         <section
+          ref="dialogCard"
           class="app-dialog-card"
           :class="`is-${feedbackState.confirm.tone}`"
           role="alertdialog"

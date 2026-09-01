@@ -23,6 +23,7 @@ const router = createRouter({
     {
       path: '/settings',
       component: SettingsLayout,
+      meta: { title: '系统设置' },
       children: [
         { path: '', redirect: '/settings/general' },
         { path: ':section', component: SystemSettings },

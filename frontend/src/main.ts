@@ -5,6 +5,7 @@ import { clickOutside } from './directives/clickOutside'
 import router from './router'
 import './styles.css'
 import './settings-design.css'
+import './ui-foundation.css'
 
 createApp(App)
   .use(router)

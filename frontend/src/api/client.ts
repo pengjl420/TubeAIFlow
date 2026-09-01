@@ -12,6 +12,14 @@ interface ApiEnvelope<T> {
   success: boolean
   data?: T
   error?: string
+  code?: string
+}
+
+export interface EngineHealth {
+  status: string
+  product: string
+  engine_version: string
+  mode: string
 }
 
 export const apiClient = axios.create({
@@ -40,4 +48,8 @@ export function unwrap<T>(response: { data: ApiEnvelope<T> }): T {
     throw new Error('服务器返回了空数据')
   }
   return response.data.data
+}
+
+export async function getEngineHealth(): Promise<EngineHealth> {
+  return unwrap<EngineHealth>(await apiClient.get('/health', { timeout: 5000 }))
 }

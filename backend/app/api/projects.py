@@ -74,7 +74,7 @@ def list_projects(session: Session = Depends(get_session)) -> dict:
 def create_project(
     name: str = Form(...),
     reference_audio: UploadFile | None = File(None),
-    output_dir: str = Form(r"D:\video_darft"),
+    output_dir: str = Form(""),
     output_filename: str = Form(""),
     media_video_dir: str = Form(""),
     include_video: bool = Form(False),
@@ -96,6 +96,7 @@ def create_project(
         normalized_tts_engine = tts_engine.strip().lower()
         if normalized_tts_engine not in project_service.SUPPORTED_TTS_ENGINES:
             fail("Unsupported TTS engine")
+        resolved_output_dir = output_dir.strip() or str(get_settings().workspace_dir / "projects")
         project = project_service.create_project(
             session,
             name.strip(),
@@ -104,7 +105,7 @@ def create_project(
             session,
             project,
             name.strip(),
-            output_dir,
+            resolved_output_dir,
             output_filename,
             media_video_dir,
             normalized_tts_engine,
@@ -355,6 +356,41 @@ def save_script(project_id: str, payload: ScriptRequest, session: Session = Depe
     except ValueError as exc:
         logger.exception("Failed to save script for project %s", project_id)
         fail(str(exc))
+
+
+@router.get("/projects/{project_id}/script")
+def get_script(project_id: str, session: Session = Depends(get_session)) -> dict:
+    project = project_service.get_project(session, project_id)
+    if not project:
+        fail("Project not found", 404)
+    if not project.script_raw_path:
+        return ok({"text": "", "clean_text": ""})
+    try:
+        raw_path = ensure_inside_any(
+            Path(project.script_raw_path),
+            [get_project_work_dir(project, get_settings().workspace_dir)],
+        )
+        clean_path = (
+            ensure_inside_any(
+                Path(project.script_clean_path),
+                [get_project_work_dir(project, get_settings().workspace_dir)],
+            )
+            if project.script_clean_path
+            else None
+        )
+        return ok(
+            {
+                "text": raw_path.read_text(encoding="utf-8") if raw_path.is_file() else "",
+                "clean_text": (
+                    clean_path.read_text(encoding="utf-8")
+                    if clean_path is not None and clean_path.is_file()
+                    else ""
+                ),
+            }
+        )
+    except (OSError, ValueError) as exc:
+        logger.exception("Failed to read script for project %s", project_id)
+        fail(str(exc), 500)
 
 
 @router.post("/projects/{project_id}/reference-audio")

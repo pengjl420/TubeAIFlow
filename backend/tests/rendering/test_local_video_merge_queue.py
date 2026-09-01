@@ -28,7 +28,7 @@ class LocalVideoMergeQueueTests(unittest.TestCase):
     def test_multiple_tasks_run_one_by_one_in_queue_order(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             with Session(self.engine) as session:
-                first = local_video_merge_queue.enqueue(
+                local_video_merge_queue.enqueue(
                     session,
                     media_dir=directory,
                     output_dir=directory,

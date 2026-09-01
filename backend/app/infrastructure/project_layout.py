@@ -50,16 +50,27 @@ def get_final_prproj_path(project: Project, workspace_dir: Path) -> Path:
 def ensure_project_dirs(base_dir: Path) -> None:
     for relative in [
         "input",
+        "input/source",
         "segments",
         "audio/segments",
         "subtitles",
         "timeline",
         "logs",
+        "scenes",
+        "assets/local",
+        "assets/stock",
+        "assets/generated",
+        "assets/imported",
+        "cache",
         "storyboard",
         "media/generated_images",
         "media",
         "renders/scenes",
+        "renders/preview",
+        "renders/final",
         "reports",
+        "exports",
+        ".backup",
         "video/temp",
     ]:
         (base_dir / relative).mkdir(parents=True, exist_ok=True)

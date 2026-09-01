@@ -1,9 +1,16 @@
 from collections.abc import Generator
+from datetime import datetime, timezone
 import json
+import shutil
+import sqlite3
+from pathlib import Path
 
 from sqlmodel import Session, SQLModel, create_engine
 
 from app.config import DATABASE_PATH
+
+
+LATEST_SCHEMA_VERSION = 15
 
 
 DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -547,8 +554,59 @@ def create_db_and_tables() -> None:
     # Import all models before create_all so new databases receive the full schema.
     import app.models  # noqa: F401
 
-    _apply_migrations()
-    SQLModel.metadata.create_all(engine)
+    backup_path = _backup_database_before_migration()
+    try:
+        _apply_migrations()
+        SQLModel.metadata.create_all(engine)
+        _validate_database()
+    except Exception:
+        engine.dispose()
+        if backup_path is not None:
+            shutil.copy2(backup_path, _engine_database_path())
+        raise
+
+
+def _engine_database_path() -> Path:
+    database = engine.url.database
+    return Path(database).resolve() if database else DATABASE_PATH.resolve()
+
+
+def _backup_database_before_migration() -> Path | None:
+    database_path = _engine_database_path()
+    if not database_path.is_file() or database_path.stat().st_size == 0:
+        return None
+    with sqlite3.connect(database_path) as connection:
+        table = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
+        ).fetchone()
+        current_version = (
+            int(connection.execute("SELECT COALESCE(MAX(version), 0) FROM schema_migrations").fetchone()[0])
+            if table
+            else 0
+        )
+        if current_version >= LATEST_SCHEMA_VERSION:
+            return None
+        backup_dir = database_path.parent / ".backup"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        backup_path = backup_dir / f"{database_path.stem}-schema-{current_version}-{timestamp}.db"
+        with sqlite3.connect(backup_path) as backup:
+            connection.backup(backup)
+    return backup_path
+
+
+def _validate_database() -> None:
+    with engine.connect() as connection:
+        integrity = connection.exec_driver_sql("PRAGMA integrity_check").scalar_one()
+        if integrity != "ok":
+            raise RuntimeError(f"Database integrity check failed: {integrity}")
+        version = connection.exec_driver_sql(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_migrations"
+        ).scalar_one()
+        if int(version) != LATEST_SCHEMA_VERSION:
+            raise RuntimeError(
+                f"Database schema version is {version}, expected {LATEST_SCHEMA_VERSION}"
+            )
 
 
 def get_session() -> Generator[Session, None, None]:

@@ -3,6 +3,8 @@ export interface Project {
   name: string
   status: string
   output_dir?: string
+  script_raw_path?: string
+  script_clean_path?: string
   reference_audio_path?: string
   config?: {
     reference_audio_filename?: string

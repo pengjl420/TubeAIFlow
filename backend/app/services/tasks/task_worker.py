@@ -11,6 +11,7 @@ from app.infrastructure import process_runner as runtime_control
 from app.models.batch import BatchItem, BatchJob
 from app.models.project import Project
 from app.models.task import TaskRun
+from app.services.projects.project_descriptor_service import write_project_descriptor
 from app.services.tasks import task_service
 from app.shared.time import utc_now_iso
 from app.workflows import narration_generation, video_synthesis
@@ -331,6 +332,7 @@ def _complete_task(session: Session, task_id: str) -> None:
         session.add(item)
     batch = session.get(BatchJob, task.batch_id) if task.batch_id else None
     session.commit()
+    _sync_project_descriptor(project)
     if batch:
         refresh_batch_status(session, batch.id)
 
@@ -373,6 +375,7 @@ def _fail_task(
             for pending_task in task_service.list_batch_tasks(session, batch.id):
                 task_service.pause_queued_task(session, pending_task)
     session.commit()
+    _sync_project_descriptor(project)
     if batch:
         refresh_batch_status(session, batch.id)
 
@@ -406,6 +409,7 @@ def _cancel_task(session: Session, task_id: str, error: str) -> None:
         item.updated_at = now
         session.add(item)
     session.commit()
+    _sync_project_descriptor(project)
     if batch:
         refresh_batch_status(session, batch.id)
 
@@ -469,3 +473,12 @@ def _load_batch_config(batch: BatchJob) -> dict:
     except (TypeError, json.JSONDecodeError):
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def _sync_project_descriptor(project: Project | None) -> None:
+    if project is None:
+        return
+    try:
+        write_project_descriptor(project)
+    except (OSError, ValueError):
+        logger.exception("Failed to update project.json for project %s", project.id)

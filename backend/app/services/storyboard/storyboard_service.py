@@ -7,7 +7,7 @@ from sqlalchemy import delete
 from sqlmodel import Session, select
 
 from app.config import get_settings
-from app.infrastructure.file_storage import project_dir
+from app.infrastructure.atomic_files import write_json_atomic
 from app.infrastructure.project_layout import (
     ensure_project_dirs,
     get_output_stem,
@@ -384,7 +384,7 @@ def _serialize_scene(scene: VisualScene) -> dict:
 
 
 def _write_artifact(project: Project, scenes: list[dict], warnings: list[str]):
-    base_dir = project_dir(get_settings().workspace_dir, project.id)
+    base_dir = get_project_work_dir(project, get_settings().workspace_dir)
     ensure_project_dirs(base_dir)
     path = base_dir / "storyboard" / "scenes.json"
     payload = {
@@ -397,7 +397,5 @@ def _write_artifact(project: Project, scenes: list[dict], warnings: list[str]):
         "warnings": warnings,
         "scenes": scenes,
     }
-    temp_path = path.with_suffix(".json.tmp")
-    temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    temp_path.replace(path)
+    write_json_atomic(path, payload)
     return path

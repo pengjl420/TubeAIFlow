@@ -11,6 +11,7 @@ from sqlmodel import Session, select
 from app.config import get_settings
 from app.integrations.tts.runner_io import write_json
 from app.models.project import Project
+from app.providers import provider_registry
 from app.models.narration import Segment
 from app.models.narration import VoiceProfile
 from app.infrastructure import gpu_resource, process_runner as task_control
@@ -380,12 +381,10 @@ def _project_cosyvoice_speed(project: Project) -> float:
 
 
 def _engine_label(engine: str) -> str:
-    return {
-        "qwen3_tts": "Qwen3-TTS",
-        "cosyvoice": "CosyVoice",
-        "index_tts": "IndexTTS",
-        "moss_tts": "MOSS-TTS",
-    }.get(engine, engine)
+    try:
+        return provider_registry.get(engine).display_name
+    except ValueError:
+        return engine
 
 
 def _project_reference_audio_path(project: Project) -> Path | None:

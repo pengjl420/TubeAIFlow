@@ -1,8 +1,10 @@
-# TubeAIFlow
+# TubeAiFolw
 
-TubeAIFlow is currently a local, tool-oriented web app for segmented voice generation,
-local video merging, and digital-human synthesis. Project management, batch production,
-and the global task center are intentionally outside the current product scope.
+TubeAiFolw is a local-first AI production workflow for long-form YouTube and faceless
+video creators. During development it runs as a Vue Web UI plus a local FastAPI Engine.
+The project workflow is the primary product surface; segmented voice generation, local
+video merging, voice profiles, and digital-human synthesis remain available as compatible
+tools while they are progressively integrated into project-level workflows.
 
 Current voice-generation workflow:
 
@@ -36,7 +38,7 @@ backend/workspace/voice_generations/{task_id}/
 
 From the project root, double-click:
 
-- `Start_TubeAIFlow.bat` to start the backend and frontend
+- `Start_TubeAIFlow.bat` to start the backend and frontend (legacy-compatible filename)
 - `Restart_TubeAIFlow.bat` to stop the running app, then start again
 - `Start_TTS_WebUI.bat index_tts|moss_tts|cosyvoice` to run one engine's standalone WebUI
 
@@ -139,6 +141,6 @@ Provider generations remain append-only in the project's `work/pipeline.db`.
 - FFmpeg, ffprobe, all four TTS engines, workspace, host, and port are configured on the System Settings page.
 - On Windows 10/11 64-bit, the System Settings page can automatically download the latest FFmpeg release essentials build, verify its published SHA-256 checksum, install only `ffmpeg.exe` and `ffprobe.exe` under `workspace/tools/ffmpeg`, and save both absolute paths to SQLite. The downloaded tools are local runtime files and are not committed to Git.
 - The automatic FFmpeg installer uses the Windows builds linked by the FFmpeg project and currently downloads the GPLv3 Gyan essentials build from `https://www.gyan.dev/ffmpeg/builds/`.
-- Qwen3-TTS voice cloning works best when the voice profile includes an accurate transcript of the reference audio. Without it, TubeAIFlow automatically uses speaker-embedding-only mode.
+- Qwen3-TTS voice cloning works best when the voice profile includes an accurate transcript of the reference audio. Without it, TubeAiFolw automatically uses speaker-embedding-only mode.
 - CosyVoice uses zero-shot cloning and requires an exact transcript of the reference audio. Fun-CosyVoice 3 prompt formatting is handled automatically.
 - Host and port changes take effect after restarting the app.

@@ -9,13 +9,14 @@ from sqlmodel import Session, select
 
 from app.config import get_settings
 from app.models.narration import Segment, VoiceProfile
+from app.providers import ProviderCategory, provider_registry
 from app.models.project import Project
 from app.infrastructure.project_layout import load_project_config
 from app.shared.time import utc_now_iso
 
 
 SUPPORTED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".m4a"}
-SUPPORTED_TTS_ENGINES = {"qwen3_tts", "index_tts", "moss_tts", "cosyvoice"}
+SUPPORTED_TTS_ENGINES = provider_registry.legacy_ids(ProviderCategory.TTS)
 SUPPORTED_VOICE_LANGUAGES = {"zh-CN", "en-US", "yue-HK"}
 RECOMMENDED_ENGINE_BY_LANGUAGE = {
     "zh-CN": "index_tts",

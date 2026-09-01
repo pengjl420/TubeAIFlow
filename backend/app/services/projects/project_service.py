@@ -11,6 +11,7 @@ from app.models.narration import Segment
 from app.models.batch import BatchItem, BatchJob
 from app.models.media import GeneratedImageVariant, MediaFile, MediaShot, SceneAssignment
 from app.models.task import TaskRun
+from app.providers import ProviderCategory, provider_registry
 from app.models.storyboard import SubtitleCue, VisualScene
 from app.infrastructure.file_storage import ensure_inside_any, project_dir
 from app.infrastructure.recycle_bin import move_existing_to_recycle_bin
@@ -31,11 +32,12 @@ from app.infrastructure.project_layout import (
 )
 from app.services.narration.segmenter import split_script, split_script_with_ai
 from app.services.narration.text_cleaner import clean_script
+from app.services.projects.project_descriptor_service import write_project_descriptor
 from app.shared.time import elapsed_seconds, utc_now_iso
 
 
 DEFAULT_TTS_ENGINE = "index_tts"
-SUPPORTED_TTS_ENGINES = {DEFAULT_TTS_ENGINE, "moss_tts", "cosyvoice", "qwen3_tts"}
+SUPPORTED_TTS_ENGINES = provider_registry.legacy_ids(ProviderCategory.TTS)
 SEGMENTATION_MODE_NEWLINE = "newline"
 SEGMENTATION_MODE_AI = "ai"
 SUPPORTED_SEGMENTATION_MODES = {SEGMENTATION_MODE_NEWLINE, SEGMENTATION_MODE_AI}
@@ -79,7 +81,10 @@ GENERATING_STATUSES = {
 def create_project(session: Session, name: str, config: dict | None = None) -> Project:
     settings = get_settings()
     project_id = uuid.uuid4().hex[:12]
-    output_dir = project_dir(settings.workspace_dir, project_id)
+    output_dir = settings.workspace_dir / "projects"
+    project_directory_name = _available_project_directory_name(
+        output_dir, name, project_id
+    )
     project = Project(
         id=project_id,
         name=name,
@@ -91,6 +96,7 @@ def create_project(session: Session, name: str, config: dict | None = None) -> P
                 "segmentation_mode": SEGMENTATION_MODE_NEWLINE,
                 "storyboard_mode": STORYBOARD_MODE_AI,
                 "storyboard_transition_enabled": True,
+                "project_directory_name": project_directory_name,
                 **(config or {}),
             },
             ensure_ascii=False,
@@ -99,6 +105,8 @@ def create_project(session: Session, name: str, config: dict | None = None) -> P
     session.add(project)
     session.commit()
     session.refresh(project)
+    ensure_project_dirs(get_project_work_dir(project, settings.workspace_dir))
+    write_project_descriptor(project)
     return project
 
 
@@ -338,6 +346,7 @@ def save_script(session: Session, project: Project, raw_text: str) -> Project:
     session.add(project)
     session.commit()
     session.refresh(project)
+    write_project_descriptor(project)
     return project
 
 
@@ -438,6 +447,7 @@ def save_reference_audio(
     session.add(project)
     session.commit()
     session.refresh(project)
+    write_project_descriptor(project)
     return project
 
 
@@ -467,6 +477,7 @@ def update_output_settings(
     session.add(project)
     session.commit()
     session.refresh(project)
+    write_project_descriptor(project)
     return project
 
 
@@ -600,6 +611,7 @@ def update_project_settings(
     session.add(project)
     session.commit()
     session.refresh(project)
+    write_project_descriptor(project)
     return project
 
 
@@ -614,6 +626,7 @@ def ensure_output_filename(session: Session, project: Project) -> Project:
     session.add(project)
     session.commit()
     session.refresh(project)
+    write_project_descriptor(project)
     return project
 
 

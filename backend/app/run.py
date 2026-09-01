@@ -14,7 +14,7 @@ LOCK_PATH = BASE_DIR / "workspace" / "backend.lock"
 def main() -> None:
     lock_file = acquire_instance_lock(LOCK_PATH)
     if lock_file is None:
-        print("TubeAIFlow backend is already running. Stop it before starting another instance.")
+        print("TubeAiFolw Engine is already running. Stop it before starting another instance.")
         return
 
     try:

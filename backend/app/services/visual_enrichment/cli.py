@@ -8,7 +8,7 @@ from app.services.visual_enrichment.pipeline import STAGE_ORDER, VisualEnrichmen
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="TubeAIFlow semantic visual enrichment pipeline")
+    parser = argparse.ArgumentParser(description="TubeAiFolw semantic visual enrichment pipeline")
     parser.add_argument("--project", required=True, type=Path)
     parser.add_argument("--config", type=Path)
     parser.add_argument("--stage", choices=(*STAGE_ORDER, "dry-run"))

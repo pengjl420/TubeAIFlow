@@ -61,7 +61,22 @@ class SettingsModelTests(unittest.TestCase):
         serialized = json.loads(_serialize_settings(Settings(app_port=18080), record))
 
         self.assertEqual(serialized["app_port"], 18080)
-        self.assertEqual(serialized["pexels_api_key"], "provider-secret")
+        self.assertNotIn("pexels_api_key", serialized)
+
+    def test_serialized_settings_never_contain_plaintext_secrets(self) -> None:
+        serialized = json.loads(
+            _serialize_settings(
+                Settings(deepseek_api_key="secret"),
+                None,
+                {"deepseek_api_key": "settings-deepseek_api_key"},
+            )
+        )
+
+        self.assertNotIn("deepseek_api_key", serialized)
+        self.assertEqual(
+            serialized["credential_refs"]["deepseek_api_key"],
+            "settings-deepseek_api_key",
+        )
 
     def test_premiere_path_must_reference_an_existing_file(self) -> None:
         settings = Settings(

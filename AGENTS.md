@@ -1,2242 +1,3706 @@
-# AGENTS.md
+# AGENTS.md — TubeAiFolw
 
-本文件用于约束本项目中的 AI 编码助手、开发者与自动化代理的行为。项目目标是构建一个本地 Web App，根据原始逐字稿与 TTS 参考音频，自动完成配音、字幕、视觉分镜、素材检索与最终视频合成。
-
-当前规划采用“模块化单体 + 显式工作流编排”。配音字幕是稳定基础能力，视频合成是在其时间轴之上扩展的项目级能力。系统不依赖剪映，必须能够独立输出完整 MP4；剪映仅可作为后续可选导出或人工精修目标。
-
----
-
-## 1. 项目定位
-
-本项目是一个本地运行的视频生产辅助工具，面向人物纪录片、商业人物故事、中国企业史、历史故事以及社会经济事件解说等中长视频内容。
-
-系统核心路线为：
-
-```text
-本地素材库
-+ Pexels / Pixabay
-+ 多模态检索与结构化元数据
-+ 主题化兜底素材
-+ FFmpeg 合成
-```
-
-核心输入与输出如下：
-
-输入：
-
-- 原始逐字稿文本
-- TTS 参考音频
-- 基础生成配置，例如项目名称、音色配置、输出目录
-- 本地素材库与可选在线素材源
-- 视频尺寸、画面节奏、素材偏好、渲染与质量检查配置
-
-输出：
-
-- 分段配音音频
-- 完整配音文件，优先输出 WAV，可选输出 MP3
-- 与输入逐字稿内容一致的单一 SRT 字幕文件
-- 时间轴 JSON
-- 分段信息 JSON
-- 项目 Manifest 文件
-- 视觉语义段与结构化分镜 JSON
-- 素材候选、最终素材选择和来源清单
-- 场景级中间视频
-- 故事板预览与质量检查报告
-- 合成后的预览视频与最终 MP4
-
-核心流程：
-
-```text
-逐字稿
-→ 文本清洗
-→ 自动切段
-→ 默认使用 Qwen3-TTS 批量生成分段音频
-→ 音频后处理
-→ 拼接完整配音
-→ 读取每段音频时长
-→ 生成时间轴
-→ 根据输入逐字稿生成 SRT 字幕
-→ 将字幕合并为视觉语义段
-→ 生成结构化分镜与视觉查询
-→ 检索本地素材库
-→ 未命中时搜索 Pexels / Pixabay
-→ 候选排序、规则过滤与兜底
-→ 镜头时间轴编排
-→ FFmpeg 场景级渲染
-→ 拼接画面、配音、字幕、音乐与音效
-→ 自动质量检查
-→ 故事板人工复核
-→ 导出最终 MP4 与项目素材包
-```
-
-核心原则：
-
-- 配音 Segment、字幕 Cue、视觉 Scene 和素材 Shot 是不同层级的数据，不能混为同一种对象。
-- 配音分段不等于视觉分镜；多个连续字幕可以合并为一个视觉语义段。
-- 字幕只保留输入逐字稿的原始语种与内容，不提供字幕翻译，也不生成 ASS 或其他语种字幕。
-- 真实素材优先，AI 图片或 AI 视频只作为后续可选补充。
-- 接口返回候选不代表素材合格，只有通过语义、事实、技术质量和去重检查的素材才能直接使用。
-- 向量检索负责“相关”，实体、年代、地点、质量和重复规则负责“正确”。
-- 本地素材优先，在线搜索和模型调用必须受缓存、配额和并发限制。
+> 本文件位于项目仓库根目录，用于指导 Codex、ChatGPT、Claude Code、Cursor Agent、GitHub Copilot Agent 及其他自动化编码代理理解、开发、重构和维护本项目。
+>
+> **项目名称必须使用：`TubeAiFolw`**
+>
+> 本项目的核心定位不是“又一个 AI 视频生成器”，而是：
+>
+> **面向 YouTube / Faceless / 长视频创作者的 Local-first AI Production Workflow（本地优先 AI 长视频生产工作流）**
+>
+> 产品目标是将脚本、TTS、字幕、语义分镜、素材规划、AI 插图、AI 视频、时间轴、视频合成、质量检测等环节组织成稳定、可恢复、可人工干预、可批量生产的桌面工作流。
+>
+> 当前优先平台：**Windows 10 / Windows 11**
+>
+> 产品形态：**Desktop + License + Local AI Engine + BYOK（Bring Your Own Key）**
+>
+> 主要原则：
+>
+> 1. 重计算尽量发生在用户本地。
+> 2. 云端只负责账号、License、版本、支付状态、轻量配置等。
+> 3. 用户可使用自己的本地 GPU。
+> 4. 用户可配置自己的第三方 API Key。
+> 5. 模型与供应商必须可替换。
+> 6. 核心护城河不是模型，而是 Workflow、Timeline、Visual Matching、Quality Control。
+> 7. 优先服务已经在生产内容的专业创作者，而不是完全小白。
+> 8. 产品设计必须支持长视频，不能仅围绕 Shorts 或 30 秒 Demo。
+> 9. 默认追求“稳定完成 20~60 分钟视频”而不是“展示炫酷 AI 效果”。
+> 10. 产品必须从第一天开始考虑长期商业化、版本升级、License、数据迁移和可维护性。
 
 ---
 
-## 2. 技术选型
+# 1. 项目愿景
 
-### 2.1 后端
+TubeAiFolw 的目标是成为一个：
 
-后端语言固定使用 Python，原因是需要和 TTS、音频处理、字幕生成、多模态检索与视频处理等能力进行深度集成。
+**Creator Production OS / AI Long-form Video Production Engine**
 
-推荐技术栈：
+用户最终可以从以下任意输入开始：
 
-- Python 3.10+
-- FastAPI
-- Uvicorn
-- SQLite
-- SQLModel 或 SQLAlchemy
-- Pydantic
+- 完整逐字稿
+- Markdown
+- TXT
+- Word / PDF 导出的纯文本
+- SRT 字幕
+- 已生成的音频
+- Podcast 音频
+- 视频脚本
+- 分章节脚本
+-已有项目模板
+
+经过自动化生产流程，得到：
+
+- 完整 TTS 音频
+- 精确字幕
+- Scene / Shot 分镜
+- 视觉素材清单
+- AI 插图
+- AI 视频片段
+- 本地素材匹配结果
+- 图表 / 地图 / 时间线 / 文字卡
+- 完整时间轴
+- 最终 MP4
+- 质量检查报告
+- 项目中间文件
+- 可继续编辑和重新生成的工程文件
+
+最终用户不应该被迫在多个独立工具之间手工复制：
+
+```text
+ChatGPT
+↓
+ElevenLabs
+↓
+Whisper
+↓
+Midjourney
+↓
+Runway
+↓
+Premiere
+↓
+FFmpeg
+```
+
+TubeAiFolw 负责将这些能力统一成一个完整生产工作流。
+
+---
+
+# 2. 非目标
+
+当前阶段不要把项目做成以下产品：
+
+- 不做通用视频剪辑器
+- 不做 Premiere / DaVinci / CapCut 替代品
+- 不做通用 TTS 平台
+- 不做通用 AI 图片平台
+- 不做通用 AI 视频平台
+- 不做“输入一句话自动生成 100 条垃圾视频”的工具
+- 不做纯云端 SaaS 渲染平台
+- 不承担用户大规模 GPU 推理成本
+- 不追求支持所有操作系统
+- 不优先支持移动端
+- 不把“支持最多模型”作为第一竞争力
+- 不允许项目演变成大量无法维护的 Provider 特殊逻辑
+- 不允许业务逻辑大量耦合 UI
+- 不允许 FFmpeg 命令散落在各个页面组件
+- 不允许 Python AI 逻辑直接侵入 Desktop UI 层
+- 不允许数据库 Schema 无迁移机制地随意修改
+
+---
+
+# 3. 目标用户
+
+优先服务以下用户：
+
+## 3.1 核心用户
+
+- YouTube 长视频创作者
+- Faceless YouTube 创作者
+- Documentary / Essay 类创作者
+- 历史频道
+- 财经频道
+- 心理频道
+- 教育频道
+- 科普频道
+- Storytelling 频道
+- 商业人物频道
+- 纪录片型频道
+- Podcast 视频化用户
+- 多频道运营者
+- 小型 MCN
+- 视频代运营团队
+- AI 视频工作室
+
+## 3.2 不优先用户
+
+- 仅偶尔生成短视频的普通用户
+- 纯娱乐型 AI 绘图用户
+- 只需要简单字幕导出的用户
+- 完全没有内容生产经验、需要大量人工客服的小白
+- 只希望“一键上传到 YouTube 并自动赚钱”的用户
+
+---
+
+# 4. 核心商业定位
+
+TubeAiFolw 的付费价值应围绕：
+
+- 节省长视频生产时间
+- 降低重复劳动
+- 提高画面与内容匹配度
+- 降低视频重复和模板化风险
+- 提高批量生产稳定性
+- 支持本地模型
+- 支持 BYOK
+- 降低云端使用成本
+- 降低创作者多工具切换成本
+- 支持失败恢复
+- 支持 Scene 级重新生成
+- 支持频道风格复用
+- 支持质量检查
+
+不要以以下卖点作为核心：
+
+- “我们也支持 TTS”
+- “我们也能调用 GPT”
+- “我们也能生成图片”
+- “我们也能 FFmpeg 合并”
+- “支持 30 个模型”
+- “一天生成 1000 个视频”
+
+---
+
+# 5. 产品原则
+
+所有新功能实现前必须判断是否符合以下原则。
+
+## 5.1 Local-first
+
+优先本地处理：
+
+- TTS
+- STT
+- 字幕对齐
 - FFmpeg
-- ffprobe
-- Qwen3-TTS（默认）
-- 可选 CosyVoice
-- httpx
-- python-dotenv
-- PySceneDetect
-- FAISS
-- SigLIP 2 或 Qwen3-VL Embedding
+- 本地图片模型
+- 本地 OCR（非核心）
+- 本地视频处理
+- 本地缓存
+- 本地项目文件
+- 本地素材库
+- 本地日志
+- 本地 SQLite
 
-后端主要职责：
+除非功能必须依赖云端，否则不要把用户内容上传到 TubeAiFolw 自有服务器。
 
-- 管理本地项目
-- 管理参考音频与音色档案
-- 清洗和切分逐字稿
-- 调用 Qwen3-TTS 或 CosyVoice 生成音频
-- 调用 FFmpeg 处理音频
-- 生成时间轴
-- 根据输入逐字稿和真实音频时间轴生成单一 SRT 字幕
-- 生成视觉语义段和结构化分镜
-- 管理全局本地素材库
-- 调用 Pexels、Pixabay 等素材提供方
-- 对素材执行切镜、抽帧、向量化、检索、排序与去重
-- 编排镜头时间轴并逐场景渲染
-- 合成配音、字幕、背景音乐和音效
-- 执行自动质量检查并输出报告
-- 管理输出文件
-- 提供本地 HTTP API 给前端调用
+## 5.2 BYOK
 
-### 2.2 前端
+第三方 API 默认由用户自行配置：
 
-前端使用本地 Web App 形式。
+- OpenAI
+- Anthropic
+- Gemini
+- ElevenLabs
+- Runway
+- Kling
+- Seedance
+- 其他图片 / 视频 / TTS Provider
 
-推荐技术栈：
+TubeAiFolw 只负责编排。
 
-- Vue 3
-- TypeScript
-- Vite
-- Pinia
-- Vue Router
-- Naive UI 或 Element Plus
-- Axios
+## 5.3 Provider 可替换
 
-前端主要职责：
+所有外部模型和平台必须通过统一 Adapter / Provider Interface 接入。
 
-- 创建项目
-- 粘贴或上传逐字稿
-- 上传参考音频
-- 查看文本切段结果
-- 查看 TTS 生成进度
-- 查看生成日志
-- 预览音频与字幕
-- 编辑单条字幕文本
-- 查看和调整视觉分镜
-- 查看素材候选、评分、来源和授权信息
-- 重搜、替换或确认低置信度素材
-- 查看场景渲染与最终合成进度
-- 查看自动质量检查结果
-- 预览故事板、场景视频和最终视频
-- 下载或打开输出文件
+禁止在业务层出现：
 
-### 2.3 本地运行方式
-
-项目默认以本地服务方式运行：
-
-```text
-前端：http://127.0.0.1:5173
-后端：http://127.0.0.1:18080
-```
-
-后端 API 默认只监听本机地址，不默认暴露到公网。
-
----
-
-## 3. 后端架构原则
-
-后端采用清晰但不过度封装的结构。代码应优先保持简单、直接、可读、易调试。
-
-### 3.1 基本原则
-
-- 不要为了“架构感”而创建过多抽象层。
-- 不要过度拆分方法。
-- 不要把一段简单逻辑拆成大量只有一两行的小函数。
-- 不要引入复杂的依赖注入框架。
-- 不要设计复杂的插件系统。
-- 不要引入微服务、消息队列、分布式任务或复杂权限系统。
-- 后端优先使用同步、清晰、可追踪的代码；耗时任务可使用简单后台任务或本地任务状态表。
-- 每个模块只处理自己职责范围内的事情。
-- 涉及文件路径、音频生成、字幕生成、素材处理和视频渲染的逻辑必须可追踪、可重跑、可恢复。
-- 参考方案中的 Agent 是职责边界，不代表必须创建多个大模型 Agent、进程或服务。
-- 不要机械地为每个 Agent 创建一个类或文件。应将职责归并为稳定业务模块。
-- 工作流编排与领域实现必须分离；批处理和单项目操作应调用同一套工作流入口。
-
-### 3.2 推荐后端目录结构
-
-```text
-backend/
-  app/
-    main.py
-    config.py
-    database.py
-
-    api/
-      projects.py
-      voices.py
-      segments.py
-      tts.py
-      subtitles.py
-      storyboard.py
-      assets.py
-      renders.py
-      quality.py
-      tasks.py
-      batches.py
-      settings.py
-      exports.py
-
-    models/
-      project.py
-      narration.py
-      storyboard.py
-      media.py
-      task.py
-      batch.py
-      settings.py
-
-    schemas/
-      common.py
-      project.py
-      narration.py
-      storyboard.py
-      media.py
-      render.py
-      task.py
-
-    services/
-      projects/
-        project_service.py
-        manifest_service.py
-      narration/
-        text_cleaner.py
-        segmenter.py
-        tts_service.py
-        audio_service.py
-        timeline_service.py
-        subtitle_service.py
-      storyboard/
-        scene_grouper.py
-        storyboard_service.py
-        query_builder.py
-      media_library/
-        ingestion_service.py
-        retrieval_service.py
-        ranking_service.py
-        fallback_service.py
-        usage_service.py
-      rendering/
-        timeline_composer.py
-        scene_renderer.py
-        final_renderer.py
-        rough_cut_service.py
-      quality/
-        qa_service.py
-      batches/
-        batch_service.py
-        batch_worker.py
-
-    workflows/
-      narration_generation.py
-      video_synthesis.py
-
-    integrations/
-      tts/
-        qwen_tts.py
-        cosyvoice.py
-      llm/
-        deepseek.py
-      media_providers/
-        pexels.py
-        pixabay.py
-      vision/
-        embedding.py
-        vector_index.py
-
-    infrastructure/
-      ffmpeg.py
-      process_runner.py
-      project_layout.py
-      asset_layout.py
-
-    shared/
-      errors.py
-      responses.py
-      time.py
-
-  workspace/
-    app.db
-    assets/
-    indexes/
-    projects/
-    voices/
-    templates/
-
-  .env
-  requirements.txt
-```
-
-说明：
-
-- `api/` 只负责 HTTP 入参、出参、简单校验和调用 workflow 或 service。
-- `models/` 放 SQLModel 数据库模型；少量关联紧密的小表可以放在同一文件中，避免一表一文件造成过度拆分。
-- `schemas/` 放 API、配置和跨模块数据契约使用的 Pydantic 模型。
-- `services/` 按业务域放核心业务逻辑，不再把所有 service 平铺在同一层。
-- `workflows/` 只负责编排稳定步骤、保存检查点和恢复任务，不包含素材评分、FFmpeg 参数等领域细节。
-- `integrations/` 隔离 TTS、LLM、Pexels、Pixabay、Embedding 等外部能力。
-- `infrastructure/` 放 FFmpeg 进程执行、路径布局和底层存储等技术能力，不能反向依赖业务 service。
-- `shared/` 只放真正跨领域且无业务含义的错误、响应和时间工具。
-- `workspace/` 存放数据库、素材库、向量索引、项目文件、参考音频、模板和生成结果。
-- 目录结构是职责规划，不要求提前创建没有实现内容的空文件。
-
-### 3.3 业务模块与依赖边界
-
-后端采用模块化单体，稳定业务域如下：
-
-```text
-projects
-narration
-storyboard
-media_library
-rendering
-quality
-batches
-workflows
-```
-
-依赖方向必须保持：
-
-```text
-API / Batch Worker
-→ Workflows
-→ Domain Services
-→ Integrations / Infrastructure
-```
-
-要求：
-
-- API 层不能直接调用 FFmpeg、第三方素材 API、Embedding 模型或拼装复杂生产流程。
-- Batch Worker 与手工触发接口必须调用相同的 workflow，不能复制一套生成逻辑。
-- Workflow 可以调用多个领域 service；领域 service 不能反向依赖 workflow。
-- 一个领域不得直接修改另一个领域的内部表或文件，应通过对方公开 service 或稳定数据契约交互。
-- `integrations/` 和 `infrastructure/` 不得依赖项目业务 service。
-- 不引入 Repository 层、抽象工厂或复杂依赖注入框架；SQLModel Session 可以由 service 直接使用。
-- 当前简单随机视频粗剪保留为 `rough_cut_service.py`，不得继续扩展成智能分镜主流程。
-
-### 3.4 核心数据概念
-
-以下概念必须明确区分：
-
-- `VoiceSegment`：适合 TTS 的口播生成单元，保存真实音频时长。
-- `SubtitleCue`：实际显示的一条字幕，可以由 VoiceSegment 再拆分，但必须保持时间连续。
-- `VisualScene`：一个视觉语义段，可以关联多个 SubtitleCue。
-- `MediaFile`：素材库中的原始视频或图片文件。
-- `MediaShot`：从 MediaFile 中切出的、可独立检索和使用的镜头。
-- `SceneCandidate`：某个 VisualScene 检索到的候选素材及其评分与冲突信息。
-- `SceneAssignment`：VisualScene 最终使用的 MediaShot，以及裁剪、速度、运镜和转场参数。
-- `TaskRun`：某次配音或视频生成工作流的状态、阶段、进度和恢复检查点。
-
-不得为了“统一时间轴”而把这些对象合并成一个巨型 Segment 模型。
-
----
-
-## 4. 前端架构原则
-
-前端以简单可用为第一目标，不追求复杂状态管理。
-
-### 4.1 基本原则
-
-- 页面结构清晰，避免过度组件化。
-- 一个页面内部逻辑不复杂时，不要强行拆成多个小组件。
-- 组件命名要直观，不要使用过度抽象的名称。
-- API 请求统一放在 `api/` 目录。
-- 页面级状态优先放在页面内部；跨页面共享状态再放入 Pinia。
-- 表单校验以实用为主，不要写复杂规则系统。
-- 日志和任务状态要直观展示，方便排查失败原因。
-
-### 4.2 推荐前端目录结构
-
-```text
-frontend/
-  src/
-    main.ts
-    App.vue
-    router.ts
-
-    api/
-      projects.ts
-      voices.ts
-      narration.ts
-      storyboard.ts
-      assets.ts
-      renders.ts
-      quality.ts
-      tasks.ts
-      batches.ts
-      settings.ts
-      exports.ts
-
-    pages/
-      projects/
-        ProjectList.vue
-        ProjectCreate.vue
-        ProjectShell.vue
-        ProjectScript.vue
-        ProjectNarration.vue
-        ProjectSubtitles.vue
-        ProjectStoryboard.vue
-        ProjectMedia.vue
-        ProjectRender.vue
-        ProjectReports.vue
-      batches/
-        BatchList.vue
-        BatchCreate.vue
-        BatchDetail.vue
-      settings/
-        SystemSettings.vue
-
-    components/
-      common/
-        AudioPlayer.vue
-        TaskLogPanel.vue
-        FileUploader.vue
-      narration/
-        SubtitleTable.vue
-      storyboard/
-        SceneCard.vue
-        CandidateList.vue
-      rendering/
-        RenderProgress.vue
-        QualityReport.vue
-
-    stores/
-      projectStore.ts
-
-    types/
-      project.ts
-      narration.ts
-      storyboard.ts
-      media.ts
-      render.ts
-      task.ts
-```
-
-补充要求：
-
-- `ProjectDetail.vue` 应逐步收敛为只负责布局和导航的 `ProjectShell.vue`。
-- 项目脚本、配音字幕、故事板、素材审核、渲染和报告使用子路由页面。
-- 页面拆分依据是业务步骤，不要把每个按钮、表单项或小块展示都拆成组件。
-- 前端不得直接解析数据库字段 `config_json`；后端 API 应返回类型化后的 `config` 对象。
-- 全局状态只保存跨页面需要的项目摘要和任务状态，场景候选、表单编辑等状态优先留在对应页面。
-
----
-
-## 5. 核心功能模块
-
-### 5.1 项目管理模块
-
-职责：
-
-- 创建项目
-- 保存原始逐字稿
-- 保存参考音频路径
-- 保存生成配置
-- 保存项目状态
-- 管理输出目录
-- 查询项目列表与详情
-
-项目状态只保留粗粒度生命周期，建议：
-
-```text
-created
-narration_in_progress
-narration_ready
-video_in_progress
-review_required
-completed
-failed
-```
-
-`segmenting`、`tts`、`subtitle_export`、`storyboard`、`asset_search`、`rendering` 和 `quality_check` 等详细阶段统一保存在 TaskRun，不继续扩展 Project.status 为巨型状态机。迁移期间可以兼容现有旧状态值。
-
-### 5.2 参考音频与音色档案模块
-
-职责：
-
-- 上传参考音频
-- 保存参考音频
-- 校验音频文件是否存在
-- 使用 FFmpeg 转换为统一格式
-- 记录音色名称与配置
-
-参考音频建议统一转为：
-
-```text
-WAV
-单声道或双声道统一
-采样率 44100 Hz 或 48000 Hz
-```
-
-### 5.3 文本清洗模块
-
-职责：
-
-- 清理多余空行
-- 清理 Markdown 符号
-- 清理不可朗读字符
-- 统一标点
-- 处理数字、日期、英文缩写等 TTS 读法问题
-
-代码要求：
-
-- 文本清洗规则应简单明确。
-- 不要把规则系统设计得过度复杂。
-- 可以使用少量正则表达式，但不要写难以维护的巨型正则。
-- 需要保留清洗前文本与清洗后文本，方便排查问题。
-
-### 5.4 自动切段模块
-
-职责：
-
-- 根据标点和长度将逐字稿切成适合 TTS 的小段
-- 生成稳定的 `segment_id`
-- 控制每段文字长度
-- 支持长句拆分与短句合并
-
-推荐规则：
-
-```text
-每段 30 到 60 个中文字
-优先按句号、问号、感叹号切分
-其次按逗号、分号切分
-避免过短片段
-避免超长片段
-```
-
-每个 segment 至少包含：
-
-```json
-{
-  "segment_id": "0001",
-  "index": 1,
-  "text": "这里是分段后的逐字稿文本。",
-  "status": "pending"
+```ts
+if (provider === "elevenlabs") {
+   ...
 }
 ```
 
-### 5.5 TTS 集成模块
+应改为：
 
-职责：
-
-- 调用 Qwen3-TTS（默认）或 CosyVoice 生成每段音频
-- 支持按 segment 单独生成
-- 支持失败重试
-- 支持跳过已生成音频
-- 保存每段生成日志
-- 记录失败原因
-
-代码要求：
-
-- 业务入口集中放在 `services/narration/tts_service.py`，引擎适配放在 `integrations/tts/`。
-- 不要把具体 TTS 引擎调用散落到 API、workflow、字幕或渲染模块中。
-- 第一版可以使用 subprocess 调用 CLI。
-- 各 TTS 引擎使用独立 Python 环境时，也应保持统一且清晰的业务调用入口。
-- 每段音频独立生成，避免整篇长稿失败后全部重跑。
-
-配音字幕基础输出结构如下，完整项目目录以第 8 节为准：
-
-```text
-workspace/projects/{project_id}/audio/segments/
-  0001.wav
-  0002.wav
-  0003.wav
+```ts
+const provider = providerRegistry.get(providerId)
+await provider.generate(...)
 ```
 
-### 5.6 音频处理模块
+## 5.4 Scene-first
 
-职责：
+TubeAiFolw 最重要的数据单位不是文件，而是：
 
-- 读取每段音频时长
-- 去除异常静音
-- 统一音量
-- 统一采样率
-- 插入段间停顿
-- 拼接完整配音文件
-- 导出 WAV 与 MP3
+**Scene**
 
-推荐工具：
+一个 Scene 应至少能够承载：
 
-- FFmpeg
-- ffprobe
+- 文本
+- 开始时间
+- 结束时间
+- 音频
+- 字幕
+- 画面类型
+- 画面 Prompt
+- 素材引用
+- AI 图片
+- AI 视频
+- Motion
+- Transition
+- Duration
+- Voice
+- 状态
+- 生成日志
+- 失败原因
+- 质量评分
 
-代码要求：
+## 5.5 可恢复
 
-- FFmpeg 命令执行集中在 `infrastructure/ffmpeg.py`，音频业务参数由 `services/narration/audio_service.py` 组织。
-- 命令执行失败时要记录 stderr。
-- 不要吞掉错误。
-- 不要在代码中硬编码绝对路径。
+任何耗时任务必须：
 
-### 5.7 时间轴生成模块
+- 支持状态持久化
+- 支持失败重试
+- 支持断点续跑
+- 支持单个 Scene 重跑
+- 支持跳过完成步骤
+- 支持取消
+- 支持暂停
+- 支持重启应用后恢复状态
 
-职责：
+## 5.6 人类可干预
 
-- 根据每段音频真实时长生成时间轴
-- 累加 start_time 与 end_time
-- 考虑段间停顿
-- 保存 `timeline.json`
+最终产品不是黑盒“一键生成”。
 
-时间轴数据示例：
+必须允许用户：
+
+- 编辑 Scene
+- 调整分镜
+- 修改 Prompt
+- 替换图片
+- 替换素材
+- 重新生成 TTS
+- 重新生成单个 Scene
+- 修改 Voice
+- 调整镜头时长
+- 修改 Transition
+- 禁用某类画面
+- 手动锁定结果
+- 标记“不允许自动覆盖”
+
+---
+
+# 6. 总体架构
+
+推荐架构：
+
+```text
+┌─────────────────────────────┐
+│        TubeAiFolw Desktop   │
+│        React + Tauri        │
+│     或 React + Electron     │
+└──────────────┬──────────────┘
+               │ IPC / localhost
+               ▼
+┌─────────────────────────────┐
+│       TubeAiFolw Engine     │
+│           Python            │
+│                             │
+│ Workflow / AI / FFmpeg      │
+└──────────────┬──────────────┘
+               │
+      ┌────────┼─────────┐
+      ▼        ▼         ▼
+   Local AI  FFmpeg   External API
+               │
+               ▼
+         Project Output
+```
+
+云端：
+
+```text
+┌─────────────────────────────┐
+│      TubeAiFolw Cloud       │
+│                             │
+│ Account                     │
+│ License                     │
+│ Device                      │
+│ Version                     │
+│ Payment Webhook             │
+│ Download Metadata           │
+└─────────────────────────────┘
+```
+
+云端绝对不要承担：
+
+- 大规模视频存储
+- 大规模视频渲染
+- 用户视频备份
+- AI GPU 推理
+- 项目实时同步
+
+除非未来商业模式发生明确变化。
+
+---
+
+# 7. 推荐技术栈
+
+## 7.1 Desktop
+
+优先：
+
+```text
+React
+TypeScript
+Tauri
+```
+
+如果现有开发效率明显更高，也允许：
+
+```text
+React
+TypeScript
+Electron
+```
+
+原则：
+
+- 不为了技术洁癖重写
+- 一人团队优先开发效率
+- Desktop UI 不承担 AI 逻辑
+- Desktop UI 不直接运行复杂 FFmpeg 命令
+
+## 7.2 Engine
+
+```text
+Python 3.11+
+FastAPI / IPC Server
+Pydantic
+SQLAlchemy 可选
+FFmpeg
+PyTorch
+```
+
+Engine 可作为：
+
+- Localhost Service
+- Child Process
+- IPC Process
+
+优先选择便于调试和解耦的方案。
+
+## 7.3 本地数据库
+
+```text
+SQLite
+```
+
+用途：
+
+- 项目元数据
+- Scene
+- Job
+- Asset
+- Provider 配置引用
+- Project Setting
+- 任务状态
+- 生成历史
+- 质量检查结果
+
+## 7.4 云端
+
+可选：
+
+```text
+Cloudflare Workers
++
+D1
+```
+
+或：
+
+```text
+Node.js / TypeScript
++
+PostgreSQL
+```
+
+原则：
+
+- 简单
+- 低成本
+- 无 GPU
+- 无复杂微服务
+
+## 7.5 下载与 CDN
+
+推荐：
+
+```text
+Cloudflare R2
++
+Cloudflare CDN
+```
+
+可替代：
+
+- AWS S3
+- Backblaze B2
+- GitHub Releases（开发期）
+- 国内 OSS（如后续需要）
+
+---
+
+# 8. 推荐仓库结构
+
+建议 Monorepo：
+
+```text
+TubeAiFolw/
+│
+├─ AGENTS.md
+├─ README.md
+├─ LICENSE
+├─ package.json
+├─ pnpm-workspace.yaml
+├─ .github/
+│  └─ workflows/
+│
+├─ apps/
+│  ├─ desktop/
+│  │  ├─ src/
+│  │  ├─ src-tauri/
+│  │  └─ tests/
+│  │
+│  └─ website/
+│
+├─ engine/
+│  ├─ tubeaifolw/
+│  │  ├─ api/
+│  │  ├─ core/
+│  │  ├─ workflow/
+│  │  ├─ providers/
+│  │  ├─ media/
+│  │  ├─ subtitle/
+│  │  ├─ tts/
+│  │  ├─ stt/
+│  │  ├─ storyboard/
+│  │  ├─ visual/
+│  │  ├─ render/
+│  │  ├─ quality/
+│  │  ├─ storage/
+│  │  └─ utils/
+│  ├─ tests/
+│  └─ pyproject.toml
+│
+├─ packages/
+│  ├─ shared-types/
+│  ├─ ui/
+│  ├─ sdk/
+│  └─ license-client/
+│
+├─ cloud/
+│  ├─ license-api/
+│  └─ version-api/
+│
+├─ installer/
+│
+├─ scripts/
+│
+├─ docs/
+│  ├─ architecture/
+│  ├─ providers/
+│  ├─ database/
+│  └─ release/
+│
+└─ migrations/
+```
+
+---
+
+# 9. 项目工程文件
+
+每一个视频项目必须拥有独立目录。
+
+推荐：
+
+```text
+project-name/
+│
+├─ project.json
+├─ project.db
+│
+├─ input/
+│  ├─ script.md
+│  └─ source/
+│
+├─ audio/
+│  ├─ segments/
+│  └─ final.wav
+│
+├─ subtitle/
+│  ├─ final.srt
+│  └─ alignment.json
+│
+├─ scenes/
+│  ├─ scene_0001/
+│  ├─ scene_0002/
+│  └─ ...
+│
+├─ assets/
+│  ├─ local/
+│  ├─ stock/
+│  ├─ generated/
+│  └─ imported/
+│
+├─ cache/
+│
+├─ renders/
+│  ├─ preview/
+│  └─ final/
+│
+├─ logs/
+│
+└─ exports/
+```
+
+用户可自定义项目根目录。
+
+不要强制所有视频数据保存在：
+
+```text
+C:\Users\xxx\AppData
+```
+
+AppData 仅保存：
+
+- 应用配置
+- License
+- 登录信息
+- 全局数据库
+- 日志
+- UI 配置
+
+---
+
+# 10. 核心数据模型
+
+## 10.1 Project
+
+字段建议：
+
+```ts
+interface Project {
+  id: string
+  name: string
+  createdAt: string
+  updatedAt: string
+  status: ProjectStatus
+  rootPath: string
+
+  sourceLanguage: string
+  targetLanguage?: string
+
+  scriptPath?: string
+  audioPath?: string
+  subtitlePath?: string
+
+  channelProfileId?: string
+  workflowPresetId?: string
+
+  fps: number
+  width: number
+  height: number
+  aspectRatio: string
+
+  durationMs?: number
+
+  locked: boolean
+}
+```
+
+## 10.2 Scene
+
+Scene 是核心对象。
+
+```ts
+interface Scene {
+  id: string
+  projectId: string
+  index: number
+
+  title?: string
+
+  text: string
+  normalizedText?: string
+
+  startMs?: number
+  endMs?: number
+  durationMs?: number
+
+  audioAssetId?: string
+  subtitleSegmentIds: string[]
+
+  visualType?: VisualType
+  visualIntent?: string
+  visualPrompt?: string
+  negativePrompt?: string
+
+  assetIds: string[]
+
+  motion?: MotionConfig
+  transitionIn?: TransitionConfig
+  transitionOut?: TransitionConfig
+
+  providerId?: string
+  modelId?: string
+
+  state: SceneState
+
+  lockedText: boolean
+  lockedAudio: boolean
+  lockedVisual: boolean
+
+  qualityScore?: number
+
+  createdAt: string
+  updatedAt: string
+}
+```
+
+## 10.3 Asset
+
+```ts
+interface Asset {
+  id: string
+  projectId: string
+
+  type:
+    | "audio"
+    | "image"
+    | "video"
+    | "subtitle"
+    | "document"
+    | "chart"
+    | "map"
+    | "screenshot"
+
+  source:
+    | "local"
+    | "generated"
+    | "stock"
+    | "api"
+    | "imported"
+
+  path: string
+
+  hash?: string
+
+  durationMs?: number
+  width?: number
+  height?: number
+
+  providerId?: string
+  prompt?: string
+
+  metadata?: Record<string, unknown>
+}
+```
+
+## 10.4 Job
+
+```ts
+interface Job {
+  id: string
+  projectId: string
+  sceneId?: string
+
+  type: JobType
+
+  state:
+    | "queued"
+    | "running"
+    | "paused"
+    | "success"
+    | "failed"
+    | "cancelled"
+
+  progress: number
+
+  retryCount: number
+  maxRetries: number
+
+  errorCode?: string
+  errorMessage?: string
+
+  createdAt: string
+  startedAt?: string
+  finishedAt?: string
+}
+```
+
+---
+
+# 11. 工作流引擎
+
+TubeAiFolw 必须拥有独立 Workflow Engine。
+
+不要把工作流写死在 UI 点击事件中。
+
+推荐：
+
+```text
+Workflow
+│
+├─ Step
+├─ Dependency
+├─ Condition
+├─ Retry
+├─ Cache
+├─ Artifact
+└─ State
+```
+
+示例：
+
+```text
+Import Script
+↓
+Normalize Script
+↓
+Semantic Chunk
+↓
+Generate TTS
+↓
+Merge Audio
+↓
+Align Subtitle
+↓
+Scene Planning
+↓
+Visual Planning
+↓
+Generate / Match Assets
+↓
+Timeline Build
+↓
+Preview Render
+↓
+Quality Check
+↓
+Final Render
+```
+
+每一步必须：
+
+- 可单独运行
+- 可重新运行
+- 有输入
+- 有输出
+- 有状态
+- 有日志
+- 有错误信息
+- 可缓存
+- 可判断是否跳过
+
+建议抽象：
+
+```python
+class WorkflowStep:
+    id: str
+
+    async def can_run(self, context): ...
+    async def run(self, context): ...
+    async def validate(self, result): ...
+    async def rollback(self, context): ...
+```
+
+---
+
+# 12. Script Engine
+
+Script Engine 负责：
+
+- 导入
+- 清洗
+- 规范化
+- 分段
+- 章节识别
+- 语义分析
+- 实体识别
+- 时间节点识别
+- 人物识别
+- 地点识别
+- 数据识别
+- 引用识别
+- 重要性评分
+- 视觉机会识别
+
+输出不是简单的文本数组。
+
+应输出结构化语义信息，例如：
 
 ```json
 {
-  "segments": [
+  "text": "In 2008 Lehman Brothers collapsed...",
+  "entities": [
     {
-      "segment_id": "0001",
-      "start": 0.0,
-      "end": 8.42,
-      "duration": 8.42,
-      "text": "这里是第一段字幕。"
+      "type": "organization",
+      "value": "Lehman Brothers"
     }
+  ],
+  "event": {
+    "type": "historical_event",
+    "year": 2008
+  },
+  "visualOpportunities": [
+    "archive",
+    "building",
+    "newspaper",
+    "timeline"
   ]
 }
 ```
 
-注意：
-
-- 不要根据文字长度估算最终字幕时间。
-- 字幕时间必须基于真实音频时长。
-
-### 5.8 SRT 字幕生成模块
-
-职责：
-
-- 根据时间轴生成唯一的 `subtitles.srt`
-- 字幕文本必须来自输入逐字稿的清洗或切段结果，不得翻译、改写或生成其他语种版本
-- 支持在不改变语义和顺序的前提下，按可读长度拆分过长字幕
-- 使用 UTF-8 编码，并输出标准 SRT 序号、时间戳和空行结构
-
-代码要求：
-
-- SRT 生成逻辑放在 `services/narration/subtitle_service.py`。
-- 不要依赖复杂字幕库，可以直接生成标准 SRT 文本文件。
-- 时间格式转换函数要清晰可读。
-- SRT 文本中的换行与空行必须符合格式要求；不得引入 ASS 标签或样式控制符。
-- 每条 SubtitleCue 必须能够追溯到输入逐字稿对应的 VoiceSegment。
-
-### 5.9 导出模块
-
-职责：
-
-- 整理输出目录
-- 生成完整项目素材包
-- 生成 `manifest.json`
-- 提供下载或打开本地目录能力
-
-推荐输出结构：
-
-```text
-workspace/projects/{project_id}/
-  input/
-    script_raw.txt
-    script_clean.txt
-    reference.wav
-
-  segments/
-    segments.json
-
-  audio/
-    segments/
-      0001.wav
-      0002.wav
-    full_voice.wav
-    full_voice.mp3
-
-  subtitles/
-    subtitles.srt
-
-  timeline/
-    timeline.json
-
-  logs/
-    tts.log
-    error.log
-
-  storyboard/
-    scenes.json
-    candidates.json
-
-  media/
-    selections.json
-
-  renders/
-    scenes/
-    preview.mp4
-    final.mp4
-
-  reports/
-    qa.json
-    asset_sources.csv
-    render_report.json
-
-  manifest.json
-```
-
-### 5.10 视觉语义段模块
-
-职责：
-
-- 将连续 SubtitleCue 合并为 VisualScene。
-- 根据人物、地点、事件、时间和叙事阶段决定镜头切换点。
-- 避免每条字幕机械对应一个画面。
-- 保持 VisualScene 的首尾时间与字幕时间轴严格对齐。
-
-建议时长：
-
-| 类型 | 建议镜头长度 |
-|---|---:|
-| 开头强钩子 | 3—5 秒 |
-| 普通叙事镜头 | 5—10 秒 |
-| 历史照片 | 6—12 秒 |
-| 地图、时间线 | 6—12 秒 |
-| 重大事件 | 8—15 秒 |
-| 情绪过渡 | 4—8 秒 |
-
-合并与切换原则：
-
-- 同一人物、地点或事件连续出现时可以合并。
-- 发生时间跳跃、主体变化或地点变化时切换。
-- 叙事从事实转为分析时切换。
-- 开头 30 秒可以适当加快节奏。
-- 不允许 VisualScene 覆盖不到完整音频，场景时间轴不能出现空洞。
-
-### 5.11 分镜与视觉查询模块
-
-职责：
-
-- 根据 VisualScene 生成结构化 Storyboard 数据。
-- 将不可直接可视化的旁白转换为具体英文视觉查询。
-- 生成精确、语义和通用三个层级的查询。
-- 提取实体、地点、年代、场景类型、情绪、镜头偏好、必须包含和应避免内容。
-- 输出兜底类别和置信度，供素材检索与人工审核使用。
-
-分镜至少包含：
-
-```json
-{
-  "scene_id": "scene_0012",
-  "start_ms": 68500,
-  "end_ms": 78100,
-  "subtitle_ids": ["sub_0018", "sub_0019"],
-  "narration": "In 1995, the traveler arrived in the United States.",
-  "visual_summary": "A traveler arriving at an American airport in the mid-1990s",
-  "visual_type": "historical_reconstruction",
-  "entities": ["traveler", "United States"],
-  "locations": ["United States"],
-  "time_period": "1995",
-  "scene_category": "travel",
-  "mood": "curious",
-  "shot_preference": "wide_or_medium",
-  "primary_query": "1990s international airport traveler arriving in America",
-  "alternative_queries": ["international travel airport 1990s"],
-  "fallback_category": "travel",
-  "fallback_mood": "neutral",
-  "must_include": ["airport", "traveler"],
-  "avoid": ["modern smartphone", "European landmark"],
-  "confidence": 0.83
-}
-```
-
-代码要求：
-
-- Storyboard 输出必须通过 Pydantic Schema 校验，不能直接信任模型返回 JSON。
-- 查询生成与素材搜索分离，Storyboard service 不直接调用 Pexels 或 Pixabay。
-- 不根据画面猜测无法视觉确认的真实人物身份。
-- Prompt、模型名称和关键参数需要保存到任务配置快照，确保结果可追踪。
-
-### 5.12 全局本地素材库模块
-
-素材来源优先级：
-
-```text
-本地已审核素材
-→ 本地已下载的 Pexels / Pixabay 素材
-→ Pexels 在线搜索
-→ Pixabay 在线搜索
-→ 相关静态图片动态化
-→ 主题化本地兜底素材
-→ 纯风景最终兜底
-```
-
-素材库职责：
-
-- 管理视频、图片、缩略图、代理文件、关键帧和结构化元数据。
-- 使用平台资产 ID 与文件哈希去重。
-- 对视频执行切镜、关键帧抽取和技术信息读取。
-- 为每个 MediaShot 独立生成向量，不允许整条多场景视频只使用一个向量。
-- 保存素材来源、作者、原始页面、许可信息和下载时间。
-- 统计素材使用次数、最近使用时间和项目内重复情况。
-
-镜头切分建议：
-
-- 使用 PySceneDetect 或明确的固定间隔策略。
-- 小于 1.5 秒的镜头与相邻镜头合并。
-- 大于 15 秒的镜头根据画面变化或固定间隔继续拆分。
-- 短于 12 秒且没有明显切镜的视频可以整条作为一个 MediaShot。
-
-关键帧抽取建议：
-
-| 镜头时长 | 抽帧数量 |
-|---:|---:|
-| 1.5—4 秒 | 3 帧 |
-| 4—8 秒 | 4 帧 |
-| 8—15 秒 | 6 帧 |
-| 15 秒以上 | 8 帧 |
-
-应过滤黑屏、转场帧、运动模糊、过曝、欠曝和重复帧。
-
-向量检索推荐：
-
-```text
-MVP：SigLIP 2 Base + FAISS IndexFlatIP + SQLite
-正式版：Qwen3-VL-Embedding-2B + 结构化描述 + FAISS + SQLite
-```
-
-向量负责语义召回，结构化描述负责过滤、冲突判断和结果解释。向量文件存放在独立索引目录，SQLite 只保存 `vector_id` 和元数据，不把大向量直接塞入业务 JSON。
-
-### 5.13 远程素材搜索模块
-
-职责：
-
-- 只有本地素材库没有合格结果时才调用 Pexels 和 Pixabay。
-- 为每个场景按精确、语义和通用查询逐层搜索。
-- 获取候选缩略图或预览图，先排序再下载完整视频。
-- 每个场景限制搜索轮数、候选数和完整视频下载数。
-- 缓存标准化查询结果，避免重复 API 调用。
-
-推荐流程：
-
-```text
-搜索返回 20—40 个候选
-→ 获取缩略图或预览图
-→ 轻量模型预筛
-→ 选出 Top 3—5
-→ 只下载最终候选
-→ 对完整视频切镜、抽帧、向量化并入库
-```
-
-要求：
-
-- Pexels 与 Pixabay 的请求、响应解析、鉴权和限流分别放在 `integrations/media_providers/`。
-- Provider 返回统一候选 Schema，业务层不得依赖平台专有响应结构。
-- 查询缓存必须包含平台、标准化查询、过期时间和响应数据。
-- 不得为了提高命中率无限扩大搜索轮数或下载全部候选。
-
-### 5.14 素材排序、合格判断与去重模块
-
-候选状态统一为：
-
-```text
-NO_RESULT
-LOW_RELEVANCE
-QUALIFIED
-FALLBACK_REQUIRED
-```
-
-综合评分可以参考：
-
-```text
-视觉语义相似度 × 55%
-+ 描述文本相似度 × 20%
-+ 标签匹配 × 15%
-+ 技术质量 × 10%
-- 重复使用惩罚
-- 人物或品牌冲突惩罚
-- 年代冲突惩罚
-- 地点冲突惩罚
-```
-
-要求：
-
-- 相似度阈值不能在多个文件中写死，应通过测试集按模型和素材类型校准。
-- 必须检查横屏比例、分辨率、时长、水印、内嵌文字、清晰度和编码完整性。
-- 同一视频内禁止重复使用同一 MediaShot。
-- 同一原始 MediaFile 不应连续使用。
-- 60 秒内避免出现高度相似镜头。
-- 对最近多个项目高频使用的素材进行扣分。
-- pHash 高度相似或文件哈希相同的素材只保留一个。
-- 只有 `QUALIFIED` 候选可以自动选用；低置信度候选必须进入人工审核或兜底。
-
-### 5.15 兜底素材模块
-
-兜底优先级：
-
-```text
-相关静态图片动态化
-→ 主题化视频兜底
-→ 地点类中性素材
-→ 情绪类中性素材
-→ 纯风景最终兜底
-```
-
-主题化兜底至少支持：
-
-```text
-business
-technology
-finance
-history
-crisis
-travel
-city
-transition
-landscape
-```
-
-要求：
-
-- 不允许所有检索失败场景统一使用随机风景。
-- 纯风景只适用于章节切换、时间流逝、人生感悟、情绪缓冲和结尾总结。
-- 商业事件、人物经历和公司冲突等具体叙事不能随意插入风景空镜。
-- 控制同类兜底素材在单条视频中的占比和连续重复。
-
-### 5.16 镜头时间轴编排模块
-
-职责：
-
-- 将 SceneAssignment 放入精确时间轴。
-- 决定素材裁剪区间、播放速度、图片运镜和转场。
-- 保证画面轨道覆盖完整旁白时长。
-
-素材长于场景时：
-
-- 从视觉质量较高且动作完整的区间裁剪。
-- 避免从源视频切镜点附近开始。
-
-素材短于场景时，按以下顺序处理：
-
-1. 降低到允许的最低速度，例如 0.85 倍。
-2. 补充同主题第二镜头。
-3. 使用最后一帧轻微推拉。
-4. 插入相关静态图片。
-5. 避免明显循环播放。
-
-纪录片风格以硬切为主、叠化为辅；普通转场建议 0.2—0.5 秒。图片运镜应缓慢，缩放通常控制在 100% 到 106% 或 108%。
-
-### 5.17 FFmpeg 视频渲染模块
-
-标准输出参数：
-
-```text
-分辨率：1920×1080
-帧率：30 fps
-视频编码：H.264
-像素格式：yuv420p
-音频编码：AAC 48 kHz
-容器：MP4
-```
-
-渲染要求：
-
-- 每个 VisualScene 先独立渲染为统一规格的中间片段。
-- 场景片段全部校验后再执行最终 concat 和音轨合成。
-- 横屏视频使用 `scale + crop`，禁止拉伸变形。
-- 竖屏素材默认不使用；必须使用时采用居中主画面和模糊背景或画中画布局。
-- 原素材音轨默认删除，最终音轨由配音、背景音乐和音效统一混合。
-- 支持外挂 SRT 字幕，以及使用同一份 SRT 烧录字幕两种模式；不得为烧录流程额外生成 ASS 文件。
-- 配音存在时应自动压低背景音乐；音量和峰值规则通过配置管理。
-- 单场景失败必须可重试，替换一个场景素材时不能强制重渲染整条视频。
-- 最终拼接前使用 ffprobe 校验所有中间片段。
-
-推荐中间结构：
-
-```text
-renders/scenes/scene_0001.mp4
-renders/scenes/scene_0002.mp4
-renders/preview.mp4
-renders/final.mp4
-```
-
-### 5.18 自动质量检查模块
-
-自动检查至少包括：
-
-- 时间轴首尾连续、无负时长、无画面空洞。
-- 视频总时长与配音时长误差小于 100 ms。
-- 字幕不得越过音频结束时间。
-- 黑屏比例、长静帧、重复画面、分辨率、纵横比和编码完整性。
-- 音频峰值、LUFS、过长静音、爆音和声道异常。
-- 字幕空文本、重叠、行长、Cue 数量与时间轴一致性、SRT 格式和安全区。
-- 素材平台、素材 ID、作者、来源页面、下载时间和使用场景是否齐全。
-
-质量检查输出 `reports/qa.json`，不得只返回布尔值。每个问题应包含类型、严重级别、关联场景或字幕、可读说明和可选修复建议。
-
-### 5.19 故事板人工审核模块
-
-审核页面应显示：
-
-- 场景起止时间和对应字幕。
-- 当前画面缩略图或预览。
-- 素材来源、评分、状态和冲突原因。
-- 替换、重搜、确认和选择兜底操作。
-
-重点突出：
-
-- 低于阈值或使用兜底的场景。
-- 可能存在人物、品牌、地点或年代错误的场景。
-- 同类素材重复过多的场景。
-- 纯风景镜头和低置信度镜头。
-
-人工确认结果必须持久化到 SceneAssignment，重新渲染时不得丢失人工选择。
-
-### 5.20 工作流、任务与恢复模块
-
-系统只维护两条主要工作流：
-
-```text
-narration_generation
-video_synthesis
-```
-
-`narration_generation` 负责：
-
-```text
-文本清洗 → 口播切段 → TTS → 音频拼接 → 字幕时间轴 → 原文 SRT 导出
-```
-
-`video_synthesis` 负责：
-
-```text
-视觉语义段 → Storyboard → 素材检索与选择 → 时间轴编排
-→ 场景渲染 → 最终合成 → QA → 人工复核 → 最终导出
-```
-
-要求：
-
-- 每一步必须具有明确输入、输出、状态和错误信息。
-- 已成功且输入未变化的步骤可以跳过。
-- 支持从失败检查点继续，不要强制整条流程从头开始。
-- 单项目手工操作和批处理调用同一套 workflow。
-- 不实现可视化通用 DAG、插件式节点系统或复杂工作流 DSL。
-
 ---
 
-## 6. API 设计规范
+# 13. TTS Engine
 
-API 使用 REST 风格即可，不需要 GraphQL。
+TTS 必须通过 Provider 抽象。
 
-### 6.1 基础接口
-
-```text
-GET    /api/projects
-POST   /api/projects
-GET    /api/projects/{project_id}
-DELETE /api/projects/{project_id}
-```
-
-```text
-POST /api/projects/{project_id}/script
-POST /api/projects/{project_id}/reference-audio
-POST /api/projects/{project_id}/segments
-GET  /api/projects/{project_id}/segments
-```
-
-```text
-POST /api/projects/{project_id}/tts/start
-POST /api/projects/{project_id}/tts/retry-failed
-POST /api/projects/{project_id}/tts/regenerate/{segment_id}
-GET  /api/projects/{project_id}/tts/status
-```
-
-```text
-POST /api/projects/{project_id}/audio/merge
-POST /api/projects/{project_id}/subtitles/srt
-POST /api/projects/{project_id}/export
-```
-
-```text
-POST /api/projects/{project_id}/storyboard/generate
-GET  /api/projects/{project_id}/storyboard
-PUT  /api/projects/{project_id}/storyboard/scenes/{scene_id}
-POST /api/projects/{project_id}/storyboard/scenes/{scene_id}/search
-POST /api/projects/{project_id}/storyboard/scenes/{scene_id}/assign
-```
-
-```text
-GET  /api/assets
-POST /api/assets/import
-GET  /api/assets/{media_id}
-POST /api/assets/{media_id}/ingest
-POST /api/assets/search
-```
-
-```text
-POST /api/projects/{project_id}/render/scenes/{scene_id}
-POST /api/projects/{project_id}/render/preview
-POST /api/projects/{project_id}/render/final
-GET  /api/projects/{project_id}/render/status
-POST /api/projects/{project_id}/quality/check
-GET  /api/projects/{project_id}/quality/report
-```
-
-```text
-POST /api/projects/{project_id}/workflows/narration/start
-POST /api/projects/{project_id}/workflows/video/start
-POST /api/projects/{project_id}/tasks/cancel
-GET  /api/projects/{project_id}/tasks/status
-```
-
-具体路径可以按现有兼容性小范围调整，但资源边界不得混淆。API 不应暴露 FAISS 索引路径、模型内部对象或第三方平台原始响应。
-
-### 6.2 API 返回格式
-
-成功返回：
-
-```json
-{
-  "success": true,
-  "data": {}
-}
-```
-
-失败返回：
-
-```json
-{
-  "success": false,
-  "error": "错误说明"
-}
-```
-
-要求：
-
-- 错误信息要可读。
-- 不要只返回 `failed`。
-- 后端日志中要记录完整错误信息。
-- 前端展示给用户的错误可以简化，但不能完全丢失原因。
-
----
-
-## 7. 数据库规范
-
-本地单机版本使用 SQLite。随着表结构增加，应使用轻量数据库迁移机制管理变更；不能依赖 `create_all()` 修改已有表。
-
-数据库按两类数据划分：
-
-- 全局可复用数据：素材文件、镜头、关键帧和搜索缓存。
-- 项目级数据：口播段、字幕、视觉场景、候选、最终分配、使用记录和任务状态。
-
-### 7.1 projects
-
-```sql
-CREATE TABLE projects (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  script_raw_path TEXT,
-  script_clean_path TEXT,
-  reference_audio_path TEXT,
-  output_dir TEXT,
-  status TEXT NOT NULL,
-  config_json TEXT,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-```
-
-### 7.2 segments
-
-```sql
-CREATE TABLE segments (
-  id TEXT PRIMARY KEY,
-  segment_id TEXT NOT NULL,
-  project_id TEXT NOT NULL,
-  segment_index INTEGER NOT NULL,
-  text TEXT NOT NULL,
-  audio_path TEXT,
-  duration REAL,
-  start_time REAL,
-  end_time REAL,
-  status TEXT NOT NULL,
-  error_message TEXT,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-```
-
-`segment_id` 在同一项目内必须唯一，并在重新运行不改变输入时保持稳定。
-
-### 7.3 subtitle_cues
-
-```sql
-CREATE TABLE subtitle_cues (
-  id TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL,
-  source_segment_id TEXT NOT NULL,
-  cue_index INTEGER NOT NULL,
-  start_ms INTEGER NOT NULL,
-  end_ms INTEGER NOT NULL,
-  text TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-```
-
-SubtitleCue 只保存输入逐字稿内容，不保存翻译文本。每条 Cue 必须通过稳定 ID 和 `source_segment_id + cue_index` 追溯到原始 VoiceSegment，不能通过数组位置临时关联。
-
-### 7.4 voice_profiles
-
-```sql
-CREATE TABLE voice_profiles (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  reference_audio_path TEXT NOT NULL,
-  config_json TEXT,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-```
-
-### 7.5 subtitle_export_presets
-
-```sql
-CREATE TABLE subtitle_export_presets (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  config_json TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-```
-
-`config_json` 只保存 SRT 导出参数，例如 UTF-8 编码、单条建议长度和换行策略；不得保存字体、描边等 SRT 无法表达的样式配置。
-
-### 7.6 visual_scenes
-
-```sql
-CREATE TABLE visual_scenes (
-  id TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL,
-  scene_index INTEGER NOT NULL,
-  start_ms INTEGER NOT NULL,
-  end_ms INTEGER NOT NULL,
-  narration TEXT NOT NULL,
-  subtitle_ids_json TEXT NOT NULL,
-  storyboard_json TEXT,
-  confidence REAL,
-  status TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-```
-
-### 7.7 scene_candidates
-
-```sql
-CREATE TABLE scene_candidates (
-  id TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL,
-  scene_id TEXT NOT NULL,
-  shot_id INTEGER,
-  provider TEXT NOT NULL,
-  provider_asset_id TEXT,
-  preview_url TEXT,
-  semantic_score REAL,
-  quality_score REAL,
-  conflict_score REAL,
-  status TEXT NOT NULL,
-  reason TEXT,
-  metadata_json TEXT,
-  created_at TEXT NOT NULL
-);
-```
-
-### 7.8 scene_assignments
-
-```sql
-CREATE TABLE scene_assignments (
-  id TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL,
-  scene_id TEXT NOT NULL,
-  shot_id INTEGER NOT NULL,
-  source_start_ms INTEGER,
-  source_end_ms INTEGER,
-  speed REAL,
-  motion_json TEXT,
-  transition_json TEXT,
-  selected_by TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-```
-
-`selected_by` 至少区分 `automatic` 与 `manual`。人工确认的分配不能被后续自动检索静默覆盖。
-
-### 7.9 media_files
-
-```sql
-CREATE TABLE media_files (
-  id INTEGER PRIMARY KEY,
-  platform TEXT,
-  platform_asset_id TEXT,
-  file_path TEXT NOT NULL,
-  file_hash TEXT NOT NULL,
-  source_page TEXT,
-  author TEXT,
-  license_info TEXT,
-  duration_ms INTEGER NOT NULL,
-  width INTEGER,
-  height INTEGER,
-  fps REAL,
-  orientation TEXT,
-  created_at TEXT NOT NULL,
-  downloaded_at TEXT
-);
-```
-
-平台资产 ID 和文件哈希必须建立合适的唯一约束或去重检查。
-
-### 7.10 media_shots
-
-```sql
-CREATE TABLE media_shots (
-  id INTEGER PRIMARY KEY,
-  media_id INTEGER NOT NULL,
-  start_ms INTEGER NOT NULL,
-  end_ms INTEGER NOT NULL,
-  caption TEXT,
-  scene_type TEXT,
-  subjects_json TEXT,
-  actions_json TEXT,
-  locations_json TEXT,
-  mood_json TEXT,
-  time_of_day TEXT,
-  shot_type TEXT,
-  camera_motion TEXT,
-  people_count INTEGER,
-  visible_text_json TEXT,
-  logos_json TEXT,
-  quality_score REAL,
-  used_count INTEGER DEFAULT 0,
-  last_used_at TEXT,
-  FOREIGN KEY(media_id) REFERENCES media_files(id)
-);
-```
-
-### 7.11 keyframes
-
-```sql
-CREATE TABLE keyframes (
-  id INTEGER PRIMARY KEY,
-  shot_id INTEGER NOT NULL,
-  timestamp_ms INTEGER NOT NULL,
-  image_path TEXT NOT NULL,
-  vector_id INTEGER,
-  sharpness_score REAL,
-  brightness_score REAL,
-  FOREIGN KEY(shot_id) REFERENCES media_shots(id)
-);
-```
-
-### 7.12 asset_usages
-
-```sql
-CREATE TABLE asset_usages (
-  id INTEGER PRIMARY KEY,
-  project_id TEXT NOT NULL,
-  scene_id TEXT NOT NULL,
-  shot_id INTEGER NOT NULL,
-  used_start_ms INTEGER,
-  used_end_ms INTEGER,
-  created_at TEXT NOT NULL
-);
-```
-
-### 7.13 search_cache
-
-```sql
-CREATE TABLE search_cache (
-  id INTEGER PRIMARY KEY,
-  platform TEXT NOT NULL,
-  normalized_query TEXT NOT NULL,
-  response_json TEXT NOT NULL,
-  expires_at TEXT,
-  created_at TEXT NOT NULL
-);
-```
-
-### 7.14 task_runs
-
-```sql
-CREATE TABLE task_runs (
-  id TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL,
-  workflow TEXT NOT NULL,
-  status TEXT NOT NULL,
-  current_stage TEXT NOT NULL,
-  progress REAL NOT NULL,
-  checkpoint_json TEXT,
-  error_message TEXT,
-  started_at TEXT,
-  updated_at TEXT NOT NULL,
-  finished_at TEXT
-);
-```
-
-`projects.status` 只表示项目粗粒度状态；详细阶段、进度和恢复点统一由 `task_runs` 管理。不得同时在内存状态、批次字段、项目字段和多个 progress 文件中维护互相冲突的任务真相。
-
----
-
-## 8. 文件与路径规范
-
-- `backend/workspace/` 是默认运行时目录；可以通过 `WORKSPACE_DIR` 覆盖，但同一次运行只能有一个规范化后的 workspace 根目录。
-- 仓库根目录与 `backend/` 下不得同时维护两套活跃 workspace。
-- 所有项目工作文件必须存放在 `workspace/projects/{project_id}/` 下。
-- 用户选择的外部输出目录只用于最终导出，不应成为任务缓存、数据库或中间文件目录。
-- 所有参考音频档案必须存放在 `workspace/voices/` 下。
-- 所有全局素材与派生文件必须存放在 `workspace/assets/` 下。
-- FAISS 等向量索引必须存放在 `workspace/indexes/` 下。
-- 不要在代码中硬编码 Windows 或 macOS 绝对路径。
-- 路径处理统一使用 `pathlib.Path`。
-- 文件名使用英文、数字、下划线和短横线。
-- segment 文件名使用固定四位编号，例如 `0001.wav`。
-- scene 文件名使用固定四位编号，例如 `scene_0001.mp4`。
-- 删除文件前需要确认文件位于 workspace 目录内。
-- 素材原文件全局只保存一份，项目目录保存素材引用、裁剪参数和来源清单。
-- 只有导出自包含素材包时，才将全局原素材复制到项目导出目录。
-
-推荐运行时目录：
-
-```text
-workspace/
-├── app.db
-├── assets/
-│   ├── originals/
-│   │   ├── pexels/
-│   │   ├── pixabay/
-│   │   └── manual/
-│   ├── fallback/
-│   │   ├── business/
-│   │   ├── technology/
-│   │   ├── finance/
-│   │   ├── history/
-│   │   ├── crisis/
-│   │   ├── travel/
-│   │   ├── city/
-│   │   ├── transition/
-│   │   └── landscape/
-│   ├── thumbnails/
-│   ├── keyframes/
-│   ├── proxies/
-│   └── metadata/
-├── indexes/
-│   └── media.faiss
-├── projects/
-│   └── {project_id}/
-│       ├── manifest.json
-│       ├── input/
-│       │   ├── script_raw.txt
-│       │   ├── script_clean.txt
-│       │   └── reference.wav
-│       ├── segments/
-│       │   └── segments.json
-│       ├── audio/
-│       │   ├── segments/
-│       │   ├── narration.wav
-│       │   └── bgm.wav
-│       ├── timeline/
-│       │   └── timeline.json
-│       ├── subtitles/
-│       │   └── subtitles.srt
-│       ├── storyboard/
-│       │   ├── scenes.json
-│       │   ├── candidates.json
-│       │   └── storyboard.html
-│       ├── media/
-│       │   ├── selections.json
-│       │   └── images/
-│       ├── renders/
-│       │   ├── scenes/
-│       │   ├── preview.mp4
-│       │   └── final.mp4
-│       ├── reports/
-│       │   ├── qa.json
-│       │   ├── asset_sources.csv
-│       │   └── render_report.json
-│       ├── logs/
-│       └── temp/
-├── voices/
-└── templates/
-```
-
----
-
-## 9. 代码规范
-
-### 9.1 总体要求
-
-- 代码优先简洁、直接、可读。
-- 不要过度封装。
-- 不要为了复用而提前抽象。
-- 不要设计复杂继承结构。
-- 不要使用过深的类层级。
-- 一个函数只要逻辑清晰，可以适当长一些，不需要强行拆分。
-- 重复出现三次以上、且确实稳定的逻辑，再考虑提取函数。
-- 业务逻辑优先写成简单函数，只有在确实需要保存状态时再使用类。
-- 不要把参考文档中的每个 Agent 实现为抽象类、基类或独立服务。
-- 同一业务域内的简单逻辑可以直接调用；跨业务域调用应通过公开 service 函数或 Pydantic Schema。
-- 不得把所有流程状态、素材元数据和渲染参数继续堆入 `Project.config_json`。
-- 不得创建包罗所有职责的 `video_service.py`；素材检索、镜头编排、渲染和 QA 必须分属不同模块。
-
-### 9.2 Python 代码规范
-
-- 使用类型标注。
-- 使用 `pathlib.Path` 处理路径。
-- 使用 `logging` 记录日志。
-- 使用 Pydantic 定义 API 请求与响应模型。
-- 捕获异常时必须记录原始错误。
-- 不要使用裸 `except`。
-- 不要静默忽略异常。
-- 不要把大段业务逻辑写在 FastAPI 路由函数中。
-- 路由函数只做参数接收、简单校验和调用 service。
-- 外部 Provider 响应必须先转换为内部 Schema，再进入排序或持久化逻辑。
-- LLM 和多模态模型的 JSON 输出必须使用 Pydantic 校验，并记录无法解析的原始错误摘要。
-- FFmpeg 与 ffprobe 执行集中在 `infrastructure/ffmpeg.py`，业务模块只传递明确参数，不自行拼接 shell 字符串。
-- 底层 `infrastructure/` 和 `shared/` 代码不得导入业务 service。
-- 长任务要定期检查取消状态，并以原子方式保存任务进度或检查点。
-
-示例风格：
+统一接口示例：
 
 ```python
-from pathlib import Path
-
-
-def get_segment_audio_path(project_dir: Path, segment_id: str) -> Path:
-    return project_dir / "audio" / "segments" / f"{segment_id}.wav"
+class TTSProvider:
+    async def list_voices(self): ...
+    async def synthesize(self, request): ...
+    async def estimate_cost(self, request): ...
+    async def health_check(self): ...
 ```
+
+支持两类：
+
+## 13.1 Local TTS
+
+可接入：
+
+- IndexTTS
+- CosyVoice
+- MOSS TTS
+- 其他本地模型
+
+## 13.2 Cloud TTS
+
+可接入：
+
+- ElevenLabs
+- OpenAI
+- Azure TTS
+- Google TTS
+- 其他
+
+TTS 功能必须支持：
+
+- 长文本智能切段
+- 语义断句
+- 最短文本限制
+- 最大文本限制
+- Voice Profile
+- Speed
+- Pitch（如果 Provider 支持）
+- Emotion（如果支持）
+- Seed（如果支持）
+- Retry
+- Segment Cache
+- 单段重生成
+- 音量标准化
+- Silence Trim
+- 合并
+- Segment 时间映射
+
+不得强制采用“一行字幕一段 TTS”。
+
+TTS 切段是为了语音自然度，不是为了字幕长度。
+
+---
+
+# 14. Subtitle / Alignment Engine
+
+字幕必须与 TTS 解耦。
+
+即：
+
+```text
+TTS Segment
+≠
+Subtitle Segment
+```
+
+支持：
+
+- Whisper
+- Faster-Whisper
+- WhisperX
+- Forced Alignment
+- 原始文稿辅助 Alignment
+- Segment 内二次对齐
+- SRT
+- VTT
+- JSON Timeline
+
+目标：
+
+即使一个 TTS Segment 长达：
+
+- 10 秒
+- 30 秒
+- 60 秒
+- 120 秒
+
+系统仍应能够在 Segment 内生成自然的逐行字幕。
+
+字幕规则应可配置：
+
+- 每行最大字符数
+- 每条最大时长
+- 每条最小时长
+- 标点优先断句
+- 语义优先断句
+- 单词不切断
+- 中英文差异规则
+- CPS 字符速度
+- 最大行数
+
+---
+
+# 15. Storyboard Engine
+
+Storyboard Engine 是核心能力之一。
+
+输入：
+
+- Script Semantic Result
+- Audio Timing
+- Subtitle Timing
+- Channel Profile
+- Visual Strategy
+
+输出：
+
+- Scene
+- Shot
+- Scene Type
+- Visual Intent
+- Visual Prompt
+- Recommended Source
+- Duration
+- Transition
+
+不要简单地：
+
+```text
+每 5 秒生成一张图
+```
+
+应该根据语义节奏决定。
+
+可能画面类型：
+
+```text
+REAL_FOOTAGE
+STOCK_VIDEO
+AI_IMAGE
+AI_VIDEO
+ARCHIVE
+PORTRAIT
+DOCUMENT
+SCREENSHOT
+CHART
+MAP
+TIMELINE
+QUOTE_CARD
+TEXT_CARD
+DIAGRAM
+INFOGRAPHIC
+B_ROLL
+```
+
+---
+
+# 16. Visual Matching Engine
+
+这是 TubeAiFolw 未来最重要的护城河之一。
+
+输入：
+
+- Scene 语义
+- Entity
+- Event
+- Location
+- Person
+- Time
+- Abstract Concept
+
+输出：
+
+- 视觉策略
+- 素材类型
+- Prompt
+- 搜索关键词
+- 优先级
+
+例如：
+
+```text
+文本：
+“In 2008 Lehman Brothers collapsed.”
+
+分类：
+Historical Event
+
+推荐：
+1. Archive Footage
+2. Lehman Building
+3. 2008 Wall Street
+4. Newspaper Headline
+5. Financial Crisis Timeline
+
+不推荐：
+Generic City Skyline
+Random Business Office
+```
+
+Visual Matching Engine 不应完全依赖一个 LLM Prompt。
+
+应逐渐形成：
+
+- Rule
+- Ontology
+- Prompt
+- Feedback
+- Template
+- History
+
+混合系统。
+
+---
+
+# 17. Visual Diversity Engine
+
+需要避免长视频中连续出现大量：
+
+- 同类静态图
+- 同一个人物
+- 同一种构图
+- 同一种动画
+- 同一种素材
+- 同一画面类型
+
+建议维护滚动窗口。
+
+例如：
+
+```text
+最近 10 个 Scene
+AI_IMAGE = 8
+
+则下一 Scene 优先：
+STOCK_VIDEO
+CHART
+MAP
+ARCHIVE
+TEXT_CARD
+```
+
+可配置 Channel Visual Ratio：
+
+```json
+{
+  "stockVideo": 0.35,
+  "aiImage": 0.25,
+  "aiVideo": 0.10,
+  "chart": 0.08,
+  "map": 0.05,
+  "archive": 0.10,
+  "textCard": 0.07
+}
+```
+
+此比例不是硬限制，而是规划参考。
+
+---
+
+# 18. 图片生成
+
+Image Provider 必须统一。
+
+```python
+class ImageProvider:
+    async def generate(self, request): ...
+    async def upscale(self, request): ...
+    async def estimate_cost(self, request): ...
+```
+
+可支持：
+
+Local：
+
+- FLUX
+- SDXL
+- ComfyUI Workflow
+
+Cloud：
+
+- OpenAI Image
+- Gemini Image
+- 其他
+
+支持：
+
+- Prompt
+- Negative Prompt
+- Seed
+- Style
+- Aspect Ratio
+- Resolution
+- Batch Count
+- Reference Image
+- ControlNet（可选）
+- LoRA（可选）
+
+生成图片必须记录：
+
+- Prompt
+- Model
+- Seed
+- Provider
+- 生成时间
+- 费用
+- 文件 Hash
+
+---
+
+# 19. AI 视频生成
+
+Video Provider 通过 Adapter 接入。
+
+可能支持：
+
+- Seedance
+- Kling
+- Runway
+- Veo
+- 其他
+
+不要把具体服务写进核心 Workflow。
+
+统一接口：
+
+```python
+class VideoGenerationProvider:
+    async def generate(self, request): ...
+    async def get_status(self, task_id): ...
+    async def cancel(self, task_id): ...
+    async def estimate_cost(self, request): ...
+```
+
+需要兼容：
+
+- 同步 API
+- 异步任务 API
+- Polling
+- Webhook（本地软件不强依赖）
+- Task ID
+- Retry
+
+---
+
+# 20. Stock / Local Asset Engine
+
+支持本地素材库。
+
+功能：
+
+- 导入目录
+- 扫描
+- 建索引
+- 视频时长读取
+- 分辨率读取
+- Hash
+- 去重
+- 标签
+- AI Caption
+- Embedding
+- 语义搜索
+- 关键词搜索
+- 使用历史
+- 重复率控制
+
+未来可扩展：
+
+- Pexels
+- Pixabay
+- Storyblocks
+- Envato
+- 用户私有 NAS
+
+不要在没有明确授权和合法来源的情况下自动抓取版权不明的视频。
+
+---
+
+# 21. 关键帧提取
+
+关键帧提取用于：
+
+- 视频理解
+- 素材索引
+- 相似度分析
+- 重复检测
+- Visual Matching
+- Preview
+
+支持策略：
+
+- 固定时间间隔
+- Scene Change Detection
+- SSIM
+- Histogram
+- CLIP Similarity
+- I-frame
+- 自适应关键帧
+
+不要对所有视频每秒提取大量帧。
+
+应根据任务进行分级。
+
+---
+
+# 22. Timeline Engine
+
+Timeline Engine 是第二个最核心模块。
+
+最终时间轴不应依赖 UI 状态。
+
+需要拥有独立数据结构。
+
+示例：
+
+```ts
+interface Timeline {
+  durationMs: number
+  fps: number
+  tracks: Track[]
+}
+
+interface Track {
+  id: string
+  type: "video" | "audio" | "subtitle" | "overlay"
+  clips: Clip[]
+}
+```
+
+Clip：
+
+```ts
+interface Clip {
+  id: string
+  assetId: string
+
+  startMs: number
+  endMs: number
+
+  sourceStartMs?: number
+  sourceEndMs?: number
+
+  transform?: Transform
+  motion?: Motion
+  opacity?: number
+
+  transitionIn?: Transition
+  transitionOut?: Transition
+}
+```
+
+时间轴需要支持：
+
+- 主音频 Track
+- 背景音乐 Track
+- 视频 Track
+- Overlay Track
+- Subtitle Track
+- Image Track
+- Text Track
+
+---
+
+# 23. Motion Engine
+
+静态图片必须支持基础动画，避免长期静止。
+
+例如：
+
+- Ken Burns
+- Zoom In
+- Zoom Out
+- Pan Left
+- Pan Right
+- Slight Drift
+
+需要限制过度动画。
+
+频道级可以配置：
+
+```text
+Subtle
+Normal
+Dynamic
+```
+
+长视频默认：
+
+```text
+Subtle
+```
+
+---
+
+# 24. Transition Engine
+
+支持基础 Transition：
+
+- Cut
+- Crossfade
+- Fade
+- Dip To Black
+
+不要早期实现大量花哨 Transition。
+
+默认优先：
+
+```text
+Cut
+Crossfade
+```
+
+---
+
+# 25. FFmpeg Render Engine
+
+所有 FFmpeg 调用必须集中在 Render Engine。
+
+禁止 UI 页面直接拼接 FFmpeg 命令。
+
+Render Engine 负责：
+
+- Probe
+- Decode
+- Transcode
+- Scale
+- Crop
+- Pad
+- Overlay
+- Audio Mix
+- Subtitle Burn
+- Transition
+- Concatenate
+- Encode
+- Thumbnail
+- Preview
+- Final Render
+
+必须支持硬件编码检测：
+
+- NVENC
+- QSV
+- AMF
+
+默认根据硬件能力选择。
+
+必须保留软件编码 fallback。
+
+---
+
+# 26. Preview Render
+
+完整渲染 30 分钟视频成本高。
+
+必须支持：
+
+- 单 Scene Preview
+- 30 秒 Preview
+- 1 分钟 Preview
+- Low Resolution Preview
+- Low Bitrate Preview
+- Draft Mode
+
+用户修改一个 Scene 后，不应重新渲染整个视频。
+
+---
+
+# 27. Quality Control Engine
+
+TubeAiFolw 必须逐渐建立自动质量检查。
+
+检查项：
+
+## 27.1 视频
+
+- 黑帧
+- 冻结帧
+- 画面分辨率异常
+- 长时间无变化
+- 重复素材
+- 高相似度素材
+- 连续静态图过多
+- 连续同类 Visual Type
+- 画面比例错误
+- Letterbox 异常
+
+## 27.2 音频
+
+- 音量过低
+- 音量过高
+- Clip
+- 静音过长
+- TTS 异常
+- 音频缺失
+- Segment 拼接爆音
+
+## 27.3 字幕
+
+- 字幕超屏
+- 字幕持续时间过短
+- 字幕持续时间过长
+- CPS 过快
+- 时间轴重叠
+- 字幕断裂
+- 文本缺失
+
+## 27.4 内容
+
+- Visual 与 Text 低相关
+- 相同画面多次重复
+- 同一生成图重复
+- 连续镜头变化过慢
+- AI 视觉比例过高
+- Archive 素材不足
+- 图表机会未使用
+
+最终可生成：
+
+```text
+Overall Score: 86
+
+Visual Diversity: 82
+Audio Quality: 93
+Subtitle Quality: 91
+Scene Matching: 84
+Repetition Risk: Low
+```
+
+评分只能作为辅助，不应声明是 YouTube 官方审核结果。
+
+---
+
+# 28. Channel Profile / Style Bible
+
+必须允许为不同频道保存 Profile。
+
+例如：
+
+```json
+{
+  "name": "Tomorrow Atlas",
+  "language": "en-US",
+  "voiceProfile": "narrator_01",
+  "visualStyle": "cinematic_scifi",
+  "subtitleStyle": "minimal_white",
+  "shotDuration": {
+    "min": 5,
+    "max": 12
+  },
+  "visualRatio": {
+    "stockVideo": 0.20,
+    "aiImage": 0.30,
+    "aiVideo": 0.25,
+    "chart": 0.10,
+    "map": 0.10,
+    "textCard": 0.05
+  }
+}
+```
+
+Channel Profile 可包含：
+
+- 频道名
+- 目标语言
+- 目标地区
+- 旁白声音
+- TTS Provider
+- 字幕风格
+- 字幕语言
+- 视觉风格
+- Prompt Prefix
+- Prompt Negative
+- 镜头节奏
+- 图表样式
+- 地图样式
+- Motion
+- Transition
+- Logo
+- Intro
+- Outro
+- 背景音乐
+- 音量
+- Thumbnail Profile
+- Render Profile
+
+---
+
+# 29. Batch Production
+
+Pro / Studio 需要支持批量。
+
+例如：
+
+```text
+Project Queue
+│
+├─ Video A
+├─ Video B
+├─ Video C
+└─ Video D
+```
+
+支持：
+
+- 最大并行任务数
+- GPU 队列
+- API 并发
+- Rate Limit
+- 夜间渲染
+- 自动重试
+- Fail Fast
+- Stop After Current
+- Resume
+
+Batch 不等于“一键生产垃圾内容”。
+
+仍需质量控制。
+
+---
+
+# 30. Task Queue
+
+Task Queue 是必需基础设施。
+
+任务分类：
+
+```text
+CPU
+GPU
+NETWORK
+FFMPEG
+API
+```
+
+不同类型有独立并发限制。
+
+示例：
+
+```text
+GPU Jobs: 1
+FFmpeg Jobs: 2
+API Jobs: 4
+CPU Jobs: 4
+```
+
+任务必须持久化。
+
+应用崩溃后：
+
+```text
+RUNNING
+```
+
+的任务重新标记为：
+
+```text
+INTERRUPTED
+```
+
+由用户决定：
+
+- Resume
+- Retry
+- Cancel
+
+---
+
+# 31. Cache
+
+所有昂贵操作尽量缓存。
+
+缓存 Key 应基于：
+
+```text
+Input Hash
++
+Provider
++
+Model
++
+Parameters
++
+App Engine Version
+```
+
+例如：
+
+```text
+TTS Cache
+
+hash(
+text
++ voice
++ speed
++ provider
++ model
+)
+```
+
+这样同样的输入不会重复花钱。
+
+---
+
+# 32. 成本统计
+
+BYOK 也应帮助用户统计成本。
+
+记录：
+
+- LLM Token
+- TTS 字符数
+- 图片数量
+- AI 视频秒数
+- API 调用
+- 估算 USD
+- 项目成本
+
+例如：
+
+```text
+Project Cost
+
+LLM            $0.13
+TTS            $1.25
+Image          $0.80
+AI Video       $4.50
+
+Total          $6.68
+```
+
+Local Model：
+
+```text
+Cost: Local
+```
+
+不需要虚构 GPU 电费。
+
+---
+
+# 33. Provider Registry
+
+所有 Provider 统一注册。
+
+例如：
+
+```python
+provider_registry.register("tts.elevenlabs", provider)
+provider_registry.register("tts.indextts", provider)
+
+provider_registry.register("image.flux", provider)
+provider_registry.register("image.openai", provider)
+
+provider_registry.register("video.seedance", provider)
+```
+
+Provider Metadata：
+
+```json
+{
+  "id": "tts.elevenlabs",
+  "category": "tts",
+  "displayName": "ElevenLabs",
+  "capabilities": [
+    "voice_list",
+    "streaming",
+    "emotion"
+  ]
+}
+```
+
+---
+
+# 34. Provider Capability
+
+不要假设所有 Provider 功能相同。
+
+通过 Capability 判断。
+
+例如：
+
+```text
+supportsSeed
+supportsReferenceImage
+supportsNegativePrompt
+supportsVoiceClone
+supportsStreaming
+supportsAsyncTask
+```
+
+UI 根据 Capability 动态显示。
+
+---
+
+# 35. Model Manager
+
+模型必须与 Desktop 安装包解耦。
+
+功能：
+
+- 查看已安装
+- 查看版本
+- 下载
+- 暂停
+- 恢复
+- 校验
+- 删除
+- 移动模型目录
+- 查看磁盘占用
+- 检查依赖
+- 检查 GPU
+- 检查 VRAM
+
+模型目录用户可指定：
+
+```text
+D:\TubeAiFolw\Models
+```
+
+不要固定在系统盘。
+
+模型 Manifest：
+
+```json
+{
+  "id": "whisper-large-v3",
+  "version": "1.0",
+  "size": 3100000000,
+  "sha256": "...",
+  "downloadUrl": "...",
+  "requiredVram": 6000
+}
+```
+
+---
+
+# 36. Hardware Detection
+
+首次启动运行 Hardware Check。
+
+检测：
+
+- OS
+- CPU
+- RAM
+- GPU
+- VRAM
+- CUDA
+- FFmpeg
+- NVENC
+- 可用磁盘
+- Python Engine
+- Model Directory
+
+给出：
+
+```text
+Recommended
+Compatible
+Limited
+Unsupported
+```
+
+不要仅仅因为没有 NVIDIA GPU 就禁止使用。
+
+---
+
+# 37. 设置
+
+Settings 建议分：
+
+## General
+
+- Language
+- Theme
+- Project Directory
+- Temp Directory
+- Cache Directory
+
+## Performance
+
+- CPU Threads
+- GPU Device
+- FFmpeg Encoder
+- Parallel Jobs
+- VRAM Strategy
+
+## Models
+
+- Model Directory
+- Installed Models
+
+## Providers
+
+- LLM
+- TTS
+- Image
+- Video
+- Stock
+
+## Account
+
+- Account
+- License
+- Device
+
+## Update
+
+- Stable
+- Beta
+- Dev
+
+## Privacy
+
+- Telemetry
+- Crash Report
+
+---
+
+# 38. API Key 安全
+
+禁止明文写入：
+
+```text
+config.json
+settings.json
+project.json
+SQLite plaintext field
+```
+
+Windows 应优先：
+
+- DPAPI
+- Windows Credential Manager
+
+只在配置层保存：
+
+```text
+credential_id
+```
+
+而不是：
+
+```text
+api_key
+```
+
+日志中必须过滤：
+
+```text
+sk-...
+Bearer ...
+Authorization
+Cookie
+```
+
+---
+
+# 39. License 架构
+
+商业版本使用：
+
+```text
+Account
++
+Device Activation
++
+Signed License
++
+Offline Lease
+```
+
+## 39.1 原则
+
+- Private Key 只存在服务器
+- Desktop 仅保存 Public Key
+- License 使用 Ed25519 签名
+- 客户端可离线验证
+- 不要求每次启动联网
+- 支持设备解绑
+- 不追求无法破解
+- 重点阻止普通复制滥用
+
+## 39.2 License Payload
+
+示例：
+
+```json
+{
+  "licenseId": "lic_xxx",
+  "userId": "usr_xxx",
+  "plan": "pro",
+  "licenseType": "perpetual",
+  "maintenanceUntil": "2027-08-28",
+  "leaseExpiresAt": "2026-09-28",
+  "deviceId": "device_xxx",
+  "features": [
+    "batch",
+    "advanced_storyboard",
+    "quality_control"
+  ]
+}
+```
+
+## 39.3 Offline Lease
+
+推荐：
+
+```text
+Lease = 30 days
+```
+
+客户端：
+
+```text
+每 7 天尝试刷新
+```
+
+如果网络不可用：
+
+- 当前 Lease 未过期 -> 正常使用
+- Lease 过期 -> 进入 Grace Period
+- Grace Period 过期 -> 限制 Pro 功能
+
+避免服务器短时不可用导致所有客户无法工作。
+
+---
+
+# 40. Device Fingerprint
+
+不能过于严格。
+
+可综合：
+
+- MachineGuid
+- 主板
+- CPU
+- 系统盘
+
+然后 Hash。
+
+云端只存 Hash。
+
+用户应可以在账户页：
+
+```text
+Deactivate Device
+```
+
+建议：
+
+```text
+Creator: 1 device
+Pro: 2 devices
+Studio: 3~5 devices
+```
+
+---
+
+# 41. 商业模式
+
+优先推荐：
+
+**Desktop Perpetual License + 1 Year Updates**
+
+例如：
+
+```text
+Free
+$0
+
+Creator
+$99
+
+Pro
+$199
+
+Studio
+$499
+```
+
+购买后：
+
+- 当前大版本永久使用
+- 12 个月免费更新
+- 12 个月后旧版本继续使用
+- 想继续获取新版本则购买维护期
+
+不要默认：
+
+```text
+不续订就软件完全打不开
+```
+
+后续可以提供 Subscription，但不应成为唯一方式。
+
+---
+
+# 42. License Server
+
+API：
+
+```text
+POST /auth/login
+POST /auth/refresh
+
+GET  /license
+POST /license/activate
+POST /license/refresh
+POST /license/deactivate
+
+GET  /devices
+DELETE /devices/:id
+
+GET /versions/latest
+```
+
+Payment：
+
+```text
+POST /payment/webhook
+```
+
+数据库：
+
+```text
+users
+licenses
+devices
+subscriptions
+payments
+versions
+```
+
+---
+
+# 43. 更新系统
+
+更新拆为：
+
+```text
+Desktop
+Engine
+Models
+```
+
+不要把三者绑死。
+
+## 43.1 Desktop Update
+
+Version API：
+
+```json
+{
+  "version": "1.4.2",
+  "channel": "stable",
+  "mandatory": false,
+  "downloadUrl": "...",
+  "sha256": "...",
+  "releaseNotes": "..."
+}
+```
+
+更新：
+
+```text
+Check
+↓
+Download
+↓
+SHA256
+↓
+Signature Verify
+↓
+Install
+```
+
+## 43.2 Engine Update
+
+Engine 独立版本：
+
+```text
+Desktop: 1.4.2
+Engine: 0.9.3
+```
+
+需要兼容矩阵。
+
+## 43.3 Model Update
+
+Model Manager 负责。
+
+不要因为 Desktop 更新重新下载 10GB 模型。
+
+---
+
+# 44. Release Channel
+
+必须支持：
+
+```text
+stable
+beta
+dev
+```
+
+默认用户：
+
+```text
+stable
+```
+
+Beta 用户主动选择。
+
+Dev 不对普通客户展示。
+
+---
+
+# 45. 强制更新
+
+仅以下情况：
+
+- 严重安全问题
+- License 协议不兼容
+- 云端 API 完全不兼容
+- 数据破坏 Bug
+
+普通功能更新：
+
+```text
+mandatory = false
+```
+
+---
+
+# 46. Windows 安装
+
+V1 推荐：
+
+```text
+EXE Installer
++
+Auto Updater
+```
+
+可使用：
+
+- Inno Setup
+- NSIS
+- WiX
+
+后期：
+
+- MSIX
+- Microsoft Store
+
+不是第一优先级。
+
+---
+
+# 47. Code Signing
+
+商业发行版本需要 Code Signing。
+
+所有：
+
+- EXE
+- DLL
+- Installer
+- Updater
+
+应签名。
+
+CI/CD 中统一处理。
+
+---
+
+# 48. CI/CD
+
+目标：
+
+```text
+git tag v1.3.0
+```
+
+自动：
+
+```text
+Lint
+↓
+Test
+↓
+Build Desktop
+↓
+Build Engine
+↓
+Build Installer
+↓
+Code Sign
+↓
+Generate SHA256
+↓
+Upload CDN
+↓
+Update Version API
+```
+
+不要手动修改生产版本文件。
+
+---
+
+# 49. 数据库迁移
+
+SQLite 必须有 Migration。
+
+禁止：
+
+```text
+修改表结构
+然后假设用户数据库自动适配
+```
+
+每个 Schema 修改：
+
+```text
+migration_001
+migration_002
+migration_003
+```
+
+升级前：
+
+- 自动备份
+- 执行 Migration
+- 验证
+- 失败则恢复
+
+---
+
+# 50. 日志
+
+日志级别：
+
+```text
+DEBUG
+INFO
+WARNING
+ERROR
+CRITICAL
+```
+
+记录：
+
+- Job ID
+- Project ID
+- Scene ID
+- Provider
+- Model
+- Duration
+- Error Code
+
+不要记录：
+
+- API Key
+- Access Token
+- Password
+- 完整 License Token
+
+---
+
+# 51. Error Code
+
+所有 Engine 错误应有稳定 Error Code。
+
+例如：
+
+```text
+TTS_PROVIDER_UNAVAILABLE
+TTS_RATE_LIMIT
+MODEL_NOT_INSTALLED
+GPU_OUT_OF_MEMORY
+FFMPEG_RENDER_FAILED
+ASSET_NOT_FOUND
+LICENSE_EXPIRED
+LICENSE_DEVICE_LIMIT
+```
+
+UI 根据 Error Code 展示友好信息。
+
+不要让用户只看到：
+
+```text
+Python traceback
+```
+
+但 Debug 页面可展示详细 Trace。
+
+---
+
+# 52. Crash Recovery
+
+应用启动时检查：
+
+- 未完成 Job
+- 写入中的文件
+- 不完整 Render
+- 数据库事务
+- 临时文件
+
+用户看到：
+
+```text
+Previous session did not close normally.
+
+3 interrupted tasks found.
+
+[Resume]
+[Review]
+[Discard]
+```
+
+---
+
+# 53. 临时文件管理
+
+所有临时数据集中：
+
+```text
+Temp Directory
+```
+
+支持：
+
+- 自动清理
+- 手动清理
+- 清理超过 N 天缓存
+- 保留正在使用文件
+
+不要在各个模块生成随机临时目录无法追踪。
+
+---
+
+# 54. 磁盘空间
+
+执行任务前预估空间。
+
+例如：
+
+```text
+Estimated required: 18 GB
+Available: 7 GB
+```
+
+禁止直接开始渲染然后写满系统盘。
+
+---
+
+# 55. GPU OOM
+
+GPU 任务必须捕获 OOM。
+
+自动策略：
+
+1. 清理缓存
+2. 降低 Batch
+3. 降低分辨率
+4. CPU Offload
+5. Retry
+6. 提示用户
+
+不得无限重试。
+
+---
+
+# 56. UI 主要页面
+
+V1 建议：
+
+```text
+Home
+Projects
+Project Workspace
+Jobs
+Models
+Providers
+Settings
+Account
+```
+
+Project Workspace：
+
+```text
+Script
+Audio
+Subtitle
+Storyboard
+Timeline
+Quality
+Export
+```
+
+---
+
+# 57. Project Workspace
+
+推荐布局：
+
+```text
+左：
+Scene List
+
+中：
+Preview
+
+右：
+Scene Inspector
+
+底：
+Timeline / Jobs
+```
+
+Scene Inspector：
+
+- Text
+- Timing
+- Voice
+- Visual Type
+- Prompt
+- Asset
+- Motion
+- Transition
+- Regenerate
+- Lock
+
+---
+
+# 58. 生成按钮
+
+不要只有：
+
+```text
+Generate Video
+```
+
+应该有：
+
+```text
+Generate Audio
+Generate Subtitle
+Generate Storyboard
+Generate Visuals
+Build Timeline
+Preview
+Quality Check
+Render Final
+```
+
+同时可以提供：
+
+```text
+Run Workflow
+```
+
+自动执行完整流程。
+
+---
+
+# 59. Undo / History
+
+至少支持 Scene 编辑 History。
+
+长期建议：
+
+- Undo
+- Redo
+- Operation Log
+
+AI 重新生成前应保留上一版本。
+
+例如：
+
+```text
+scene_001
+├─ visual_v1
+├─ visual_v2
+└─ visual_v3
+```
+
+用户可回退。
+
+---
+
+# 60. Lock
+
+锁定机制非常重要。
+
+用户手动确认一个 Scene 后：
+
+```text
+lockedVisual = true
+```
+
+再次：
+
+```text
+Run Workflow
+```
+
+不能覆盖。
+
+同理：
+
+- Text Lock
+- Audio Lock
+- Visual Lock
+- Timing Lock
+
+---
+
+# 61. 素材重复检测
+
+素材 Hash：
+
+- 文件 Hash
+- Perceptual Hash
+- Frame Embedding
+
+用于判断：
+
+- 完全重复
+- 高度相似
+- 同一个视频不同裁剪
+
+长视频中可设置：
+
+```text
+Avoid reuse within 10 minutes
+```
+
+---
+
+# 62. YouTube 低质风险辅助
+
+TubeAiFolw 可以提供：
+
+```text
+Repetition Risk
+Template Risk
+Visual Diversity
+```
+
+但产品文案必须说明：
+
+- 不是 YouTube 官方检测
+- 不保证获利
+- 不保证审核通过
+- 只作为内容质量辅助
+
+不要宣称：
+
+```text
+100% pass monetization
+```
+
+---
+
+# 63. Privacy
+
+默认：
+
+```text
+Local Processing
+```
+
+如果用户调用第三方 Provider：
+
+UI 应明确：
+
+```text
+This step will send data to Provider X.
+```
+
+可配置：
+
+```text
+Never Send Full Script
+```
+
+只发送当前 Scene。
+
+---
+
+# 64. Telemetry
+
+默认只收集必要匿名数据。
+
+建议可选：
+
+- App Version
+- OS
+- Crash
+- Feature Usage
+- Job Success / Failure
+
+禁止上传：
+
+- Script
+- Voice
+- Images
+- Video
+- API Key
+
+用户可关闭。
+
+---
+
+# 65. 插件系统
+
+V1 不一定暴露插件市场。
+
+但内部架构需插件化。
+
+未来可允许：
+
+```text
+Provider Plugin
+Workflow Plugin
+Exporter Plugin
+Asset Source Plugin
+```
+
+插件必须有明确 API Version。
+
+---
+
+# 66. Export
+
+支持：
+
+- MP4
+- SRT
+- VTT
+- Audio
+- Scene JSON
+- Timeline JSON
+- Project Archive
+
+未来可考虑：
+
+- Premiere XML
+- Final Cut XML
+- DaVinci
+- EDL
+
+不是 V1 必需。
+
+---
+
+# 67. Render Preset
+
+默认：
+
+```text
+YouTube 1080p
+1920x1080
+30fps
+H.264
+AAC
+```
+
+可选：
+
+- 1080p 60fps
+- 1440p
+- 4K
+
+不要默认 4K。
+
+---
+
+# 68. Thumbnail
+
+Thumbnail 可作为独立模块。
+
+但不是核心 V1。
+
+未来：
+
+- Thumbnail Prompt
+- Thumbnail Image
+- Thumbnail Text
+- A/B Variants
+
+不要让 Thumbnail 功能拖慢核心视频 Workflow。
+
+---
+
+# 69. SEO / Upload
+
+未来可以支持：
+
+- Title
+- Description
+- Chapters
+- Keywords
+- Tags
+- Pinned Comment
+
+自动上传 YouTube 不作为 V1 核心。
+
+如果未来支持，必须使用官方 OAuth API。
+
+---
+
+# 70. V1 范围
+
+V1 必须克制。
+
+目标：
+
+**Script → Finished Long-form Video**
+
+V1 核心：
+
+- 项目创建
+- Script 导入
+- TTS
+- Audio Merge
+- Subtitle Alignment
+- Semantic Scene
+- Storyboard
+- AI Image
+- 本地素材
+- Timeline
+- Ken Burns
+- FFmpeg Render
+- Preview
+- Scene Regenerate
+- Basic Quality Check
+- License
+- Auto Update
+
+V1 不需要：
+
+- 完整 NLE
+- 多人协作
+- 云项目同步
+- Plugin Market
+- 移动端
+- macOS
+- AI Avatar
+- 直播
+- Social Scheduling
+
+---
+
+# 71. V2
+
+重点：
+
+- Timeline Editor
+- Scene Editor
+- Advanced Visual Matching
+- Stock Integration
+- AI Video
+- Chart
+- Map
+- Screenshot
+- Batch Projects
+- Channel Profile
+
+---
+
+# 72. V3
+
+重点：
+
+- Studio
+- 多项目 Queue
+- Advanced QC
+- Template
+- Automation
+- Export Integrations
+- Plugin SDK
+- macOS
+
+---
+
+# 73. Free 工具
+
+官网可逐渐提供免费工具用于 SEO 获客：
+
+- SRT 修复
+- SRT 时间偏移
+- TXT → SRT
+- SRT → TXT
+- 音频合并
+- 视频合并
+- 视频信息读取
+- 关键帧提取
+- 音频时长分析
+- FFmpeg GUI
+
+这些不应破坏 Desktop 主产品定位。
+
+---
+
+# 74. 编码规范 — TypeScript
+
+必须：
+
+- TypeScript Strict
+- 避免 any
+- 所有跨进程对象有类型
+- API Response 有 Schema
+- 使用 Zod / Valibot 可选
+- UI Component 不承担业务逻辑
+
+推荐：
+
+```text
+Component
+↓
+Hook
+↓
+Service
+↓
+IPC Client
+```
+
+---
+
+# 75. 编码规范 — Python
+
+必须：
+
+- Type Hint
+- Pydantic
+- 明确 Exception
+- 不使用裸 except
+- 不使用大量全局变量
+- Provider 无状态或明确状态管理
+- Job 可重试
+- IO 与业务逻辑分离
+
+推荐：
+
+```python
+async def generate(...) -> Result:
+```
+
+---
+
+# 76. 函数设计
 
 避免：
 
-```python
-class AbstractSegmentAudioPathFactoryBase:
-    ...
+```text
+process_everything()
 ```
 
-### 9.3 前端代码规范
+拆分：
 
-- 页面代码优先直观。
-- 不要过度封装 hooks。
-- 简单请求可以直接在页面中调用 API 方法。
-- 公共 API 请求封装在 `api/` 目录。
-- 类型定义放在 `types/` 目录。
-- 组件 props 不要设计得过度复杂。
-- 不要写过度通用的表格组件、表单组件或弹窗系统。
-- 项目详情页按脚本、配音字幕、故事板、素材、渲染和报告拆分子路由。
-- 页面不得直接解析 `config_json`、第三方 Provider 响应或数据库内部字段。
-- 故事板编辑状态应以 scene 为最小保存单元，替换单场景素材时不要刷新或重建整条故事板。
+```text
+normalize_script
+segment_tts
+generate_audio
+align_subtitle
+plan_scene
+generate_visual
+render_scene
+```
 
-### 9.4 注释规范
+每个函数尽量：
 
-- 注释解释“为什么这样做”，不要重复代码表面含义。
-- 对 FFmpeg 命令、SRT 时间格式、TTS 调用参数、向量模型输入和素材评分规则要写必要注释。
-- 对临时方案要标注清楚，例如 `TODO` 或 `NOTE`。
-- 不要写无意义注释。
+- 单职责
+- 可测试
+- 可重用
+- 可缓存
 
 ---
 
-## 10. 配置规范
-
-项目配置使用 `.env` 与简单配置文件。
-
-`.env` 示例：
-
-```env
-APP_HOST=127.0.0.1
-APP_PORT=18080
-WORKSPACE_DIR=./workspace
-FFMPEG_PATH=ffmpeg
-FFPROBE_PATH=ffprobe
-GEMINI_API_KEY=
-OPENAI_API_KEY=
-PEXELS_API_KEY=
-PIXABAY_API_KEY=
-EMBEDDING_MODEL_PATH=
-VECTOR_INDEX_PATH=./workspace/indexes/media.faiss
-```
-
-要求：
-
-- API Key 不得写入代码。
-- `.env` 不得提交到公开仓库。
-- 默认配置应能在本地直接运行。
-- 字幕导出不得依赖外部翻译 API 或翻译密钥。
-- 缺少远程素材 API Key 时，本地素材库、手工素材选择和粗剪功能仍应可用。
-- 系统配置、项目配置与单次任务快照必须分开。
-- 前端 API 返回配置对象时必须隐藏完整密钥，只返回是否已配置或掩码值。
+# 77. 配置
 
 配置分层：
 
-1. `SystemSettings`：FFmpeg、模型路径、API Key、GPU 设备和本机 workspace。
-2. `ProjectConfig`：音色、SRT 导出参数、视频尺寸、素材偏好、兜底策略和渲染参数。
-3. `TaskRun.checkpoint_json`：单次任务使用的配置快照、阶段输出和恢复点。
-
-短期可以继续将 ProjectConfig 存在 `projects.config_json` 中，但必须通过 Pydantic 模型统一读写。API 返回解析后的 `config` 对象，前端不得自行解析 JSON 字符串。
-
-视频相关项目配置建议：
-
-```yaml
-video:
-  width: 1920
-  height: 1080
-  fps: 30
-  codec: libx264
-  pixel_format: yuv420p
-
-scene:
-  min_duration_ms: 3000
-  preferred_duration_ms: 8000
-  max_duration_ms: 15000
-
-retrieval:
-  local_top_k: 50
-  final_candidates: 3
-  similarity_threshold: null
-  use_dynamic_threshold: true
-
-remote_search:
-  providers: [pexels, pixabay]
-  max_rounds: 3
-  preview_candidates: 30
-  full_download_candidates: 3
-  cache_ttl_hours: 24
-
-fallback:
-  enable_images: true
-  enable_topic_assets: true
-  enable_landscape: true
-  landscape_max_ratio: 0.08
-
-render:
-  scene_parallelism: 2
-  preview_crf: 26
-  final_crf: 18
-  audio_lufs: -16
+```text
+App Default
+↓
+User Settings
+↓
+Channel Profile
+↓
+Project Settings
+↓
+Scene Override
 ```
 
-不同模型的相似度分布不同，`similarity_threshold` 默认不写死。阈值应通过人工标注测试集校准，并保存模型版本和校准结果。
+Scene Override 优先级最高。
 
 ---
 
-## 11. 日志规范
+# 78. 兼容性
 
-需要记录以下日志：
-
-- 项目创建
-- 文本清洗
-- 切段结果
-- 每个 segment 的 TTS 生成状态
-- FFmpeg 命令执行失败原因
-- 字幕导出结果
-- 完整音频导出结果
-- 视觉语义段与 Storyboard 生成结果摘要
-- 本地素材召回数量和候选状态
-- 远程素材查询、缓存命中、配额和下载结果
-- 素材入库、切镜、抽帧、向量化与去重结果
-- 每个 scene 的素材选择、人工替换和渲染状态
-- 最终视频拼接与音轨合成结果
-- 自动质量检查问题摘要
-
-日志文件建议：
+所有 Provider 数据必须保存：
 
 ```text
-workspace/projects/{project_id}/logs/app.log
-workspace/projects/{project_id}/logs/tts.log
-workspace/projects/{project_id}/logs/storyboard.log
-workspace/projects/{project_id}/logs/assets.log
-workspace/projects/{project_id}/logs/render.log
-workspace/projects/{project_id}/logs/qa.log
-workspace/projects/{project_id}/logs/error.log
+provider_id
+model_id
+model_version
 ```
 
-要求：
-
-- 日志要能帮助定位是哪一个 segment 失败。
-- 视频相关日志要能帮助定位是哪一个 scene、candidate、media file 或 shot 失败。
-- 不要在日志中输出完整 API Key。
-- 不要在日志中输出过长的原始全文，可截断显示。
-- 不要记录第三方接口完整鉴权 URL。
-- FFmpeg、Provider 和模型调用失败时必须保留可诊断的 stderr、HTTP 状态或解析错误摘要。
-
----
-
-## 12. 安全与本地权限规范
-
-本项目默认在本地运行，不默认提供公网访问。
-
-要求：
-
-- 后端默认监听 `127.0.0.1`。
-- 不要默认开启跨域公网访问。
-- 文件读写必须限制在 workspace 目录内。
-- 不要允许前端传入任意系统路径后直接删除或覆盖文件。
-- 所有外部命令调用必须使用参数数组，不要拼接 shell 字符串。
-- 对上传文件类型进行基础校验。
-- 对音频文件大小进行限制。
-- 对视频和图片文件类型、文件大小、分辨率和可解码性进行基础校验。
-- 远程下载必须限制超时、最大文件大小、重试次数和允许的协议。
-- 不允许前端提供任意下载 URL 后由后端无条件访问；远程素材应来自配置过的 Provider 或经过明确校验的来源。
-- 从素材元数据中读取到的文件名、作者名和标题不得直接用作系统路径。
-- 素材删除前需要确认没有项目 SceneAssignment 正在引用；默认优先软删除元数据或移入受控回收目录。
-- 第三方素材来源、作者和许可信息必须随最终导出清单保留。
-
----
-
-## 13. SRT 字幕规范
-
-每个项目只生成一份 `subtitles/subtitles.srt`。字幕语言和内容与输入逐字稿一致，不执行翻译，不生成多语种副本，也不生成 ASS 文件。
-
-文件要求：
-
-- 使用 UTF-8 编码。
-- Cue 序号从 1 开始连续递增。
-- 时间戳格式固定为 `HH:MM:SS,mmm --> HH:MM:SS,mmm`。
-- 每个 Cue 依次包含序号、时间戳、正文和一个空行。
-- 时间必须来自真实音频时间轴，不得按字符数估算。
-- Cue 不得重叠、倒序、出现负时长或越过配音结束时间。
-- 字幕文本不得翻译或改写；因显示长度拆分时，必须保持原文顺序、内容和语义不变。
-- 不写入字体、颜色、位置、描边等样式标签，不引入 ASS 控制符。
-
----
-
-## 14. 不做的事情
-
-当前视频合成 MVP 明确不做以下内容：
-
-- 不做剪映草稿生成
-- 不做剪映自动点击
-- 不把剪映作为核心渲染引擎
-- 不把复杂 AI 视频生成作为基础生产方式
-- 不默认使用 AI 图片生成；只保留后续可选补充能力
-- 不做自动人物身份识别
-- 不做复杂新闻档案搜索
-- 不做多模型复杂重排
-- 不做高级地图、时间线和数据动画
-- 不做 YouTube 自动上传
-- 不做云端账号系统
-- 不做多人协作
-- 不做复杂权限系统
-- 不做插件市场
-- 不做通用工作流编排平台、可视化 DAG 或工作流 DSL
-- 不做多机并行或分布式素材库
-- 不做字幕翻译、多语种字幕或 ASS 字幕输出
-
-当前 MVP 应优先完成：
-
-1. 视觉语义段合并。
-2. Storyboard JSON 与英文视觉查询。
-3. Pexels、Pixabay 搜索和查询缓存。
-4. 缩略图预筛、候选下载与本地素材入库。
-5. 素材切镜、关键帧、向量化和 FAISS 检索。
-6. 主题化兜底素材。
-7. 场景独立渲染与完整视频拼接。
-8. 原文 SRT 字幕、配音和基础背景音乐合成。
-9. 自动 QA、故事板审核和低置信度人工替换。
-
-后续能力必须通过现有业务边界扩展，不得污染配音字幕基础模块或把可选能力硬编码进核心工作流。
-
----
-
-## 15. AI 编码助手行为规范
-
-当 AI 编码助手参与本项目开发时，必须遵守以下规则：
-
-- 优先保持代码简单。
-- 不要主动引入复杂架构。
-- 不要把简单需求写成企业级框架。
-- 不要创建无必要的抽象基类、工厂、接口层、插件层。
-- 不要在没有要求的情况下重构大量无关代码。
-- 修改代码时应尽量小范围变更。
-- 新增功能时应优先复用现有简单结构。
-- 不要擅自改变技术栈。
-- 后端必须使用 Python。
-- 前端必须使用 Vue 3 + TypeScript。
-- 本地版本数据库使用 SQLite。
-- 音频处理优先使用 FFmpeg。
-- 视频处理与最终合成优先使用 FFmpeg。
-- 字幕只生成与输入逐字稿一致的 UTF-8 SRT 文件。
-- TTS 集成逻辑必须集中在 `integrations/tts/` 与 `services/narration/tts_service.py`，不能散落在 API、workflow 或渲染模块。
-- Pexels、Pixabay 集成逻辑必须集中在 `integrations/media_providers/`。
-- Embedding 和向量索引逻辑必须集中在 `integrations/vision/`。
-- 新增视频功能必须遵循 VoiceSegment、SubtitleCue、VisualScene、MediaShot 和 SceneAssignment 的边界。
-- 新增完整流程步骤时优先扩展 `workflows/`，不要在 API 或 Batch Worker 中复制流程。
-- 修改现有平铺 service 时，优先进行行为不变的小步迁移，再增加新功能。
-- 不要在同一变更中同时大规模移动文件、修改 API 和重写业务逻辑。
-- 涉及外部 API Key 的代码必须从环境变量读取。
-- 涉及文件操作时必须考虑本地路径安全。
-
-本项目的代码风格目标是：
+不能只保存：
 
 ```text
-能跑通
-易理解
-易调试
-少抽象
-少魔法
+model = "pro"
+```
+
+因为 Provider 会变。
+
+---
+
+# 79. Provider 失效
+
+如果第三方 Provider：
+
+- 改 API
+- 下线模型
+- 限流
+- 涨价
+
+不应该导致项目无法打开。
+
+项目应显示：
+
+```text
+Provider unavailable.
+Select replacement.
+```
+
+---
+
+# 80. 测试
+
+至少：
+
+## Unit
+
+- Script
+- Segment
+- Subtitle
+- Timeline
+- License Verify
+- Provider Adapter
+- Cost Calculation
+
+## Integration
+
+- TTS → Audio
+- Audio → Subtitle
+- Scene → Asset
+- Timeline → FFmpeg
+
+## E2E
+
+最少一个：
+
+```text
+short_test_script
+↓
+full workflow
+↓
+test.mp4
+```
+
+---
+
+# 81. Golden Test
+
+维护固定测试项目：
+
+```text
+tests/golden/
+```
+
+包含：
+
+- 中文
+- 英文
+- 长句
+- 短句
+- 数字
+- 人名
+- 日期
+
+每次核心逻辑变化执行。
+
+---
+
+# 82. FFmpeg Test
+
+必须验证：
+
+- Windows 路径
+- 中文路径
+- 空格路径
+- 特殊字符
+- 长路径
+
+禁止假设路径只包含英文。
+
+---
+
+# 83. 性能
+
+长项目不得把所有：
+
+- Frame
+- Audio
+- Image
+
+加载进内存。
+
+应流式处理。
+
+---
+
+# 84. 大文件
+
+视频文件统一通过 Path 引用。
+
+数据库不存 Blob。
+
+不要 Base64 存视频。
+
+---
+
+# 85. 文件命名
+
+内部文件建议：
+
+```text
+scene_0001
+scene_0002
+```
+
+不要直接使用用户文本作为文件名。
+
+避免：
+
+- 中文非法字符
+- Windows 保留字符
+- 超长 Path
+
+---
+
+# 86. 原子写入
+
+重要 JSON：
+
+```text
+project.json
+```
+
+写入使用：
+
+```text
+temp
+↓
+fsync
+↓
+rename
+```
+
+避免崩溃导致项目文件损坏。
+
+---
+
+# 87. Project Backup
+
+自动备份：
+
+```text
+.backup/
+```
+
+条件：
+
+- Migration
+- 大范围 Workflow
+- 删除 Scene
+- 导入 Project
+
+---
+
+# 88. Version
+
+采用 Semantic Versioning：
+
+```text
+MAJOR.MINOR.PATCH
+```
+
+例如：
+
+```text
+1.3.2
+```
+
+Engine 独立版本。
+
+---
+
+# 89. Git
+
+提交消息建议：
+
+```text
+feat:
+fix:
+refactor:
+perf:
+docs:
+test:
+build:
+chore:
+```
+
+禁止一次提交同时：
+
+- 重构
+- 功能
+- 格式化整个项目
+
+除非必要。
+
+---
+
+# 90. Agent 工作原则
+
+任何编码 Agent 在修改项目前：
+
+1. 先阅读 `AGENTS.md`
+2. 阅读相关目录
+3. 查找现有实现
+4. 不重复造已有模块
+5. 不随意替换技术栈
+6. 不修改无关代码
+7. 不做超范围重构
+8. 优先小步提交
+9. 保证旧项目兼容
+10. 如果修改数据结构，必须考虑 Migration
+
+---
+
+# 91. Agent 新增 Provider 时
+
+必须完成：
+
+1. Provider Interface 实现
+2. Metadata
+3. Capability
+4. Config Schema
+5. Error Mapping
+6. Cost Estimate
+7. Health Check
+8. Unit Test
+9. Documentation
+
+禁止只在某个页面硬编码 API。
+
+---
+
+# 92. Agent 新增 Workflow Step 时
+
+必须定义：
+
+- Step ID
+- Inputs
+- Outputs
+- Cache Key
+- Retry Strategy
+- Failure State
+- Resume Strategy
+- Progress
+- Log
+
+---
+
+# 93. Agent 修改 Scene 时
+
+必须检查：
+
+- Timeline
+- Cache
+- Job
+- Project Serialization
+- Migration
+- UI
+- Export
+
+Scene 是核心数据结构。
+
+不可轻易修改。
+
+---
+
+# 94. Agent 修改 License 时
+
+严格要求：
+
+- Private Key 不进入客户端
+- 不在日志显示 Token
+- 不移除签名验证
+- 不将 License 逻辑仅放 UI
+- Pro Feature 后端 / Engine 也要验证
+- Offline Lease 可继续工作
+
+---
+
+# 95. Agent 修改 Update 时
+
+必须：
+
+- SHA256
+- 签名验证
+- Version Check
+- Rollback
+- 不自动执行未验证二进制
+
+---
+
+# 96. 安全边界
+
+TubeAiFolw 不应：
+
+- 收集用户密码
+- 上传用户脚本
+- 上传用户视频
+- 私自上传声音
+- 存储第三方 API Key 云端
+- 自动抓取受版权保护素材
+- 绕过平台风控
+- 绕过 YouTube 审核
+- 伪造原创性
+
+---
+
+# 97. AI 内容透明度
+
+项目应提供：
+
+- AI 生成标记 Metadata
+- Provider 记录
+- Prompt History
+
+方便用户管理内容来源。
+
+---
+
+# 98. 商业优先级
+
+如果资源有限，优先级：
+
+```text
+稳定性
+>
+可恢复
+>
+画面匹配
+>
+时间轴
+>
+质量控制
+>
+批量
+>
+模型数量
+>
+炫酷 UI
+```
+
+---
+
+# 99. 一人公司原则
+
+因为 TubeAiFolw 预期长期由极小团队维护，所以所有功能要考虑：
+
+- 客服成本
+- 服务器成本
+- Bug 成本
+- 依赖成本
+- Provider 变更成本
+- Windows 兼容成本
+
+避免：
+
+- 微服务过多
+- 数据库过多
+- 运行时过多
+- 独立后台服务过多
+- 自建 GPU 集群
+- 自建视频 CDN
+- 自建云盘
+- 复杂多人权限系统
+
+---
+
+# 100. 产品最终目标
+
+TubeAiFolw 最终应该做到：
+
+```text
+Script
+↓
+Semantic Analysis
+↓
+Voice
+↓
+Subtitle
+↓
+Storyboard
+↓
+Visual Planning
+↓
+Asset Generation
+↓
+Timeline
+↓
+Preview
+↓
+Quality Check
+↓
+Final Render
+```
+
+同时保留：
+
+```text
+Human Review
+```
+
+即：
+
+**AI 执行生产流程，人负责判断和确认。**
+
+---
+
+# 101. 核心护城河
+
+长期重点投入：
+
+## 第一层
+
+```text
+Workflow Engine
+```
+
+## 第二层
+
+```text
+Timeline Engine
+```
+
+## 第三层
+
+```text
+Script → Visual Matching
+```
+
+## 第四层
+
+```text
+Visual Diversity
+```
+
+## 第五层
+
+```text
+Quality Control
+```
+
+模型本身不是核心护城河。
+
+---
+
+# 102. 项目质量标准
+
+一个功能只有满足以下条件才能视为完成：
+
+- UI 可操作
+- Engine 可运行
+- 状态可保存
+- 异常有提示
+- 任务可重试
+- 日志可定位
+- 有测试
+- 不破坏旧项目
+- 不泄漏 API Key
+- 不阻塞主 UI
+- 能取消耗时任务
+- 支持 Windows 路径
+- README / Docs 有必要说明
+
+---
+
+# 103. V1 成功标准
+
+V1 不以功能数量判断。
+
+成功标准：
+
+用户能将：
+
+```text
+20~30 分钟逐字稿
+```
+
+稳定完成：
+
+```text
+TTS
+字幕
+Scene
+插图
+素材
+时间轴
+视频
+```
+
+且：
+
+- 中途失败可以恢复
+- 单 Scene 可以重做
+- 不需要人工重新从头运行
+- 项目重启后可以继续
+- 最终 MP4 可直接上传 YouTube
+
+---
+
+# 104. 后续可探索模块
+
+在核心稳定后才考虑：
+
+- 自动 Chart
+- 自动 Map
+- Browser Screenshot
+- Web Research
+- Archive Search
+- AI Music
+- Thumbnail
+- SEO
+- Upload
+- Analytics
+- Content Planner
+- Team Collaboration
+- Cloud Sync
+
+---
+
+# 105. 产品命名约束
+
+项目正式名称：
+
+```text
+TubeAiFolw
+```
+
+代码中：
+
+```text
+tubeaifolw
+```
+
+包名可使用：
+
+```text
+com.tubeaifolw.desktop
+```
+
+不要擅自改成：
+
+```text
+TubeAIFlow
+TubeAiFlow
+TubeFlow
+```
+
+除非产品负责人明确决定改名。
+
+---
+
+# 106. 建议初始 Milestone
+
+## Milestone 1 — Core Project
+
+- Desktop
+- Engine IPC
+- SQLite
+- Project
+- Scene
+- Job
+
+## Milestone 2 — Audio
+
+- TTS Provider
+- Audio Segment
+- Merge
+- Voice Profile
+
+## Milestone 3 — Subtitle
+
+- Whisper
+- Alignment
+- SRT
+
+## Milestone 4 — Storyboard
+
+- Semantic
+- Scene
+- Visual Type
+
+## Milestone 5 — Visual
+
+- Local Asset
+- AI Image
+- Prompt
+
+## Milestone 6 — Timeline
+
+- Video
+- Image
+- Audio
+- Subtitle
+
+## Milestone 7 — Render
+
+- Preview
+- Final
+- NVENC
+
+## Milestone 8 — QC
+
+- Visual
+- Audio
+- Subtitle
+
+## Milestone 9 — Commercial
+
+- Login
+- License
+- Device
+- Update
+- Installer
+
+---
+
+# 107. 第一版建议不做的功能
+
+Agent 如果没有明确任务，不要主动增加：
+
+- Docker
+- Kubernetes
+- Redis
+- Kafka
+- RabbitMQ
+- Microservices
+- GraphQL
+- Elasticsearch
+- WebRTC
+- Electron + Tauri 双客户端
+- 多数据库
+- 多云部署
+- 自建 OAuth Provider
+
+这些对一人公司早期没有必要。
+
+---
+
+# 108. 实现哲学
+
+当两种方案都能满足需求：
+
+优先：
+
+```text
+简单
+稳定
+可测试
+可恢复
 少依赖
-方便后续继续扩展
+低维护
+```
+
+而不是：
+
+```text
+最新
+复杂
+最炫
+最抽象
 ```
 
 ---
 
-## 16. 渐进实施与迁移顺序
+# 109. 最后的 Agent 指令
 
-项目结构优化和视频功能必须渐进实施，不进行一次性大重构。
+当你作为 Coding Agent 参与 TubeAiFolw：
 
-### 16.1 阶段一：稳定现有能力边界
+请始终记住：
 
-- 将现有配音、字幕、项目、批处理和粗剪 service 移入对应业务子目录。
-- 保持现有 API 路径、返回格式和用户行为不变。
-- 为旧导入路径保留短期兼容入口，测试迁移完成后再清理。
-- 将当前 `video_service.py` 拆为粗剪选择、FFmpeg 标准化、进度和最终拼接等明确职责。
+这不是一个 Demo。
 
-### 16.2 阶段二：建立公共运行基础
+这不是一个 Hackathon 项目。
 
-- 建立 `workflows/narration_generation.py`，让单项目和批处理复用同一流程。
-- 增加 TaskRun、类型化 ProjectConfig 和数据库迁移。
-- 统一 workspace、项目路径和全局素材路径。
-- 将 FFmpeg 进程执行和取消控制下沉到 infrastructure，消除底层工具对业务 service 的反向依赖。
+这是一个准备长期维护、商业化并由极小团队运营的 Windows AI 视频生产软件。
 
-### 16.3 阶段三：分镜 MVP
+任何代码都应该尽量：
 
-- 建立 SubtitleCue、VisualScene、Storyboard Schema 和数据库模型。
-- 实现视觉语义段合并、结构化分镜和查询生成。
-- 提供场景级查看、编辑和重新生成接口。
+- 可维护
+- 可恢复
+- 可替换
+- 可测试
+- 可升级
+- 可商业化
 
-### 16.4 阶段四：素材库与检索 MVP
+如果某项修改能让 Demo 更漂亮，但增加未来维护成本，应优先拒绝。
 
-- 实现 Pexels、Pixabay Provider 和查询缓存。
-- 实现全局素材入库、切镜、关键帧、文件哈希和元数据。
-- 接入 SigLIP 2 或 Qwen3-VL Embedding 与 FAISS。
-- 实现候选排序、冲突检查、去重和主题化兜底。
+如果某项修改能降低用户 30 分钟长视频生产过程中的失败率、重复劳动或等待时间，应优先考虑。
 
-### 16.5 阶段五：视频渲染与 QA
+TubeAiFolw 的最终竞争力不是“它用了什么最新模型”，而是：
 
-- 实现场景时间轴、场景独立渲染和最终拼接。
-- 合成配音、字幕、背景音乐和音效。
-- 实现自动 QA 报告和场景级重试。
-- 生成来源清单、渲染报告和最终 Manifest。
-
-### 16.6 阶段六：前端工作台
-
-- 将 ProjectDetail 收敛为 ProjectShell 和子路由。
-- 增加故事板、候选审核、低置信度替换、渲染和报告页面。
-- 保持页面级状态简单，不为时间轴编辑提前引入复杂前端状态框架。
-
-每个阶段完成后都必须保证已有配音字幕流程仍可独立运行。
-
----
-
-## 17. 性能、缓存与成本控制
-
-- 每个场景必须先检索本地素材库，本地有 `QUALIFIED` 结果时不调用远程 Provider。
-- 必须缓存查询结果、缩略图、已下载素材、文件哈希、关键帧、向量和结构化描述。
-- 同一章节中语义接近的查询可以合并，但不能因为缓存合并而忽略必须包含或应避免的实体约束。
-- 只对最终候选下载完整视频，避免下载全部搜索结果。
-- 新下载素材只正式入库一次，后续项目复用。
-- 对缩略图使用轻量模型预筛，只对低置信度候选使用更重的模型。
-- 针对 8GB 显存，Embedding、描述模型和其他 VLM 串行加载，不允许多个模型长期同时驻留显存。
-- 限制每个场景的远程搜索轮数、候选数、完整视频下载数和重试次数。
-- 场景渲染并发必须可配置；默认从 1—2 个并发开始，不根据 CPU 核数盲目放大。
-- 模型和 Provider 失败时允许降级到本地素材与人工选择，不得阻塞配音字幕输出。
-
----
-
-## 18. 测试与验收规范
-
-测试目录按业务域组织：
-
-```text
-backend/tests/
-  narration/
-  storyboard/
-  media_library/
-  rendering/
-  workflows/
-  integration/
-```
-
-要求：
-
-- 文本清洗、切段、字幕时间、SRT 序号与时间戳格式、路径安全使用确定性单元测试。
-- Storyboard 和 Provider 使用固定 JSON Fixture 测试解析、校验和异常响应。
-- 素材排序测试必须覆盖相关、低相关、人物冲突、年代冲突和重复素材。
-- FFmpeg 测试优先验证参数数组和短素材集成结果，不依赖长视频样本。
-- 工作流测试覆盖阶段跳过、失败检查点、取消、单场景重试和恢复。
-- 至少保留一套数秒钟的端到端固定样本，验证配音时间轴、场景覆盖、字幕和最终 MP4 可播放。
-- 数据库迁移必须同时测试新建数据库和已有数据库升级。
-
-检索阈值应使用人工标注测试集校准，至少跟踪：
-
-```text
-Top 1 准确率
-Top 3 / Top 5 召回率
-错误人物率
-错误年代率
-纯风景使用率
-人工替换率
-单条视频平均人工处理时间
-```
-
-视频输出验收至少包括：
-
-- 视频可播放且编码完整。
-- 画面轨道无空洞。
-- 视频与配音总时长误差小于 100 ms。
-- `subtitles.srt` 内容与输入逐字稿一致，时间轴连续且不越过配音结束时间。
-- 所有自动选择素材均为 `QUALIFIED`，或明确标记为人工确认/兜底。
-- 最终导出包含素材来源与 QA 报告。
-
----
-
-## 19. 数字人接入规划（Duix-Avatar）
-
-本节用于约束后续数字人能力的开发。当前阶段只保留设计与接口边界，不应提前创建空目录、空模型或不可运行的占位代码。第一期数字人引擎采用本地部署的 Duix-Avatar，后续如需增加其他引擎，也必须复用本节定义的业务模型和工作流边界。
-
-Duix-Avatar 在系统中的定位是“音频驱动的非实时数字人视频生成引擎”，不是 TTS 引擎、普通素材 Provider、实时交互服务或最终视频编辑器。TubeAIFlow 继续负责配音、字幕、时间轴、场景规划、画面合成、任务恢复和质量检查。
-
-### 19.1 接入目标与优先级
-
-按以下顺序实现数字人显示模式：
-
-1. `picture_in_picture`：矩形画中画，数字人以固定区域叠加在视觉素材上。
-2. `full_screen`：指定场景使用全屏数字人画面。
-3. `cutout`：对纯色背景数字人执行抠像后叠加。
-
-第一版只要求开场、结尾或人工指定场景出镜，不默认让数字人全程出现。自然背景视频的 AI 人像分割、自动姿态生成、实时交互和多人数字人不属于第一版范围。
-
-数字人失败不得阻断配音、字幕和无数字人视频的导出。项目启用数字人且生成失败时，应进入 `review_required` 或允许用户明确选择“跳过数字人后继续渲染”，不得静默降级。
-
-### 19.2 模块边界
-
-后续按实际实现内容逐步增加以下文件，不提前创建空文件：
-
-```text
-backend/app/
-  api/
-    avatars.py
-  models/
-    avatar.py
-  schemas/
-    avatar.py
-  services/
-    avatar/
-      avatar_profile_service.py
-      avatar_generation_service.py
-      avatar_compositor.py
-  integrations/
-    avatar/
-      duix_client.py
-```
-
-职责要求：
-
-- `integrations/avatar/duix_client.py` 只处理 Duix 健康检查、任务提交、状态查询、响应解析、超时、重试和宿主机/容器路径映射。
-- `avatar_generation_service.py` 负责生成粒度、输入签名、缓存、任务恢复、输出校验和数字人片段状态，不直接拼装 HTTP 接口细节。
-- `avatar_compositor.py` 负责 FFmpeg 抠像、缩放、定位、遮罩和叠加，不直接调用 Duix。
-- API 层只做参数校验并调用 service 或 workflow，不直接轮询 Duix、执行 FFmpeg 或修改其他领域内部数据。
-- Duix Electron 客户端不是运行时依赖；后端直接调用本地 Docker 服务开放的 HTTP API。
-- 第一版复用项目已经生成的最终配音，不接入 Duix 自带 Fish Speech 或 ASR。只需要部署 Duix 视频生成服务的 lite 版本。
-
-### 19.3 核心数据概念
-
-数字人对象必须与 `VoiceSegment`、`VisualScene`、`MediaFile`、`MediaShot` 和 `SceneAssignment` 分离，不得把数字人片段伪装成语义检索素材。
-
-建议数据模型：
-
-- `AvatarProfile`：数字人档案，保存名称、引擎、模板视频、背景类型、默认布局、启用状态和授权信息。
-- `AvatarClip`：某项目的一段数字人生成结果，保存音频区间、输入签名、Duix task code、状态、进度、输出路径、真实时长和错误信息。
-- `AvatarPlacement`：数字人在最终时间轴中的显示区间和布局，保存模式、位置、尺寸、边距、层级、抠像参数及人工确认状态。
-
-至少需要支持以下状态：
-
-```text
-pending
-submitted
-generating
-ready
-failed
-cancelled
-```
-
-要求：
-
-- `AvatarClip` 必须记录 `start_ms`、`end_ms`，并可追溯到使用的音频文件及配置快照。
-- Duix task code 必须持久化；服务重启后先恢复查询，不能无条件重新提交。
-- 输入签名至少包含音频哈希、模板视频哈希、时间区间、引擎版本和关键生成参数。
-- `AvatarPlacement` 可以关联一个或多个 `VisualScene`，但其时间边界最终必须使用毫秒级项目时间轴表示。
-- 肖像、声音和模板素材的授权状态必须保存在 `AvatarProfile` 或关联审计记录中。
-
-### 19.4 工作流接入
-
-数字人能力继续归属于 `video_synthesis`，不新增第三条顶级工作流。建议阶段如下：
-
-```text
-storyboard
-→ asset_search / image_generation
-→ asset_review / image_review
-→ avatar_plan
-→ avatar_generation
-→ avatar_review
-→ scene_render
-→ visual_track
-→ avatar_composite
-→ final_render
-→ quality_check
-→ quality_review
-```
-
-要求：
-
-- 未启用数字人的项目应直接跳过 `avatar_plan`、`avatar_generation`、`avatar_review` 和 `avatar_composite`。
-- `avatar_plan` 决定哪些场景或时间段出镜，不负责生成视频。
-- `avatar_generation` 使用已有最终配音或从其无损切出的片段驱动 Duix。
-- `avatar_review` 至少允许预览、重试、禁用该片段和调整布局。
-- `avatar_composite` 在 `visual_track.mp4` 生成后执行，输出独立的 `avatar_composited_track.mp4`。
-- `final_render` 根据配置选择纯视觉轨道或数字人合成轨道，并始终使用 TubeAIFlow 的最终配音文件。
-- 每一阶段必须支持检查点恢复；只修改布局时不得重新调用 Duix，只需重做 `avatar_composite` 及后续阶段。
-
-### 19.5 音频切分与同步
-
-Duix 只负责根据音频生成口型画面。最终视频不得使用 Duix 输出中的音轨，必须继续使用 TubeAIFlow 生成的完整配音，以避免重复编码、双音轨和累计同步误差。
-
-生成粒度规则：
-
-- 概念验证可以使用完整 `full_voice.wav` 一次生成。
-- 正式实现优先按章节或连续出镜区间分块，建议单块约 30—90 秒，并允许配置。
-- 不建议逐条 SubtitleCue 生成，避免人物动作频繁重置和接缝明显。
-- 生成片段必须从最终配音无损或高质量切出，不得重新执行 TTS。
-
-每个数字人输出在合成前统一规格：
-
-```text
-帧率：与项目一致，默认 30 fps CFR
-视频编码：H.264 中间文件或支持透明通道的受控中间格式
-音轨：删除
-时间基：归一化
-时长：严格裁剪或补帧到目标帧数
-```
-
-数字人片段实际时长与目标音频区间误差超过 100 ms 时不得自动进入最终合成。禁止通过改变数字人播放速度修正明显时长误差，因为这会破坏口型同步；应优先检查 Duix 输出、时间基和首尾静音。
-
-### 19.6 Duix API 与路径映射
-
-默认本地接口：
-
-```text
-POST http://127.0.0.1:8383/easy/submit
-GET  http://127.0.0.1:8383/easy/query?code={task_code}
-```
-
-提交参数至少包含：
-
-```json
-{
-  "audio_url": "容器可读取的音频路径",
-  "video_url": "容器可读取的模板视频路径",
-  "code": "唯一任务标识",
-  "chaofen": 0,
-  "watermark_switch": 0,
-  "pn": 1
-}
-```
-
-不得把任意 Windows 路径直接传给容器。系统设置必须显式保存：
-
-- Duix 服务地址。
-- 宿主机共享目录。
-- Duix 容器内共享目录。
-- 请求超时、轮询间隔、任务超时和重试次数。
-
-路径转换必须通过统一函数完成，并校验：
-
-- 输入文件位于允许的共享目录中。
-- 转换后的容器路径不包含目录穿越。
-- 提交前输入存在且可读。
-- 查询成功后结果路径能够安全映射回宿主机路径。
-- 返回文件确实位于配置的 Duix 输出目录内。
-
-所有请求和响应应记录必要诊断信息，但日志不得保存完整隐私音频、访问凭证或不必要的个人信息。
-
-### 19.7 合成规则
-
-`picture_in_picture`：
-
-- 第一版推荐模式，不要求透明通道。
-- 支持左下、右下和自定义位置，默认避开字幕安全区。
-- 保持人物原始宽高比，禁止拉伸。
-- 可以添加圆角、边框或阴影，但必须由少量明确配置控制。
-
-`full_screen`：
-
-- 使用数字人画面覆盖指定时间段的视觉轨道。
-- 必须缩放裁剪到项目分辨率，不能改变人物比例。
-- 场景切换仍遵循项目转场规则。
-
-`cutout`：
-
-- 第一版只保证纯绿或纯蓝背景模板。
-- 使用 FFmpeg `chromakey` 或 `colorkey`、边缘调整和 `overlay` 完成。
-- 抠像参数属于 AvatarProfile 默认配置，允许项目级覆盖。
-- 自然背景 AI 抠像必须作为独立可选阶段实现，并经过帧间稳定性验证后才能默认启用。
-
-所有模式均应：
-
-- 只修改视频轨道，不混入 Duix 音轨。
-- 避免遮挡字幕、人物姓名条和重要画面主体。
-- 将最终位置、尺寸、滤镜参数和输入文件写入 render report。
-- 使用输入签名缓存；布局、视频尺寸或抠像参数变化时使合成缓存失效。
-
-### 19.8 GPU 与任务调度
-
-Duix Docker 与 Qwen3-TTS、视觉 Embedding 和图片生成共享单张 GPU 时，必须串行执行。调用 Duix 提交后，GPU 独占范围应覆盖从任务提交到生成完成或失败的整个周期，不能提交后立即释放锁。
-
-现有 `infrastructure/gpu_resource.py` 的文件锁只能协调遵守该锁的 TubeAIFlow 进程，不能直接控制 Docker 容器显存，因此还需要：
-
-- 在系统诊断页检测 Duix 服务、Docker、NVIDIA 驱动和可用显存。
-- 记录 Duix 容器空闲时是否常驻显存，并在支持的部署方式下提供明确的启动/停止策略。
-- 禁止数字人生成与 SDXL、Embedding 或 TTS 并行。
-- 等待 GPU 和等待 Duix 生成时持续更新 TaskRun 心跳，避免被误判为僵死任务。
-- 用户取消任务时停止轮询并标记取消；只有在 Duix 提供可靠取消接口后才调用远端取消。
-- 不得通过杀死全部 Docker 容器或清理其他项目任务来实现取消。
-
-生产环境如需并行批量生成，应优先使用独立 GPU 或独立 Duix 工作节点，而不是绕过 GPU 独占锁。
-
-### 19.9 API 规划
-
-具体路径可以根据现有兼容性调整，但建议提供：
-
-```text
-GET    /api/avatars
-POST   /api/avatars
-GET    /api/avatars/{avatar_id}
-PUT    /api/avatars/{avatar_id}
-DELETE /api/avatars/{avatar_id}
-
-POST /api/avatars/duix/health-check
-
-GET  /api/projects/{project_id}/avatar/plan
-PUT  /api/projects/{project_id}/avatar/plan
-POST /api/projects/{project_id}/avatar/generate
-GET  /api/projects/{project_id}/avatar/status
-POST /api/projects/{project_id}/avatar/clips/{clip_id}/retry
-POST /api/projects/{project_id}/avatar/clips/{clip_id}/confirm
-POST /api/projects/{project_id}/avatar/composite
-```
-
-API 不得暴露容器内部实现对象、未经清理的 Duix 原始响应或不受控文件路径。删除 AvatarProfile 时，如仍被项目引用，应拒绝删除或执行可审计的软禁用，不能破坏已有项目的可重渲染性。
-
-### 19.10 前端规划
-
-系统设置页增加 Duix 服务地址、共享路径和健康检查；数字人档案页负责模板、背景类型、默认抠像参数和授权信息。
-
-项目配置至少支持：
-
-```text
-数字人：关闭 / 开场结尾 / 指定场景 / 全程
-显示模式：画中画 / 全屏 / 抠像
-人物档案
-默认位置、尺寸和边距
-字幕安全区避让
-生成分块时长
-```
-
-故事板页面允许对场景设置数字人出镜和布局。渲染页面展示数字人规划、生成、审核和合成进度，并提供失败原因、重试和跳过操作。页面状态优先保留在对应页面，不把所有数字人编辑状态放入全局 Pinia。
-
-### 19.11 QA 与验收
-
-数字人 QA 至少包括：
-
-- Duix 输出文件存在、可解码且视频流完整。
-- 实际帧率、分辨率、像素格式和时长符合项目要求。
-- 数字人片段与目标音频区间误差小于 100 ms。
-- 最终合成只包含预期音轨，配音没有重叠、回声或重复编码造成的明显异常。
-- Placement 时间轴无负时长、重叠冲突或越过项目结尾。
-- 画中画和抠像人物未越过画面边界，且不遮挡字幕安全区。
-- 抠像输出检查大面积残留背景、明显边缘闪烁和人物主体缺失。
-- 数字人片段失败、人工跳过和降级行为全部进入 `qa.json` 与 render report。
-- Manifest 记录数字人引擎、引擎版本、AvatarProfile、任务配置快照和授权状态，不记录不必要的个人敏感数据。
-
-自动 QA 不能可靠判断嘴型自然度时，必须把相关片段标记为人工审核项，不得伪造自动通过结果。
-
-测试至少覆盖：
-
-- Duix 提交、轮询中、成功、失败、超时和异常响应的固定 Fixture。
-- 宿主机与容器路径双向映射及目录穿越拒绝。
-- 服务重启后根据 task code 恢复轮询。
-- 输入签名缓存、音频变化后失效、只改布局时不重新生成。
-- 画中画、全屏和纯色抠像的短视频 FFmpeg 集成测试。
-- 数字人关闭时原有视频工作流完全不受影响。
-
-### 19.12 隐私、授权与许可证
-
-- 创建 AvatarProfile 前必须提示用户确认拥有肖像、模板视频和声音使用权。
-- 授权记录至少保存授权状态、适用范围、记录时间和可选凭证路径；凭证默认不得打包进公开导出物。
-- 不允许在没有明确授权的情况下预置或克隆公众人物、客户、员工或其他第三方形象与声音。
-- 面向公开发布时应支持添加数字人或 AI 生成内容标识，具体规则由发布地区和平台配置决定。
-- Duix-Avatar 的 README 与正式 LICENSE 对商业许可门槛存在不一致。开发和发布前必须复核仓库当前 LICENSE；正式商用前应取得书面许可确认。
-- 如许可证要求署名、NOTICE、用户协议声明或商业授权，必须在安装包、关于页面、文档和发布流程中落实，不能只在代码注释中记录。
-- 不得把 Duix 镜像、模型或代码直接重新打包进 TubeAIFlow 安装包，除非已确认再分发权限和全部许可证义务。
-
-### 19.13 分阶段实施与完成标准
-
-第一阶段：技术验证
-
-- 用户自行部署 Duix lite 服务。
-- 完成健康检查、路径映射、单音频提交、进度查询和结果导入。
-- 使用数秒固定样本验证画中画合成、时长和最终配音一致性。
-
-第二阶段：可用 MVP
-
-- 实现 AvatarProfile、AvatarClip、AvatarPlacement 与数据库迁移。
-- 接入 `video_synthesis` 检查点、任务恢复和 GPU 独占调度。
-- 支持开场结尾、指定场景、画中画和全屏模式。
-- 支持纯色背景抠像、人工审核、项目配置和 QA 报告。
-
-第三阶段：生产增强
-
-- 根据真实测试决定是否实现自然背景视频抠像。
-- 增加批量任务、独立 Duix 节点、性能统计和安装诊断。
-- 完成许可证、授权审计、发布标识和多硬件兼容测试。
-
-数字人 MVP 只有在以下条件全部满足时才视为完成：
-
-- 关闭数字人后现有配音、字幕、素材和视频生成回归测试全部通过。
-- Duix 不可用时错误可读、任务可恢复，并可由用户明确跳过数字人继续导出。
-- 数字人片段可单独重试，布局修改不触发重新生成。
-- 最终视频时长与完整配音误差小于 100 ms，且只使用 TubeAIFlow 最终配音。
-- 输出 Manifest、render report 和 `qa.json` 能完整追踪数字人生成与合成配置。
-- 肖像与声音授权状态已记录，许可证要求已得到确认和落实。
+> **它能不能稳定地把一个复杂的长视频，从脚本真正生产成成品。**

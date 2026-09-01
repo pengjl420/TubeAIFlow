@@ -305,6 +305,13 @@ def get_settings() -> Settings:
             if record:
                 data = json.loads(record.config_json)
                 if isinstance(data, dict):
+                    credential_refs = data.pop("credential_refs", {})
+                    if isinstance(credential_refs, dict):
+                        from app.infrastructure.credential_store import load_secret
+
+                        for field_name, credential_id in credential_refs.items():
+                            if field_name in Settings.model_fields and isinstance(credential_id, str):
+                                data[field_name] = load_secret(credential_id)
                     settings = Settings.model_validate(data)
     except (ImportError, json.JSONDecodeError, OperationalError, ValidationError):
         # Defaults allow database initialization before the settings table exists.

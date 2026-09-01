@@ -114,7 +114,7 @@ function exportDiagnostics() {
   }, null, 2)
   const url = URL.createObjectURL(new Blob([report], { type: 'application/json' }))
   const link = document.createElement('a')
-  link.href = url; link.download = 'TubeAIFlow-diagnostics.json'; link.click(); URL.revokeObjectURL(url)
+  link.href = url; link.download = 'TubeAiFolw-diagnostics.json'; link.click(); URL.revokeObjectURL(url)
 }
 
 onMounted(load)

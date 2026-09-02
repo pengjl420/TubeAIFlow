@@ -49,3 +49,6 @@ an isolated test router.
 3. Integrate local asset indexing and visual matching into the project workflow.
 4. Add scene preview, partial timeline invalidation, and quality score dimensions.
 5. Add the Tauri desktop shell only after the localhost Engine contract is stable.
+
+The executable provider, workflow-step, configuration, and artifact contracts used for
+these increments are documented in [extension-foundations.md](extension-foundations.md).

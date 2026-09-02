@@ -21,6 +21,8 @@ from app.services.projects import project_service
 from app.services.quality import qa_service
 from app.services.rendering import rough_cut_service
 from app.workflows import video_synthesis
+from app.workflows.engine import WorkflowContext, WorkflowGraph, WorkflowStep
+from app.domain.states import ResourceClass
 
 
 StageChanged = Callable[[str], None]
@@ -52,64 +54,106 @@ def run_project_generation(
     """Run one project's generation stages from its persisted checkpoint."""
     ensure_ffmpeg_available()
     stage = current_stage or "segmenting"
-    supported_stages = {
-        "segmenting", "tts", "audio_merge", "subtitles", "video", "completed",
-        *video_synthesis.STAGES,
-    }
+    supported_stages = {*_NARRATION_GRAPH.stages, "completed", *video_synthesis.STAGES}
     if stage not in supported_stages:
         raise ValueError(f"Unknown generation stage: {stage}")
-
-    if stage == "segmenting":
-        project_service.create_segments(session, project)
-        stage = "tts"
-        on_stage_changed(stage)
-
-    if stage == "tts":
-        with task_control.controlled(project.id, "tts"):
-            segments = tts_service.generate_project_tts(session, project)
-        failed = [item for item in segments if item.status == "failed"]
-        if failed:
-            raise RuntimeError(f"TTS 有 {len(failed)} 段生成失败")
-        stage = "audio_merge"
-        on_stage_changed(stage)
-
-    if stage == "audio_merge":
-        with task_control.controlled(project.id, "audio_merge"):
-            audio_service.merge_project_audio(session, project)
-        stage = "subtitles"
-        on_stage_changed(stage)
-
-    if stage == "subtitles":
-        with task_control.controlled(project.id, "subtitles"):
-            timeline_service.build_timeline(session, project)
-            segments = session.exec(
-                select(Segment)
-                .where(Segment.project_id == project.id)
-                .order_by(Segment.segment_index)
-            ).all()
-            srt_service.create_full_srt(project, list(segments), session=session)
-        project.status = "narration_ready"
-        session.add(project)
-        session.commit()
-        stage = _stage_after_narration(project, include_video)
-        on_stage_changed(stage)
-
-    if stage == "video":
-        try:
-            with task_control.controlled(project.id, "video"):
-                rough_cut_service.compose_video(session, project)
-        except task_control.TaskCancelledError:
-            raise
-        except (OSError, RuntimeError, ValueError) as exc:
-            try:
-                rough_cut_service.mark_video_progress_failed(project, str(exc))
-            except OSError:
-                pass
-            raise
-        on_stage_changed("completed")
-
+    stage = _NARRATION_GRAPH.execute(
+        WorkflowContext(session=session, project=project, include_video=include_video),
+        stage,
+        on_stage_changed,
+    )
     if stage in video_synthesis.STAGES and stage != "completed":
         video_synthesis.run_video_synthesis(session, project, stage, on_stage_changed)
+
+
+def _segmenting_step(context: WorkflowContext) -> str:
+    project_service.create_segments(context.session, context.project)
+    return "tts"
+
+
+def _tts_step(context: WorkflowContext) -> str:
+    with task_control.controlled(context.project.id, "tts"):
+        segments = tts_service.generate_project_tts(context.session, context.project)
+    failed = [item for item in segments if item.status == "failed"]
+    if failed:
+        raise RuntimeError(f"TTS 有 {len(failed)} 段生成失败")
+    return "audio_merge"
+
+
+def _audio_merge_step(context: WorkflowContext) -> str:
+    with task_control.controlled(context.project.id, "audio_merge"):
+        audio_service.merge_project_audio(context.session, context.project)
+    return "subtitles"
+
+
+def _subtitles_step(context: WorkflowContext) -> str:
+    with task_control.controlled(context.project.id, "subtitles"):
+        timeline_service.build_timeline(context.session, context.project)
+        segments = context.session.exec(
+            select(Segment)
+            .where(Segment.project_id == context.project.id)
+            .order_by(Segment.segment_index)
+        ).all()
+        srt_service.create_full_srt(
+            context.project, list(segments), session=context.session
+        )
+    context.project.status = "narration_ready"
+    context.session.add(context.project)
+    context.session.commit()
+    return _stage_after_narration(context.project, context.include_video)
+
+
+def _video_step(context: WorkflowContext) -> str:
+    try:
+        with task_control.controlled(context.project.id, "video"):
+            rough_cut_service.compose_video(context.session, context.project)
+    except task_control.TaskCancelledError:
+        raise
+    except (OSError, RuntimeError, ValueError) as exc:
+        try:
+            rough_cut_service.mark_video_progress_failed(context.project, str(exc))
+        except OSError:
+            pass
+        raise
+    return "completed"
+
+
+_NARRATION_GRAPH = WorkflowGraph(
+    (
+        WorkflowStep("segmenting", _segmenting_step, output_artifacts=("segments",)),
+        WorkflowStep(
+            "tts",
+            _tts_step,
+            resource_class=ResourceClass.GPU,
+            depends_on=("segmenting",),
+            input_artifacts=("segments",),
+            output_artifacts=("segment_audio",),
+            cacheable=True,
+        ),
+        WorkflowStep(
+            "audio_merge",
+            _audio_merge_step,
+            resource_class=ResourceClass.FFMPEG,
+            depends_on=("tts",),
+            input_artifacts=("segment_audio",),
+            output_artifacts=("narration_audio",),
+        ),
+        WorkflowStep(
+            "subtitles",
+            _subtitles_step,
+            depends_on=("audio_merge",),
+            input_artifacts=("narration_audio",),
+            output_artifacts=("subtitle_timeline",),
+        ),
+        WorkflowStep(
+            "video",
+            _video_step,
+            resource_class=ResourceClass.FFMPEG,
+            depends_on=("subtitles",),
+            output_artifacts=("final_video",),
+        ),
+    )
+)
 
 
 def _stage_after_narration(project: Project, include_video: bool) -> str:

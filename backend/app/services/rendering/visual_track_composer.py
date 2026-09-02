@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 from sqlmodel import Session, select
@@ -17,6 +16,7 @@ from app.services.rendering.rough_cut_service import (
 )
 from app.services.rendering.timeline_composer import scene_frame_window
 from app.infrastructure.project_layout import load_project_config
+from app.infrastructure.atomic_files import write_json_atomic
 
 
 def compose_visual_track(session: Session, project: Project) -> dict:
@@ -101,8 +101,7 @@ def compose_visual_track(session: Session, project: Project) -> dict:
         "quality": quality,
     }
     report_path = base_dir / "reports" / "visual_track_report.json"
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json_atomic(report_path, report)
     return report
 
 

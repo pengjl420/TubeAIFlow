@@ -1,6 +1,12 @@
 import unittest
 
-from app.providers import ProviderCapability, ProviderCategory, provider_registry
+from app.providers import (
+    ProviderCapability,
+    ProviderCategory,
+    TTSProviderRuntime,
+    provider_registry,
+)
+from app.services.narration import tts_service  # noqa: F401 - binds executable adapters
 
 
 class ProviderRegistryTests(unittest.TestCase):
@@ -25,6 +31,14 @@ class ProviderRegistryTests(unittest.TestCase):
     def test_unknown_provider_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "Unsupported provider"):
             provider_registry.get("tts.unknown")
+
+    def test_builtin_tts_providers_have_executable_runtime_adapters(self) -> None:
+        for provider in provider_registry.list(ProviderCategory.TTS):
+            self.assertTrue(provider_registry.is_executable(provider.id))
+            self.assertIsInstance(
+                provider_registry.runtime(provider.id, TTSProviderRuntime),
+                TTSProviderRuntime,
+            )
 
 
 if __name__ == "__main__":

@@ -11,7 +11,7 @@ from sqlmodel import Session, select
 from app.config import Settings, get_settings
 from app.integrations.tts.runner_io import write_json
 from app.models.project import Project
-from app.providers import provider_registry
+from app.providers import TTSProviderRuntime, provider_registry
 from app.models.narration import Segment
 from app.models.narration import VoiceProfile
 from app.infrastructure import gpu_resource, process_runner as task_control
@@ -298,43 +298,11 @@ def _validate_configuration(project: Project, segments: list[Segment]) -> tuple[
 
 
 def _required_engine_paths(settings: Settings, engine: str) -> dict[str, Path | None]:
-    if engine == "qwen3_tts":
-        return {
-            "QWEN_TTS_ROOT": settings.qwen_tts_root,
-            "QWEN_TTS_PYTHON": settings.qwen_tts_python,
-            "QWEN_TTS_MODEL_DIR": settings.qwen_tts_model_dir,
-        }
-    if engine == "cosyvoice":
-        return {
-            "COSYVOICE_ROOT": settings.cosyvoice_root,
-            "COSYVOICE_PYTHON": settings.cosyvoice_python,
-            "COSYVOICE_MODEL_DIR": settings.cosyvoice_model_dir,
-        }
-    if engine == "index_tts":
-        return {
-            "INDEX_TTS_ROOT": settings.index_tts_root,
-            "INDEX_TTS_PYTHON": settings.index_tts_python,
-            "INDEX_TTS_MODEL_DIR": settings.index_tts_model_dir,
-        }
-    if engine == "moss_tts":
-        return {
-            "MOSS_TTS_ROOT": settings.moss_tts_root,
-            "MOSS_TTS_PYTHON": settings.moss_tts_python,
-            "MOSS_TTS_MODEL_DIR": settings.moss_tts_model_dir,
-            "MOSS_TTS_CODEC_DIR": settings.moss_tts_codec_dir,
-        }
-    raise ValueError(f"Unsupported TTS engine: {engine}")
+    return provider_registry.runtime(engine, TTSProviderRuntime).required_paths(settings)
 
 
 def _validate_engine_assets(settings: Settings, project: Project, engine: str) -> None:
-    if engine == "qwen3_tts":
-        _validate_qwen_assets(settings)
-    elif engine == "cosyvoice":
-        _validate_cosyvoice_assets(settings, project)
-    elif engine == "index_tts":
-        _validate_index_assets(settings)
-    elif engine == "moss_tts":
-        _validate_moss_assets(settings)
+    provider_registry.runtime(engine, TTSProviderRuntime).validate_assets(settings, project)
 
 
 def _validate_qwen_assets(settings: Settings) -> None:
@@ -431,19 +399,9 @@ def _run_tts_batch(
     logs_dir: Path,
 ) -> None:
     with gpu_resource.exclusive_gpu(f"tts:{engine}:project:{project.id}"):
-        if engine == "qwen3_tts":
-            _run_qwen3_tts_batch(project, reference_audio_path, segments, audio_dir, logs_dir)
-            return
-        if engine == "cosyvoice":
-            _run_cosyvoice_batch(project, reference_audio_path, segments, audio_dir, logs_dir)
-            return
-        if engine == "index_tts":
-            _run_index_tts_batch(project, reference_audio_path, segments, audio_dir, logs_dir)
-            return
-        if engine == "moss_tts":
-            _run_moss_tts_batch(project, reference_audio_path, segments, audio_dir, logs_dir)
-            return
-        raise ValueError(f"Unsupported TTS engine: {engine}")
+        provider_registry.runtime(engine, TTSProviderRuntime).synthesize_batch(
+            project, reference_audio_path, segments, audio_dir, logs_dir
+        )
 
 
 def _run_qwen3_tts_batch(
@@ -764,3 +722,51 @@ def _write_initial_progress(progress_path: Path, segments: list[Segment]) -> Non
         "segment_results": [],
     }
     write_json(progress_path, data)
+
+
+def _bind_tts_provider_runtimes() -> None:
+    """Bind existing local runners behind the executable provider contract."""
+    adapters = {
+        "tts.qwen3_tts": TTSProviderRuntime(
+            required_paths=lambda settings: {
+                "QWEN_TTS_ROOT": settings.qwen_tts_root,
+                "QWEN_TTS_PYTHON": settings.qwen_tts_python,
+                "QWEN_TTS_MODEL_DIR": settings.qwen_tts_model_dir,
+            },
+            validate_assets=lambda settings, _project: _validate_qwen_assets(settings),
+            synthesize_batch=lambda *args: _run_qwen3_tts_batch(*args),
+        ),
+        "tts.cosyvoice": TTSProviderRuntime(
+            required_paths=lambda settings: {
+                "COSYVOICE_ROOT": settings.cosyvoice_root,
+                "COSYVOICE_PYTHON": settings.cosyvoice_python,
+                "COSYVOICE_MODEL_DIR": settings.cosyvoice_model_dir,
+            },
+            validate_assets=_validate_cosyvoice_assets,
+            synthesize_batch=lambda *args: _run_cosyvoice_batch(*args),
+        ),
+        "tts.index_tts": TTSProviderRuntime(
+            required_paths=lambda settings: {
+                "INDEX_TTS_ROOT": settings.index_tts_root,
+                "INDEX_TTS_PYTHON": settings.index_tts_python,
+                "INDEX_TTS_MODEL_DIR": settings.index_tts_model_dir,
+            },
+            validate_assets=lambda settings, _project: _validate_index_assets(settings),
+            synthesize_batch=lambda *args: _run_index_tts_batch(*args),
+        ),
+        "tts.moss_tts": TTSProviderRuntime(
+            required_paths=lambda settings: {
+                "MOSS_TTS_ROOT": settings.moss_tts_root,
+                "MOSS_TTS_PYTHON": settings.moss_tts_python,
+                "MOSS_TTS_MODEL_DIR": settings.moss_tts_model_dir,
+                "MOSS_TTS_CODEC_DIR": settings.moss_tts_codec_dir,
+            },
+            validate_assets=lambda settings, _project: _validate_moss_assets(settings),
+            synthesize_batch=lambda *args: _run_moss_tts_batch(*args),
+        ),
+    }
+    for provider_id, runtime in adapters.items():
+        provider_registry.bind_runtime(provider_id, runtime)
+
+
+_bind_tts_provider_runtimes()

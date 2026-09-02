@@ -1,6 +1,7 @@
 from sqlmodel import Field, SQLModel
 
 from app.shared.time import utc_now_iso
+from app.domain.states import TaskStatus
 
 
 class TaskRun(SQLModel, table=True):
@@ -11,7 +12,7 @@ class TaskRun(SQLModel, table=True):
     batch_id: str | None = Field(default=None, index=True)
     batch_item_id: str | None = Field(default=None, index=True)
     workflow: str = Field(default="narration_generation", index=True)
-    status: str = Field(default="queued", index=True)
+    status: str = Field(default=TaskStatus.QUEUED.value, index=True)
     current_stage: str = Field(default="segmenting", index=True)
     include_video: bool = False
     queue_sequence: int = Field(index=True)

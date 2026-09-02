@@ -15,6 +15,7 @@ from sqlmodel import Session, select
 from app.config import get_settings
 from app.infrastructure import gpu_resource, process_runner as task_control
 from app.infrastructure.project_layout import ensure_project_dirs, get_project_work_dir
+from app.infrastructure.serialization import stable_json_hash
 from app.integrations.tts.runner_io import write_json
 from app.models.media import (
     LIBRARY_ROLE_PROJECT_GENERATED,
@@ -419,7 +420,7 @@ def _stable_seed(project_id: str, scene_id: str, variant_index: int) -> int:
 
 def _signature(prompt: str, negative: str, model: Path, seed: int, width: int, height: int, steps: int, guidance: float) -> str:
     payload = [WORKFLOW_VERSION, prompt, negative, str(model.resolve()), model.stat().st_mtime_ns, seed, width, height, steps, guidance]
-    return hashlib.sha256(json.dumps(payload, ensure_ascii=False).encode()).hexdigest()
+    return stable_json_hash(payload)
 
 
 def _sha256(path: Path) -> str:

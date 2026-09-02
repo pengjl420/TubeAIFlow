@@ -15,6 +15,14 @@ class StorageTests(unittest.TestCase):
             path.write_text('{"value": 2}', encoding="utf-8")
             self.assertFalse(store.is_current("work/value.json", "input-one"))
 
+    def test_artifact_store_rejects_absolute_and_escaping_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            store = ArtifactStore(Path(temporary))
+            with self.assertRaisesRegex(ValueError, "project-relative"):
+                store.write_json(str(Path(temporary).resolve() / "outside.json"), {})
+            with self.assertRaisesRegex(ValueError, "escapes project"):
+                store.write_json("../outside.json", {})
+
     def test_generations_are_append_only_and_selection_moves(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             history = GenerationHistory(Path(temporary) / "pipeline.db")

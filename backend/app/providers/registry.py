@@ -1,6 +1,18 @@
 from collections.abc import Iterable
+from dataclasses import dataclass
+from typing import TypeVar, cast
 
+from app.providers.runtime import ProviderRuntime
 from app.providers.types import ProviderCapability, ProviderCategory, ProviderMetadata
+
+
+RuntimeT = TypeVar("RuntimeT", bound=ProviderRuntime)
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderRegistration:
+    metadata: ProviderMetadata
+    runtime: ProviderRuntime | None = None
 
 
 class ProviderRegistry:
@@ -12,22 +24,54 @@ class ProviderRegistry:
     """
 
     def __init__(self) -> None:
-        self._providers: dict[str, ProviderMetadata] = {}
+        self._providers: dict[str, ProviderRegistration] = {}
 
-    def register(self, metadata: ProviderMetadata) -> None:
+    def register(
+        self, metadata: ProviderMetadata, runtime: ProviderRuntime | None = None
+    ) -> None:
         if metadata.id in self._providers:
             raise ValueError(f"Provider is already registered: {metadata.id}")
-        self._providers[metadata.id] = metadata
+        self._providers[metadata.id] = ProviderRegistration(metadata, runtime)
+
+    def bind_runtime(self, provider_id: str, runtime: ProviderRuntime) -> None:
+        """Attach an executable adapter to already-registered provider metadata."""
+        normalized = self.normalize_id(provider_id)
+        try:
+            registration = self._providers[normalized]
+        except KeyError as exc:
+            raise ValueError(f"Unsupported provider: {provider_id}") from exc
+        self._providers[normalized] = ProviderRegistration(registration.metadata, runtime)
 
     def get(self, provider_id: str) -> ProviderMetadata:
         normalized = self.normalize_id(provider_id)
         try:
-            return self._providers[normalized]
+            return self._providers[normalized].metadata
         except KeyError as exc:
             raise ValueError(f"Unsupported provider: {provider_id}") from exc
 
+    def runtime(self, provider_id: str, runtime_type: type[RuntimeT]) -> RuntimeT:
+        normalized = self.normalize_id(provider_id)
+        try:
+            runtime = self._providers[normalized].runtime
+        except KeyError as exc:
+            raise ValueError(f"Unsupported provider: {provider_id}") from exc
+        if runtime is None:
+            raise ValueError(f"Provider has no executable runtime: {provider_id}")
+        if not isinstance(runtime, runtime_type):
+            raise TypeError(
+                f"Provider {provider_id} runtime is not {runtime_type.__name__}"
+            )
+        return cast(RuntimeT, runtime)
+
+    def is_executable(self, provider_id: str) -> bool:
+        normalized = self.normalize_id(provider_id)
+        registration = self._providers.get(normalized)
+        return bool(registration and registration.runtime is not None)
+
     def list(self, category: ProviderCategory | None = None) -> list[ProviderMetadata]:
-        values: Iterable[ProviderMetadata] = self._providers.values()
+        values: Iterable[ProviderMetadata] = (
+            item.metadata for item in self._providers.values()
+        )
         if category is not None:
             values = (item for item in values if item.category == category)
         return sorted(values, key=lambda item: item.id)

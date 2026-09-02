@@ -5,6 +5,7 @@ from sqlmodel import Session, select
 
 from app.config import get_settings
 from app.infrastructure.ffmpeg import probe_duration, probe_media
+from app.infrastructure.atomic_files import write_json_atomic
 from app.infrastructure.project_layout import (
     get_final_audio_path,
     get_final_srt_path,
@@ -15,6 +16,8 @@ from app.models.media import MediaFile, MediaShot, SceneAssignment
 from app.models.project import Project
 from app.models.storyboard import SubtitleCue, VisualScene
 from app.services.rendering.scene_renderer import scene_output_path
+from app.services.rendering.render_config import get_project_render_config
+from app.services.rendering.scene_quality_checker import expected_codec_name
 from app.services.rendering import timeline_composer
 from app.services.narration.subtitle_service import display_units, spoken_weight
 
@@ -24,6 +27,7 @@ MAX_DURATION_ERROR_SECONDS = 0.1
 
 def run_quality_check(session: Session, project: Project) -> dict:
     issues: list[dict] = []
+    render_config = get_project_render_config(project)
     scenes = list(
         session.exec(
             select(VisualScene)
@@ -140,8 +144,17 @@ def run_quality_check(session: Session, project: Project) -> dict:
     if video_path.is_file():
         try:
             video_metadata = probe_media(video_path)
-            if video_metadata.get("width") != 1920 or video_metadata.get("height") != 1080:
-                _issue(issues, "resolution_mismatch", "error", "最终视频不是 1920×1080")
+            expected_video = render_config.video
+            if (
+                video_metadata.get("width") != expected_video.width
+                or video_metadata.get("height") != expected_video.height
+            ):
+                _issue(
+                    issues,
+                    "resolution_mismatch",
+                    "error",
+                    f"最终视频不是 {expected_video.width}×{expected_video.height}",
+                )
             video_sar = video_metadata.get("sample_aspect_ratio")
             if video_sar and video_sar not in {"1:1", "1/1"}:
                 _issue(
@@ -150,8 +163,14 @@ def run_quality_check(session: Session, project: Project) -> dict:
                     "error",
                     f"最终视频像素宽高比不是 1:1（实际为 {video_sar}）",
                 )
-            if video_metadata.get("codec_name") != "h264":
-                _issue(issues, "codec_mismatch", "warning", "最终视频编码不是 H.264")
+            expected_codec = expected_codec_name(expected_video.video_codec)
+            if video_metadata.get("codec_name") != expected_codec:
+                _issue(
+                    issues,
+                    "codec_mismatch",
+                    "warning",
+                    f"最终视频编码不是 {expected_codec}",
+                )
         except RuntimeError as exc:
             _issue(issues, "video_probe_failed", "error", str(exc))
 
@@ -173,8 +192,7 @@ def run_quality_check(session: Session, project: Project) -> dict:
         "issues": issues,
     }
     path = _report_path(project)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json_atomic(path, report)
     return report
 
 

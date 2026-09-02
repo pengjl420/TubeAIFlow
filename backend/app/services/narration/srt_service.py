@@ -14,6 +14,7 @@ from app.shared.time import seconds_to_srt_time
 from app.services.narration import subtitle_service
 from app.services.narration import alignment_service
 from app.infrastructure.project_layout import load_project_config
+from app.infrastructure.atomic_files import write_json_atomic, write_text_atomic
 
 
 def create_full_srt(
@@ -37,8 +38,7 @@ def create_full_srt(
     )
 
     final_path = get_final_srt_path(project, get_settings().workspace_dir)
-    final_path.parent.mkdir(parents=True, exist_ok=True)
-    final_path.write_text(work_path.read_text(encoding="utf-8"), encoding="utf-8")
+    write_text_atomic(final_path, work_path.read_text(encoding="utf-8"))
     _write_alignment_outputs(base_dir, alignment)
     return final_path
 
@@ -113,7 +113,7 @@ def _build_aligned_cues(project: Project, segments: list[Segment], settings) -> 
 
 def _write_alignment_outputs(base_dir: Path, alignment: dict) -> None:
     alignment_path = base_dir / "subtitles" / "alignment.json"
-    alignment_path.write_text(json.dumps(alignment, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json_atomic(alignment_path, alignment)
     segments = alignment["segments"]
     review = [item for item in segments if item["status"] != "passed"]
     report = {
@@ -132,9 +132,7 @@ def _write_alignment_outputs(base_dir: Path, alignment: dict) -> None:
             for item in review
         ],
     }
-    (base_dir / "reports" / "subtitle_qa.json").write_text(
-        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    write_json_atomic(base_dir / "reports" / "subtitle_qa.json", report)
 
 
 def read_alignment_outputs(project: Project) -> dict:
@@ -164,8 +162,7 @@ def _write_srt(path: Path, cues: list[tuple[float, float, str]]) -> None:
             f"{seconds_to_srt_time(start)} --> {seconds_to_srt_time(end)}\n"
             f"{clean_text}"
         )
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n\n".join(blocks) + "\n", encoding="utf-8")
+    write_text_atomic(path, "\n\n".join(blocks) + "\n")
 
 
 def _clean_srt_text(text: str) -> str:

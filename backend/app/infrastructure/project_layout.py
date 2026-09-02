@@ -1,4 +1,3 @@
-import json
 import re
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -7,6 +6,8 @@ from pathlib import Path
 
 from app.models.project import Project
 from app.infrastructure.file_storage import project_dir
+from app.infrastructure.serialization import load_json_object
+from app.schemas.project_config import ProjectConfig
 
 
 _PROJECT_CONFIG_OVERRIDES: ContextVar[dict[str, dict] | None] = ContextVar(
@@ -105,13 +106,11 @@ def load_project_config(project: Project) -> dict:
     overrides = _PROJECT_CONFIG_OVERRIDES.get()
     if overrides and project.id in overrides:
         return dict(overrides[project.id])
-    if not project.config_json:
-        return {}
-    try:
-        data = json.loads(project.config_json)
-    except json.JSONDecodeError:
-        return {}
-    return data if isinstance(data, dict) else {}
+    return load_json_object(project.config_json)
+
+
+def load_project_config_model(project: Project) -> ProjectConfig:
+    return ProjectConfig.model_validate(load_project_config(project))
 
 
 @contextmanager

@@ -1,6 +1,7 @@
 from sqlmodel import Field, SQLModel
 
 from app.shared.time import utc_now_iso
+from app.domain.states import ProjectStatus
 
 
 class Project(SQLModel, table=True):
@@ -12,7 +13,7 @@ class Project(SQLModel, table=True):
     script_clean_path: str | None = None
     reference_audio_path: str | None = None
     output_dir: str | None = None
-    status: str = "created"
+    status: str = ProjectStatus.CREATED.value
     config_json: str | None = None
     created_at: str = Field(default_factory=utc_now_iso)
     updated_at: str = Field(default_factory=utc_now_iso)

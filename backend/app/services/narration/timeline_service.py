@@ -1,5 +1,3 @@
-import json
-
 from sqlmodel import Session, select
 
 from app.config import get_settings
@@ -10,6 +8,7 @@ from app.infrastructure.project_layout import (
     get_output_stem,
     get_project_work_dir,
 )
+from app.infrastructure.atomic_files import write_json_atomic
 
 
 def build_timeline(session: Session, project: Project, gap_seconds: float = 0.0) -> dict:
@@ -46,9 +45,6 @@ def build_timeline(session: Session, project: Project, gap_seconds: float = 0.0)
     ensure_project_dirs(base_dir)
     timeline_dir = base_dir / "timeline"
     timeline_dir.mkdir(parents=True, exist_ok=True)
-    (timeline_dir / f"{get_output_stem(project)}_timeline.json").write_text(
-        json.dumps(data, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    write_json_atomic(timeline_dir / f"{get_output_stem(project)}_timeline.json", data)
     session.commit()
     return data

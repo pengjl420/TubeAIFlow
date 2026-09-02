@@ -1,4 +1,3 @@
-import json
 import threading
 import uuid
 
@@ -6,23 +5,16 @@ from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.infrastructure.project_layout import load_project_config
+from app.infrastructure.serialization import dump_json, load_json_object
 from app.config import get_settings
 from app.models.project import Project
 from app.models.task import TaskRun
 from app.shared.time import elapsed_seconds, utc_now_iso
+from app.workflows.builtin import get_workflow_runtime
 
 
 ACTIVE_STATUSES = {"queued", "running", "paused"}
 TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
-VIDEO_STAGES = {
-    "video",
-    "storyboard",
-    "image_generation",
-    "scene_render",
-    "visual_track",
-    "final_render",
-    "quality_check",
-}
 _enqueue_lock = threading.Lock()
 _SECRET_SUFFIXES = ("_api_key", "_token", "_secret", "_password")
 
@@ -33,13 +25,12 @@ def build_config_snapshot(project: Project) -> str:
         for key, value in get_settings().model_dump(mode="json").items()
         if not key.lower().endswith(_SECRET_SUFFIXES)
     }
-    return json.dumps(
+    return dump_json(
         {
             "format_version": 1,
             "project": load_project_config(project),
             "settings": settings,
-        },
-        ensure_ascii=False,
+        }
     )
 
 
@@ -75,9 +66,8 @@ def enqueue_project_task(
             current_stage=current_stage,
             include_video=include_video,
             queue_sequence=int(last_sequence or 0) + 1,
-            checkpoint_json=json.dumps(
-                {"current_stage": current_stage, "stage_history": []},
-                ensure_ascii=False,
+            checkpoint_json=dump_json(
+                {"current_stage": current_stage, "stage_history": []}
             ),
             config_snapshot_json=build_config_snapshot(project),
             created_at=now,
@@ -125,17 +115,14 @@ def resume_failed_task(session: Session, task: TaskRun, *, current_stage: str) -
     now = utc_now_iso()
     task.current_stage = current_stage
     queue_paused_task(session, task)
-    try:
-        checkpoint = json.loads(task.checkpoint_json or "{}")
-    except json.JSONDecodeError:
-        checkpoint = {}
+    checkpoint = load_json_object(task.checkpoint_json)
     history = checkpoint.get("stage_history")
     if not isinstance(history, list):
         history = []
     history.append({"event": "resumed", "stage": current_stage, "at": now})
     checkpoint["current_stage"] = current_stage
     checkpoint["stage_history"] = history[-100:]
-    task.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
+    task.checkpoint_json = dump_json(checkpoint)
     session.add(task)
 
     project = session.get(Project, task.project_id)
@@ -153,7 +140,10 @@ def resume_failed_task(session: Session, task: TaskRun, *, current_stage: str) -
 
 
 def _is_video_task(workflow: str, current_stage: str) -> bool:
-    return workflow == "video_synthesis" or current_stage in VIDEO_STAGES
+    try:
+        return current_stage in get_workflow_runtime(workflow).video_stages
+    except ValueError:
+        return False
 
 
 def get_active_project_task(session: Session, project_id: str) -> TaskRun | None:

@@ -1,9 +1,9 @@
-import json
 from datetime import datetime
 from pathlib import Path
 
 from app.config import get_settings
 from app.models.project import Project
+from app.infrastructure.atomic_files import write_json_atomic
 from app.infrastructure.project_layout import (
     ensure_project_dirs,
     get_final_srt_path,
@@ -44,5 +44,5 @@ def create_manifest(project: Project) -> Path:
         },
     }
     output_path = base_dir / f"{stem}_manifest.json"
-    output_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json_atomic(output_path, manifest)
     return output_path

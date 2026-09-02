@@ -27,8 +27,8 @@ def check_scene_video(
     sample_aspect_ratio = metadata.get("sample_aspect_ratio")
     if sample_aspect_ratio and sample_aspect_ratio not in {"1:1", "1/1"}:
         issues.append(f"像素宽高比不是 1:1（实际为 {sample_aspect_ratio}）")
-    if metadata.get("codec_name") != _expected_codec_name(video.video_codec):
-        issues.append(f"视频编码不是 {_expected_codec_name(video.video_codec)}")
+    if metadata.get("codec_name") != expected_codec_name(video.video_codec):
+        issues.append(f"视频编码不是 {expected_codec_name(video.video_codec)}")
     if metadata.get("pixel_format") != video.pixel_format:
         issues.append(f"像素格式不是 {video.pixel_format}")
     frame_rate = metadata.get("frame_rate_value")
@@ -65,5 +65,11 @@ def check_scene_video(
     return result
 
 
-def _expected_codec_name(codec: str) -> str:
-    return "h264" if codec in {"libx264", "h264"} else codec
+def expected_codec_name(codec: str) -> str:
+    aliases = {
+        "libx264": "h264",
+        "h264_nvenc": "h264",
+        "h264_qsv": "h264",
+        "h264_amf": "h264",
+    }
+    return aliases.get(codec, codec)

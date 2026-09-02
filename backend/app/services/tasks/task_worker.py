@@ -1,4 +1,3 @@
-import json
 import logging
 import os
 import threading
@@ -11,13 +10,19 @@ from app.database import engine
 from app.config import use_settings_snapshot
 from app.infrastructure import process_runner as runtime_control
 from app.infrastructure.project_layout import use_project_config_snapshot
+from app.infrastructure.serialization import dump_json, load_json_object
 from app.models.batch import BatchItem, BatchJob
 from app.models.project import Project
 from app.models.task import TaskRun
 from app.services.projects.project_descriptor_service import write_project_descriptor
 from app.services.tasks import task_service
 from app.shared.time import utc_now_iso
+from app.workflows import get_workflow_runtime
+from app.workflows.builtin import VIDEO_WORKFLOW_ID
 from app.workflows import narration_generation, video_synthesis
+
+
+_COMPATIBILITY_WORKFLOW_MODULES = (narration_generation, video_synthesis)
 
 
 logger = logging.getLogger(__name__)
@@ -29,11 +34,10 @@ _worker_id = f"{os.getpid()}-{uuid.uuid4().hex[:8]}"
 
 def _is_video_task(task: TaskRun, stage: str | None = None) -> bool:
     current_stage = stage or task.current_stage
-    return (
-        task.workflow == "video_synthesis"
-        or current_stage == "video"
-        or current_stage in video_synthesis.STAGES
-    )
+    try:
+        return current_stage in get_workflow_runtime(task.workflow).video_stages
+    except ValueError:
+        return task.workflow == VIDEO_WORKFLOW_ID
 
 
 def start_worker() -> None:
@@ -254,23 +258,14 @@ def process_next_task() -> bool:
             with ExitStack() as stack:
                 stack.enter_context(use_project_config_snapshot(project.id, project_snapshot))
                 stack.enter_context(use_settings_snapshot(settings_snapshot))
-                if task.workflow == "narration_generation":
-                    narration_generation.run_project_generation(
-                        session,
-                        project,
-                        task.current_stage,
-                        task.include_video,
-                        update_stage,
-                    )
-                elif task.workflow == "video_synthesis":
-                    video_synthesis.run_video_synthesis(
-                        session,
-                        project,
-                        task.current_stage,
-                        update_stage,
-                    )
-                else:
-                    raise ValueError(f"Unknown workflow: {task.workflow}")
+                runtime = get_workflow_runtime(task.workflow)
+                runtime.run(
+                    session,
+                    project,
+                    task.current_stage,
+                    task.include_video,
+                    update_stage,
+                )
         except runtime_control.TaskCancelledError as exc:
             session.rollback()
             _cancel_task(session, task.id, str(exc))
@@ -324,7 +319,7 @@ def _complete_task(session: Session, task_id: str) -> None:
     if project:
         project.status = (
             "completed"
-            if task.workflow == "video_synthesis" or task.include_video
+            if get_workflow_runtime(task.workflow).produces_video or task.include_video
             else "narration_ready"
         )
         project.updated_at = now
@@ -455,8 +450,8 @@ def _append_checkpoint_event(
     next_stage: str | None = None,
 ) -> None:
     try:
-        checkpoint = json.loads(task.checkpoint_json)
-    except (TypeError, json.JSONDecodeError):
+        checkpoint = load_json_object(task.checkpoint_json)
+    except TypeError:
         checkpoint = {}
     if not isinstance(checkpoint, dict):
         checkpoint = {}
@@ -471,24 +466,21 @@ def _append_checkpoint_event(
     history.append(entry)
     checkpoint["current_stage"] = checkpoint_stage or stage
     checkpoint["stage_history"] = history[-100:]
-    task.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
+    task.checkpoint_json = dump_json(checkpoint)
 
 
 def _load_batch_config(batch: BatchJob) -> dict:
     try:
-        data = json.loads(batch.config_json)
-    except (TypeError, json.JSONDecodeError):
+        return load_json_object(batch.config_json)
+    except TypeError:
         return {}
-    return data if isinstance(data, dict) else {}
 
 
 def _load_config_snapshot(task: TaskRun) -> tuple[dict | None, dict | None]:
     """Read both current and legacy task snapshots without breaking old queues."""
     try:
-        data = json.loads(task.config_snapshot_json or "{}")
-    except (TypeError, json.JSONDecodeError):
-        return None, None
-    if not isinstance(data, dict):
+        data = load_json_object(task.config_snapshot_json)
+    except TypeError:
         return None, None
     if data.get("format_version") == 1:
         project = data.get("project")

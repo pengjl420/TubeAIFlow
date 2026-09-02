@@ -1,93 +1,15 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import sqlite3
 from pathlib import Path
-from typing import Any
 
-from pydantic import BaseModel
-
+from app.infrastructure.artifacts import (
+    ArtifactStore as ArtifactStore,
+    sha256_bytes as sha256_bytes,
+    sha256_file as sha256_file,
+)
 from app.shared.time import utc_now_iso
-
-
-def sha256_bytes(value: bytes) -> str:
-    return hashlib.sha256(value).hexdigest()
-
-
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-class ArtifactStore:
-    def __init__(self, project_dir: Path):
-        self.project_dir = project_dir.resolve()
-        self.cache_path = self.project_dir / "work" / "artifact_cache.json"
-
-    def write_json(self, relative_path: str, value: BaseModel | dict | list) -> Path:
-        payload = value.model_dump(mode="json") if isinstance(value, BaseModel) else value
-        encoded = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
-        return self._write(relative_path, encoded)
-
-    def write_jsonl(self, relative_path: str, values: list[BaseModel]) -> Path:
-        encoded = (
-            "\n".join(json.dumps(value.model_dump(mode="json"), ensure_ascii=False) for value in values)
-            + "\n"
-        ).encode("utf-8")
-        return self._write(relative_path, encoded)
-
-    def write_bytes(self, relative_path: str, value: bytes) -> Path:
-        return self._write(relative_path, value)
-
-    def is_current(self, relative_path: str, input_hash: str) -> bool:
-        path = self.project_dir / relative_path
-        cache = self._read_cache()
-        entry = cache.get(relative_path)
-        return bool(
-            path.is_file()
-            and entry
-            and entry.get("input_hash") == input_hash
-            and entry.get("artifact_hash") == sha256_file(path)
-        )
-
-    def record_input_hash(self, relative_path: str, input_hash: str) -> None:
-        path = self.project_dir / relative_path
-        cache = self._read_cache()
-        cache[relative_path] = {
-            "input_hash": input_hash,
-            "artifact_hash": sha256_file(path),
-            "updated_at": utc_now_iso(),
-        }
-        self._write_cache(cache)
-
-    def _write(self, relative_path: str, encoded: bytes) -> Path:
-        path = (self.project_dir / relative_path).resolve()
-        if self.project_dir not in path.parents:
-            raise ValueError("Artifact path escapes project directory")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_suffix(path.suffix + ".tmp")
-        temporary.write_bytes(encoded)
-        temporary.replace(path)
-        return path
-
-    def _read_cache(self) -> dict[str, Any]:
-        if not self.cache_path.is_file():
-            return {}
-        try:
-            value = json.loads(self.cache_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return {}
-        return value if isinstance(value, dict) else {}
-
-    def _write_cache(self, value: dict[str, Any]) -> None:
-        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.cache_path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
-        temporary.replace(self.cache_path)
 
 
 class GenerationHistory:

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="frontend/public/brand/tubeaifolw-logo.png" alt="TubeAiFolw Logo" width="128" />
+</p>
+
 # TubeAiFolw
 
 TubeAiFolw is a local-first AI production workflow for long-form YouTube and faceless

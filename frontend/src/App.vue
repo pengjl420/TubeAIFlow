@@ -45,7 +45,7 @@ onBeforeUnmount(() => {
   <div class="app-shell taf-shell">
     <aside class="sidebar taf-sidebar">
       <RouterLink class="brand taf-brand" to="/projects" aria-label="前往项目">
-        <span class="brand-mark taf-brand-mark"><span /></span>
+        <img class="brand-mark taf-brand-mark" src="/brand/tubeaifolw-logo.png" alt="" width="32" height="32" />
         <strong>TubeAiFolw</strong>
       </RouterLink>
       <nav class="side-nav taf-side-nav" aria-label="主导航">

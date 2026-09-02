@@ -4811,7 +4811,16 @@ input[type='range']::-moz-range-thumb {
   .app-content.taf-content { margin-left: 184px; }
 }
 .brand.taf-brand { gap: 10px; padding: 0 6px 35px; }
-.brand-mark.taf-brand-mark { background: linear-gradient(145deg, #0879ff, #0549f5); border-radius: 7px 11px 11px 7px; box-shadow: 0 6px 14px rgba(11,92,255,.24); height: 28px; width: 28px; }
+.brand-mark.taf-brand-mark {
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  flex: 0 0 32px;
+  height: 32px;
+  object-fit: contain;
+  transform: none;
+  width: 32px;
+}
 .side-nav.taf-side-nav a { border-radius: 9px; color: #445169; font-size: 15px; gap: 16px; min-height: 45px; padding: 10px 14px; }
 .side-nav.taf-side-nav a:hover { background: #f3f6fb; color: #075bf5; transform: none; }
 .side-nav.taf-side-nav a.is-active { background: #eef3ff; color: #075bf5; }

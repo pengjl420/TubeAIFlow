@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { AudioLines, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Download, Loader2, Pause, Play, RefreshCw, RotateCcw, Search, Trash2, XCircle } from 'lucide-vue-next'
+import { AudioLines, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Copy, Download, Loader2, Pause, Play, RefreshCw, RotateCcw, Search, Trash2, XCircle } from 'lucide-vue-next'
 import { listVoices, type VoiceProfile } from '../api/voices'
 import { voiceTagText } from '../utils/tts'
 import {
@@ -27,6 +27,8 @@ const taskSearch = ref('')
 const statusFilter = ref('all')
 const taskPage = ref(1)
 const pageSize = ref(10)
+const segmentPages = ref<Record<string, number>>({})
+const segmentPageSize = 5
 const lastUpdatedAt = ref<Date | null>(null)
 const error = ref('')
 let pollTimer: number | undefined
@@ -47,6 +49,54 @@ const pagedTasks = computed(() => filteredTasks.value.slice((taskPage.value - 1)
 
 function taskSegments(task: VoiceGenerationTask) {
   return task.segments || []
+}
+
+function segmentTotalPages(task: VoiceGenerationTask) {
+  return Math.max(1, Math.ceil(taskSegments(task).length / segmentPageSize))
+}
+
+function segmentPage(task: VoiceGenerationTask) {
+  return Math.min(segmentPages.value[task.id] || 1, segmentTotalPages(task))
+}
+
+function pagedTaskSegments(task: VoiceGenerationTask) {
+  const start = (segmentPage(task) - 1) * segmentPageSize
+  return taskSegments(task).slice(start, start + segmentPageSize)
+}
+
+function setSegmentPage(task: VoiceGenerationTask, page: number) {
+  segmentPages.value[task.id] = Math.min(Math.max(1, page), segmentTotalPages(task))
+}
+
+async function copyError(message: string) {
+  let copied = false
+  try {
+    if (navigator.clipboard) {
+      await navigator.clipboard.writeText(message)
+      copied = true
+    }
+  } catch {
+    // Fall back to the local selection API when clipboard permission is unavailable.
+  }
+  if (!copied) {
+    const textarea = document.createElement('textarea')
+    try {
+      textarea.value = message
+      textarea.setAttribute('readonly', '')
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      copied = document.execCommand('copy')
+    } catch {
+      copied = false
+    } finally {
+      textarea.remove()
+    }
+  }
+  showToast(copied
+    ? { title: '错误内容已复制', description: '可以粘贴到日志、工单或其他位置。', tone: 'success' }
+    : { title: '复制失败', description: '浏览器未允许访问剪贴板，请重试。', tone: 'danger', duration: 4000 })
 }
 
 function taskSegmentCount(task: VoiceGenerationTask) {
@@ -152,7 +202,17 @@ async function deleteTask(task: VoiceGenerationTask) {
 }
 
 const formatDate = (value: string | null) => value ? new Date(value).toLocaleString() : '—'
-const formatDuration = (value: number | null) => value === null ? '—' : `${value.toFixed(1)} 秒`
+function formatDuration(value: number | null | undefined) {
+  if (value === null || value === undefined) return '—'
+  const seconds = Number(value)
+  if (!Number.isFinite(seconds) || seconds < 0) return '—'
+  const rounded = Math.round(seconds)
+  const hours = Math.floor(rounded / 3600)
+  const minutes = Math.floor((rounded % 3600) / 60)
+  const remainingSeconds = rounded % 60
+  const clock = `${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`
+  return hours ? `${String(hours).padStart(2, '0')}:${clock}` : clock
+}
 
 watch([taskSearch, statusFilter, pageSize], () => { taskPage.value = 1 })
 watch(totalPages, value => { if (taskPage.value > value) taskPage.value = value })
@@ -238,15 +298,27 @@ onBeforeUnmount(() => {
           <div class="task-main">
             <div><strong>{{ task.output_filename }}</strong><span>{{ task.voice_profile_name }}</span><span>{{ voiceTagText(task.tts_engine, task.language) }}</span><span>{{ taskSegmentCount(task) }} 段</span></div>
             <p>{{ task.text }}</p>
-            <span v-if="task.error_message" class="task-error">{{ task.error_message }}</span>
-            <div v-if="task.audio_url" class="full-audio"><b>完整音频</b><audio controls preload="none" :src="voiceGenerationAudioUrl(task)" /><a :href="voiceGenerationAudioUrl(task, true)"><Download :size="14" /> 下载</a></div>
+            <div v-if="task.error_message" class="task-error-wrap" tabindex="0" :aria-describedby="`task-error-${task.id}`">
+              <span class="task-error-preview">{{ task.error_message }}</span>
+              <div :id="`task-error-${task.id}`" class="task-error-tooltip" role="tooltip">
+                <p>{{ task.error_message }}</p>
+                <button type="button" aria-label="复制完整错误内容" @click.stop="copyError(task.error_message)"><Copy :size="13" />复制错误</button>
+              </div>
+            </div>
+            <div v-if="task.audio_url" class="full-audio"><b>完整音频</b><audio controls preload="metadata" :src="voiceGenerationAudioUrl(task)" /><a :href="voiceGenerationAudioUrl(task, true)"><Download :size="14" /> 下载</a></div>
             <details v-if="taskSegments(task).length" class="segment-results">
               <summary><span>分段音频</span><b>{{ taskSegments(task).length }} 段</b></summary>
-              <div v-for="segment in taskSegments(task)" :key="segment.index" class="segment-result">
+              <div v-for="segment in pagedTaskSegments(task)" :key="segment.index" class="segment-result">
                 <b>{{ String(segment.index).padStart(4, '0') }}</b><span>{{ segment.text }}</span><small>{{ formatDuration(segment.duration) }}</small>
-                <audio v-if="segment.audio_url" controls preload="none" :src="voiceGenerationSegmentAudioUrl(segment)" />
+                <audio v-if="segment.audio_url" controls preload="metadata" :src="voiceGenerationSegmentAudioUrl(segment)" />
                 <a v-if="segment.audio_url" :href="voiceGenerationSegmentAudioUrl(segment, true)"><Download :size="13" /> {{ segment.filename }}</a>
               </div>
+              <footer v-if="segmentTotalPages(task) > 1" class="segment-pagination">
+                <span>每页 {{ segmentPageSize }} 段</span>
+                <button type="button" :disabled="segmentPage(task) <= 1" aria-label="上一页分段音频" @click="setSegmentPage(task, segmentPage(task) - 1)"><ChevronLeft :size="14" /></button>
+                <strong>{{ segmentPage(task) }} / {{ segmentTotalPages(task) }}</strong>
+                <button type="button" :disabled="segmentPage(task) >= segmentTotalPages(task)" aria-label="下一页分段音频" @click="setSegmentPage(task, segmentPage(task) + 1)"><ChevronRight :size="14" /></button>
+              </footer>
             </details>
           </div>
           <div class="task-meta">
@@ -382,5 +454,7 @@ onBeforeUnmount(() => {
 .segment-results summary b{background:#f2f5f9;border-radius:999px;color:#657389;font-size:9px;padding:2px 7px}
 .segment-results summary::after{color:#8792a3;content:"展开查看";font-size:9px;font-weight:500}
 .segment-results[open] summary::after{content:"收起"}
+.segment-pagination{align-items:center;border-top:1px solid #edf0f4;display:flex;gap:7px;justify-content:flex-end;padding-top:8px}.segment-pagination>span{color:#8792a3;font-size:9px;margin-right:auto}.segment-pagination button{align-items:center;background:#fff;border:1px solid #dce3ec;border-radius:5px;color:#536078;display:flex;height:28px;justify-content:center;width:28px}.segment-pagination button:disabled{cursor:not-allowed;opacity:.4}.segment-pagination strong{font-size:9px;white-space:nowrap}
+.task-row:hover,.task-row:focus-within{position:relative;z-index:10}.task-error-wrap{color:#d63b49;font-size:10px;min-width:0;outline:none;position:relative}.task-error-preview{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.task-error-tooltip{background:#172033;border-radius:7px;box-shadow:0 7px 22px #17203333;color:#fff;font-size:11px;font-weight:500;left:0;line-height:1.55;max-width:min(420px,70vw);opacity:0;padding:9px 10px;pointer-events:none;position:absolute;top:calc(100% + 6px);transform:translateY(-3px);transition:opacity .15s ease,transform .15s ease;visibility:hidden;width:max-content;z-index:20}.task-error-tooltip p{margin:0;max-height:180px;overflow:auto;white-space:pre-wrap}.task-error-tooltip button{align-items:center;background:#ffffff14;border:1px solid #ffffff38;border-radius:5px;color:#fff;display:flex;font-size:10px;font-weight:700;gap:5px;margin-top:8px;padding:5px 8px}.task-error-tooltip button:hover,.task-error-tooltip button:focus-visible{background:#ffffff24;border-color:#ffffff70;outline:none}.task-error-wrap:hover .task-error-tooltip,.task-error-wrap:focus-within .task-error-tooltip{opacity:1;pointer-events:auto;transform:translateY(0);visibility:visible}
 @media(max-width:1050px){.task-list{grid-template-columns:1fr}}
 </style>

@@ -240,8 +240,8 @@ onBeforeUnmount(() => {
             <p>{{ task.text }}</p>
             <span v-if="task.error_message" class="task-error">{{ task.error_message }}</span>
             <div v-if="task.audio_url" class="full-audio"><b>完整音频</b><audio controls preload="none" :src="voiceGenerationAudioUrl(task)" /><a :href="voiceGenerationAudioUrl(task, true)"><Download :size="14" /> 下载</a></div>
-            <details v-if="taskSegments(task).length" class="segment-results" :open="task.status === 'completed'">
-              <summary>分段音频（{{ taskSegments(task).length }}）</summary>
+            <details v-if="taskSegments(task).length" class="segment-results">
+              <summary><span>分段音频</span><b>{{ taskSegments(task).length }} 段</b></summary>
               <div v-for="segment in taskSegments(task)" :key="segment.index" class="segment-result">
                 <b>{{ String(segment.index).padStart(4, '0') }}</b><span>{{ segment.text }}</span><small>{{ formatDuration(segment.duration) }}</small>
                 <audio v-if="segment.audio_url" controls preload="none" :src="voiceGenerationSegmentAudioUrl(segment)" />
@@ -364,4 +364,23 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .task-toolbar{align-items:center;display:flex;gap:9px;margin-bottom:12px}.task-toolbar>label{align-items:center;border:1px solid #dce3ec;border-radius:8px;color:#8290a3;display:flex;height:38px;padding:0 10px;width:min(360px,45%)}.task-toolbar input{border:0;min-width:0;outline:0;padding:0 8px;width:100%}.task-toolbar select,.task-pagination select{background:#fff;border:1px solid #dce3ec;border-radius:7px;min-height:38px;padding:0 28px 0 10px}.task-toolbar>span{color:#7a8699;font-size:11px;margin-left:auto}.task-pagination{align-items:center;border-top:1px solid #edf0f4;display:flex;gap:9px;margin-top:14px;padding-top:12px}.task-pagination>span{color:#718096;font-size:12px;margin-right:auto}.task-pagination label{align-items:center;color:#718096;display:flex;font-size:11px;gap:6px}.task-pagination select{min-height:32px}.task-pagination button{align-items:center;background:#fff;border:1px solid #dce3ec;border-radius:6px;color:#536078;display:flex;height:34px;justify-content:center;min-height:34px;width:34px}.task-pagination strong{font-size:11px}@media(max-width:650px){.task-toolbar{align-items:stretch;display:grid;grid-template-columns:1fr 140px}.task-toolbar>label{width:100%}.task-toolbar>span{grid-column:1/-1;margin:0}.task-pagination{flex-wrap:wrap}.task-pagination>span{flex-basis:100%}}
+
+/* Keep generation history compact; segment audio stays collapsed until requested. */
+.task-list{gap:7px;grid-template-columns:repeat(2,minmax(0,1fr))}
+.task-row{gap:10px;padding:11px 12px}
+.status-icon{height:34px;width:34px}
+.task-main{gap:6px}
+.task-main>div:first-child{gap:7px}
+.task-meta{gap:4px}
+.full-audio{gap:8px!important;padding:6px 8px}
+.full-audio audio{height:30px}
+.segment-results{padding-top:6px}
+.segment-results summary{align-items:center;display:flex;font-size:10px;gap:7px;list-style:none;min-height:24px;width:max-content}
+.segment-results summary::-webkit-details-marker{display:none}
+.segment-results summary::before{border-bottom:4px solid transparent;border-left:5px solid #8290a3;border-top:4px solid transparent;content:"";transition:transform .15s ease}
+.segment-results[open] summary::before{transform:rotate(90deg)}
+.segment-results summary b{background:#f2f5f9;border-radius:999px;color:#657389;font-size:9px;padding:2px 7px}
+.segment-results summary::after{color:#8792a3;content:"展开查看";font-size:9px;font-weight:500}
+.segment-results[open] summary::after{content:"收起"}
+@media(max-width:1050px){.task-list{grid-template-columns:1fr}}
 </style>

@@ -17,7 +17,7 @@ const navigation = [
   <section class="settings-center settings-design-shell">
     <header class="settings-title">
       <h1>系统设置</h1>
-      <p>统一管理系统基础环境、AI 服务、配音引擎、图片生成与渲染策略</p>
+      <p>本地环境、模型、服务与生产默认值</p>
     </header>
     <div class="settings-workspace">
       <aside class="settings-navigation">

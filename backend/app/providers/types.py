@@ -20,6 +20,8 @@ class ProviderCapability(StrEnum):
     NEGATIVE_PROMPT = "negative_prompt"
     SEED = "seed"
     ASYNC_TASK = "async_task"
+    STRUCTURED_OUTPUT = "structured_output"
+    LONG_CONTEXT = "long_context"
 
 
 class ProviderMetadata(BaseModel):

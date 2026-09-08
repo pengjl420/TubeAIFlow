@@ -21,6 +21,15 @@ Current voice-generation workflow:
 5. FFmpeg merges the generated WAV files in their original order.
 6. The page retains and exposes both the individual segment WAVs and the complete WAV.
 
+Each voice-generation task has a random UUID (32 hexadecimal characters), shown in
+generation history with a copy button. Search history by this ID, or search
+`backend/workspace/logs/engine.log` and the task's `logs/*.log` files for
+`[task_id=<ID>]`. The same ID is retained across pause/resume and restart recovery;
+new submissions receive new IDs. Queue events, nested Engine logs, runner output,
+and audio merging share this ID. Copying an error also includes the task ID.
+Existing records keep their original IDs; logs written before this feature are
+not retroactively tagged. Paths above use the default workspace directory.
+
 For an output filename such as `人物开场白.wav`, artifacts are stored as:
 
 ```text
@@ -43,12 +52,34 @@ backend/workspace/voice_generations/{task_id}/
 From the project root, double-click:
 
 - `Start_TubeAIFlow.bat` to start the backend and frontend (legacy-compatible filename)
+- `Start_TubeAIFlow.bat --restart` / `--stop` to restart / stop local services
+- `Start_TubeAIFlow.bat --check` for a read-only environment check
+- `Start_TubeAIFlow.bat --repair` to rerun dependency installation
 - `Restart_TubeAIFlow.bat` to stop the running app, then start again
 - `Start_TTS_WebUI.bat index_tts|moss_tts|cosyvoice` to run one engine's standalone WebUI
 
+The BAT files are compatibility entry points; shared startup logic lives in
+`scripts/Launch_TubeAiFolw.ps1`. The standalone TTS entry remains available for
+existing integrations and delegates to `scripts/Start_TTSWebUI.ps1`.
+
+Create a desktop shortcut with the project Logo by running:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/Create_DesktopShortcut.ps1
+```
+
+This converts the existing Logo to a multi-resolution ICO and creates `TubeAiFolw.lnk`
+on the current user's desktop. The shortcut starts minimized and points to the project;
+do not copy the BAT itself to the desktop. Rerun this command after moving the repository.
+
 The start script uses the existing backend virtual environment without requiring a
 system-wide Python on `PATH`. If the environment does not exist, Python 3.12 is required
-once to create it. The launcher installs missing dependencies and starts both services in
+once to create it. On the first run of the updated launcher, dependencies are checked by
+pip/npm once and fingerprints are saved inside `.venv` and `node_modules`. Subsequent
+starts skip installation unless the dependency files change or `--repair` is supplied.
+The launcher waits up to 90 seconds for backend health and frontend HTTP readiness before
+opening the browser. Concurrent launcher invocations are serialized, and a healthy running
+instance is reused. The launcher starts both services in
 the background. It records both process IDs and writes rotating Engine logs plus backend
 and frontend process output to `backend/workspace/logs`. Restart
 uses the recorded process trees plus listener ports, so the previous instance is stopped

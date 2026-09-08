@@ -13,7 +13,7 @@ from app.infrastructure.project_layout import (
     get_output_stem,
     get_project_work_dir,
 )
-from app.integrations.llm.deepseek import DeepSeekClient
+from app.providers.llm import JSONLLMProvider, build_storyboard_llm, invoke_json
 from app.models.narration import Segment
 from app.models.project import Project
 from app.models.storyboard import SubtitleCue, VisualScene
@@ -46,12 +46,12 @@ logger = logging.getLogger(__name__)
 def generate_storyboard(
     session: Session,
     project: Project,
-    client: DeepSeekClient | None = None,
+    client: JSONLLMProvider | None = None,
 ) -> dict:
     cues = _load_narration_units(session, project.id)
     if not cues:
         raise ValueError("请先完成分段配音")
-    llm_client = client or DeepSeekClient(project_id=project.id)
+    llm_client = client or build_storyboard_llm(project.id)
     storyboard_mode = project_service.get_storyboard_mode(project)
     full_script = "\n".join(cue["text"] for cue in cues)
     if storyboard_mode == project_service.STORYBOARD_MODE_SEGMENTS:
@@ -92,11 +92,13 @@ def generate_storyboard(
     session.commit()
 
     scenes = list_scenes(session, project.id)
-    artifact_path = _write_artifact(project, scenes, warnings)
+    artifact_path = _write_artifact(project, scenes, warnings, llm_client)
     return {
         "scenes": scenes,
         "warnings": warnings,
-        "model": get_settings().deepseek_model,
+        "provider": getattr(llm_client, "name", "llm.extension"),
+        "model": getattr(llm_client, "model", get_settings().deepseek_model),
+        "routing": list(getattr(llm_client, "routes", [])),
         "path": str(artifact_path),
     }
 
@@ -211,7 +213,7 @@ def _load_segment_visual_hints(project: Project) -> list[str]:
 
 def _generate_storyboard_content(
     scene_values: list[dict],
-    client: DeepSeekClient,
+    client: JSONLLMProvider,
     *,
     full_script: str = "",
     scenes_per_request: int = SCENES_PER_REQUEST,
@@ -223,7 +225,7 @@ def _generate_storyboard_content(
         expected_ids = {scene["id"] for scene in batch}
         actual_ids = {scene.scene_id for scene in parsed.scenes}
         if actual_ids != expected_ids or len(parsed.scenes) != len(batch):
-            raise ValueError("DeepSeek 返回的 Storyboard 场景 ID 不完整")
+            raise ValueError("LLM 返回的 Storyboard 场景 ID 不完整")
         for scene in parsed.scenes:
             content = StoryboardContent.model_validate(
                 scene.model_dump(exclude={"scene_id"})
@@ -233,20 +235,29 @@ def _generate_storyboard_content(
 
 
 def _request_storyboard_batch(
-    batch: list[dict], client: DeepSeekClient, full_script: str = ""
+    batch: list[dict], client: JSONLLMProvider, full_script: str = ""
 ) -> StoryboardBatchResult:
     system_prompt = _storyboard_system_prompt()
     user_prompt = _storyboard_user_prompt(batch, full_script)
-    raw_payload = client.chat_json(system_prompt, user_prompt)
+    raw_payload = invoke_json(
+        client,
+        system_prompt,
+        user_prompt,
+        schema=StoryboardBatchResult.model_json_schema(),
+        task="storyboard",
+    )
     try:
         return StoryboardBatchResult.model_validate(
             _normalize_llm_storyboard_payload(raw_payload)
         )
     except ValidationError as exc:
         logger.warning("Storyboard response validation failed; requesting one repair: %s", exc)
-        repaired_payload = client.chat_json(
+        repaired_payload = invoke_json(
+            client,
             system_prompt,
             _storyboard_repair_prompt(batch, raw_payload, exc, full_script),
+            schema=StoryboardBatchResult.model_json_schema(),
+            task="storyboard-repair",
         )
         return StoryboardBatchResult.model_validate(
             _normalize_llm_storyboard_payload(repaired_payload)
@@ -296,6 +307,12 @@ For every input scene return exactly one object using the same scene_id and thes
 scene_id, visual_summary, visual_type, entities, locations, time_period, scene_category,
 mood, shot_preference, primary_query, alternative_queries, fallback_category,
 fallback_mood, allow_landscape_fallback, must_include, avoid, confidence.
+Also return recommended_source, fact_risk and visual_brief. recommended_source should be one of
+stock_video, archive, generated_image, generated_video, chart, map, timeline, document or text_card.
+fact_risk must be none, low, medium or high. visual_brief must contain subject, action,
+environment, semantic_message, composition, camera, era, mood, must_include and must_avoid.
+Describe visible, verifiable content rather than merely restating the narration. Keep visual_brief
+provider-neutral; do not add model names, quality buzzwords or rendering parameters.
 Also return motion_prompt, scene_type, importance_score, motion_score, identity_risk,
 text_density and subject_count. motion_prompt describes only subtle subject/environment/camera
 motion plus identity consistency constraints; do not repeat image style keywords.
@@ -336,8 +353,21 @@ def _storyboard_user_prompt(scene_values: list[dict], full_script: str = "") -> 
     ]
     request = {"scenes": payload}
     if full_script:
-        request["full_script_context"] = full_script
+        request["full_script_context"] = _compact_script_context(full_script)
     return json.dumps(request, ensure_ascii=False)
+
+
+def _compact_script_context(script: str, limit: int = 6000) -> str | dict:
+    text = script.strip()
+    if len(text) <= limit:
+        return text
+    side = limit // 2
+    return {
+        "total_characters": len(text),
+        "opening": text[:side],
+        "closing": text[-side:],
+        "context_policy": "hierarchical_excerpt_v1",
+    }
 
 
 def _storyboard_repair_prompt(
@@ -383,13 +413,20 @@ def _serialize_scene(scene: VisualScene) -> dict:
     }
 
 
-def _write_artifact(project: Project, scenes: list[dict], warnings: list[str]):
+def _write_artifact(
+    project: Project,
+    scenes: list[dict],
+    warnings: list[str],
+    client: JSONLLMProvider,
+):
     base_dir = get_project_work_dir(project, get_settings().workspace_dir)
     ensure_project_dirs(base_dir)
     path = base_dir / "storyboard" / "scenes.json"
     payload = {
         "project_id": project.id,
-        "model": get_settings().deepseek_model,
+        "provider": getattr(client, "name", "llm.extension"),
+        "model": getattr(client, "model", get_settings().deepseek_model),
+        "routing": list(getattr(client, "routes", [])),
         "grouping_prompt_version": GROUPING_PROMPT_VERSION,
         "storyboard_prompt_version": STORYBOARD_PROMPT_VERSION,
         "storyboard_mode": project_service.get_storyboard_mode(project),

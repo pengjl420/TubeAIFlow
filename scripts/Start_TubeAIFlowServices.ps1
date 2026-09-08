@@ -34,6 +34,20 @@ function Stop-StartedProcess($Process) {
     }
 }
 
+function Wait-ServiceReady([int]$ApiPort, [int]$WebPort) {
+    $deadline = (Get-Date).AddSeconds(90)
+    Write-Host 'Waiting for TubeAiFolw services...'
+    do {
+        try {
+            $health = Invoke-RestMethod "http://127.0.0.1:$ApiPort/api/health" -TimeoutSec 2
+            $web = Invoke-WebRequest "http://127.0.0.1:$WebPort" -UseBasicParsing -TimeoutSec 2
+            if ($health.data.product -eq 'TubeAiFolw' -and $health.data.status -eq 'ok' -and $web.StatusCode -eq 200) { return }
+        } catch { }
+        Start-Sleep -Milliseconds 500
+    } while ((Get-Date) -lt $deadline)
+    throw "Services did not become ready within 90 seconds. See $logDirectory"
+}
+
 if (-not (Test-Path -LiteralPath $backendPython)) {
     throw "Backend Python was not found: $backendPython"
 }
@@ -46,15 +60,16 @@ if ($Check) {
 }
 
 if (Test-Path -LiteralPath $statePath) {
+    $reuse = $false
     try {
         $state = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
         $backendRunning = Test-ProcessRunning -ProcessId ([int]$state.backend_pid)
         $frontendRunning = Test-ProcessRunning -ProcessId ([int]$state.frontend_pid)
         if ($backendRunning -and $frontendRunning) {
-            Write-Host "TubeAIFlow is already running (backend PID $($state.backend_pid), frontend PID $($state.frontend_pid))."
-            exit 0
+            $reuse = $true
         }
         foreach ($staleProcessId in @([int]$state.frontend_pid, [int]$state.backend_pid)) {
+            if ($reuse) { break }
             if (Test-ProcessRunning -ProcessId $staleProcessId) {
                 Write-Host "Stopping incomplete process tree $staleProcessId..."
                 & taskkill.exe /PID $staleProcessId /T /F | Out-Null
@@ -63,6 +78,11 @@ if (Test-Path -LiteralPath $statePath) {
     }
     catch {
         Write-Host "Ignoring a stale process state file."
+    }
+    if ($reuse) {
+        Wait-ServiceReady -ApiPort ([int]$state.backend_port) -WebPort ([int]$state.frontend_port)
+        Write-Host 'TubeAiFolw is already running.'
+        exit 0
     }
     Remove-Item -LiteralPath $statePath -Force -ErrorAction SilentlyContinue
 }
@@ -115,6 +135,8 @@ try {
         frontend_port = $FrontendPort
         started_at = (Get-Date).ToUniversalTime().ToString("o")
     } | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8
+
+    Wait-ServiceReady -ApiPort $BackendPort -WebPort $FrontendPort
 
     Write-Host "Backend started in the background (PID $($backendProcess.Id), port $BackendPort)."
     Write-Host "Frontend started in the background (PID $($frontendProcess.Id), port $FrontendPort)."

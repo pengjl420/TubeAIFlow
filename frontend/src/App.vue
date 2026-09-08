@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { AudioLines, CircleUserRound, FolderKanban, Merge, Mic2, Settings2, Wifi, WifiOff } from 'lucide-vue-next'
+import { AudioLines, CircleUserRound, FolderKanban, Merge, Mic2, Settings2 } from 'lucide-vue-next'
 import AppFeedback from './components/common/AppFeedback.vue'
 import { getEngineHealth } from './api/client'
 
@@ -18,8 +18,6 @@ const navigation = [
     { to: '/settings/general', label: '系统设置', icon: Settings2 },
   ] },
 ]
-const pageTitle = computed(() => String(route.meta.title || '本地工作流'))
-
 const engineOnline = ref(false)
 let healthTimer: number | undefined
 
@@ -64,14 +62,6 @@ onBeforeUnmount(() => {
       </div>
     </aside>
     <div class="app-content taf-content">
-      <header class="topbar taf-topbar streamlined">
-        <div><strong>{{ pageTitle }}</strong><span>TubeAiFolw · Local-first 长视频生产工作流</span></div>
-        <div class="topbar-engine-state" :class="{ offline: !engineOnline }" role="status">
-          <Wifi v-if="engineOnline" :size="15" />
-          <WifiOff v-else :size="15" />
-          <span>{{ engineOnline ? 'Engine 已连接' : 'Engine 未连接' }}</span>
-        </div>
-      </header>
       <main class="taf-main"><RouterView /></main>
     </div>
     <AppFeedback />
@@ -79,6 +69,5 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.streamlined>div:first-child{display:grid;gap:3px}.streamlined strong{color:#172033;font-size:14px}.streamlined span{color:#8792a3;font-size:11px}.taf-system-state .offline i{background:#e04b57}.taf-system-state .offline span{color:#c34a55}
-.topbar-engine-state{align-items:center!important;background:#e9f8f2;border:1px solid #cdeee0;border-radius:999px;color:#087b56;display:flex!important;gap:7px!important;margin-left:auto;padding:7px 11px}.topbar-engine-state span{color:inherit;font-size:11px;font-weight:700}.topbar-engine-state.offline{background:#fff0f1;border-color:#ffd7da;color:#c23f4b}
+.taf-system-state .offline i{background:#e04b57}.taf-system-state .offline span{color:#c34a55}
 </style>

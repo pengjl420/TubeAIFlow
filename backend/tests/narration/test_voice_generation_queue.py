@@ -1,5 +1,9 @@
 import tempfile
 import unittest
+import uuid
+import logging
+import io
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -9,6 +13,9 @@ from sqlmodel import Session, SQLModel, create_engine
 from app.models.narration import VoiceProfile
 from app.models.voice_generation import VoiceGenerationTask
 from app.services.narration import tts_service, voice_generation_queue
+from app.infrastructure.logging_config import (
+    TaskLogFormatter, current_task_id, task_log_context,
+)
 
 
 class VoiceGenerationQueueTests(unittest.TestCase):
@@ -58,6 +65,96 @@ class VoiceGenerationQueueTests(unittest.TestCase):
             voice_generation_queue.split_transcript_lines("第一句。第二句！\n\n  第三行  \r\n"),
             ["第一句。第二句！", "第三行"],
         )
+
+    def test_uuid_is_unique_and_persisted_through_resume_and_restart(self) -> None:
+        with Session(self.engine) as session:
+            session.add(VoiceProfile(
+                id="voice", name="Narrator", reference_audio_path=str(self.reference_audio)
+            ))
+            session.commit()
+            tasks = [voice_generation_queue.enqueue(
+                session, voice_profile_id="voice", text="same text", output_filename="same.wav",
+            ) for _ in range(2)]
+            ids = [task.id for task in tasks]
+            self.assertNotEqual(*ids)
+            self.assertTrue(all(uuid.UUID(identifier).version == 4 for identifier in ids))
+            voice_generation_queue.pause_task(session, tasks[0])
+            voice_generation_queue.resume_task(session, tasks[0])
+            tasks[0].status = "running"
+            session.add(tasks[0])
+            session.commit()
+        with Session(self.engine) as session:
+            self.assertEqual(voice_generation_queue.recover_interrupted_tasks(session), 1)
+            records = voice_generation_queue.list_tasks(session)
+            self.assertEqual({record["id"] for record in records}, set(ids))
+            self.assertTrue(all(record["status"] == "queued" for record in records))
+
+    def test_failure_and_success_logs_keep_task_id_without_leaking_to_next_task(self) -> None:
+        with Session(self.engine) as session:
+            session.add(VoiceProfile(
+                id="voice", name="Narrator", reference_audio_path=str(self.reference_audio)
+            ))
+            for index, task_id in enumerate(["failing", "succeeding"]):
+                session.add(VoiceGenerationTask(
+                    id=task_id, voice_profile_id="voice", voice_profile_name="Narrator",
+                    text="text", output_filename="voice.wav", queue_sequence=index,
+                ))
+            session.commit()
+
+        def generate(task_id, *_args):
+            self.assertEqual(current_task_id(), task_id)
+            logging.getLogger("test.provider").info("nested provider log")
+            if task_id == "failing":
+                raise RuntimeError("synthesis failed")
+            return {"output_path": "voice.wav", "duration": 1.0}
+
+        output = io.StringIO()
+        handler = logging.StreamHandler(output)
+        handler.setFormatter(TaskLogFormatter("%(message)s"))
+        root = logging.getLogger()
+        previous_level = root.level
+        root.addHandler(handler)
+        root.setLevel(logging.INFO)
+        try:
+            with patch.object(tts_service, "generate_segmented_audio", side_effect=generate):
+                voice_generation_queue.process_next_task()
+                self.assertIsNone(current_task_id())
+                voice_generation_queue.process_next_task()
+                self.assertIsNone(current_task_id())
+        finally:
+            root.removeHandler(handler)
+            root.setLevel(previous_level)
+            handler.close()
+        log = output.getvalue()
+        self.assertIn("[task_id=failing] nested provider log", log)
+        self.assertIn("[task_id=succeeding] nested provider log", log)
+        self.assertIn("[task_id=failing] RuntimeError: synthesis failed", log)
+        self.assertIn("[task_id=succeeding] Voice generation attempt finished: status=completed", log)
+        self.assertTrue(all(line.startswith("[task_id=") for line in log.splitlines()))
+        with Session(self.engine) as session:
+            self.assertEqual(session.get(VoiceGenerationTask, "failing").status, "failed")
+            self.assertEqual(session.get(VoiceGenerationTask, "succeeding").status, "completed")
+
+    def test_runner_logs_tag_and_redact_every_line_before_cancellation(self) -> None:
+        logs_dir = Path(self.temp_dir.name)
+        result = subprocess.CompletedProcess([], 1, "line one\nline two\n", "password=hidden\nfailed\n")
+        with (
+            task_log_context("runner-task"),
+            patch.object(tts_service, "_run_controlled_process", return_value=result) as run,
+            patch.object(tts_service.task_control, "check_cancelled", side_effect=tts_service.task_control.TaskCancelledError("paused")),
+        ):
+            with self.assertRaises(tts_service.task_control.TaskCancelledError):
+                tts_service._execute_batch_runner(
+                    "voice-generation-runner-task", ["python"], logs_dir,
+                    logs_dir, logs_dir / "result.json", "test-provider",
+                )
+        self.assertEqual(run.call_args.kwargs["env"]["TUBEAIFOLW_TASK_ID"], "runner-task")
+        files = list(logs_dir.glob("*.log"))
+        self.assertEqual(len(files), 4)
+        for path in files:
+            content = path.read_text(encoding="utf-8")
+            self.assertNotIn("hidden", content)
+            self.assertTrue(all(line.startswith("[task_id=runner-task] ") for line in content.splitlines()))
 
     def test_pause_and_resume_queued_task(self) -> None:
         with Session(self.engine) as session:

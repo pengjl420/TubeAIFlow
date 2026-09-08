@@ -2,7 +2,7 @@ import json
 
 from pydantic import BaseModel, Field, ValidationError
 
-from app.integrations.llm.deepseek import DeepSeekClient
+from app.providers.llm import JSONLLMProvider, build_storyboard_llm, invoke_json
 
 
 AI_SEGMENTATION_PROMPT_VERSION = "narration-segmentation-v1"
@@ -26,25 +26,28 @@ def split_script(text: str) -> list[dict]:
 
 def split_script_with_ai(
     text: str,
-    client: DeepSeekClient | None = None,
+    client: JSONLLMProvider | None = None,
 ) -> list[dict]:
-    """Ask DeepSeek to segment the complete script without rewriting its content."""
+    """Use the configured local-first LLM to choose TTS boundaries without rewriting."""
     source = text.strip()
     if not source:
         return []
-    llm_client = client or DeepSeekClient()
-    payload = llm_client.chat_json(
+    llm_client = client or build_storyboard_llm()
+    payload = invoke_json(
+        llm_client,
         _ai_segmentation_system_prompt(),
         json.dumps({"script": source}, ensure_ascii=False),
+        schema=_AISegmentationResult.model_json_schema(),
+        task="transcript-segmentation",
     )
     try:
         parsed = _AISegmentationResult.model_validate(payload)
     except ValidationError as exc:
-        raise ValueError(f"DeepSeek 自动切段结果格式无效：{exc}") from exc
+        raise ValueError(f"AI 自动切段结果格式无效：{exc}") from exc
 
     segment_texts = [item.text.strip() for item in parsed.segments]
     if _without_whitespace("".join(segment_texts)) != _without_whitespace(source):
-        raise ValueError("DeepSeek 自动切段修改、遗漏或重排了逐字稿内容")
+        raise ValueError("AI 自动切段修改、遗漏或重排了逐字稿内容")
     return _serialize_segments(
         segment_texts,
         [item.visual_description.strip() for item in parsed.segments],
@@ -83,5 +86,6 @@ Rules:
 - Only choose boundaries; never translate, rewrite, summarize, add, or omit transcript text.
 - Prefer complete semantic thoughts and natural speaking rhythm, normally 30-60 Chinese characters.
 - Avoid fragments that are too short and split unusually long sentences at natural punctuation.
-- visual_description is a concise English visual idea informed by the complete transcript context.
+- visual_description is only a rough English visual hint informed by the complete transcript.
+  It must not determine TTS boundaries and will not be treated as a final visual scene plan.
 """.strip()

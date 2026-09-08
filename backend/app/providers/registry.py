@@ -136,5 +136,38 @@ def _register_builtin_providers() -> None:
     for provider in providers:
         provider_registry.register(provider)
 
+    llm_providers = (
+        ProviderMetadata(
+            id="llm.local_qwen",
+            category=ProviderCategory.LLM,
+            display_name="Local Qwen",
+            model_id="qwen3-8b-q4_k_m",
+            capabilities=frozenset(
+                {
+                    ProviderCapability.LOCAL_INFERENCE,
+                    ProviderCapability.STRUCTURED_OUTPUT,
+                    ProviderCapability.LONG_CONTEXT,
+                }
+            ),
+            configuration_fields=(
+                "local_llm_base_url",
+                "local_llm_model",
+            ),
+        ),
+        ProviderMetadata(
+            id="llm.deepseek",
+            category=ProviderCategory.LLM,
+            display_name="DeepSeek",
+            model_id="deepseek-v4-flash",
+            local=False,
+            capabilities=frozenset(
+                {ProviderCapability.STRUCTURED_OUTPUT, ProviderCapability.LONG_CONTEXT}
+            ),
+            configuration_fields=("deepseek_base_url", "deepseek_model", "deepseek_api_key"),
+        ),
+    )
+    for provider in llm_providers:
+        provider_registry.register(provider)
+
 
 _register_builtin_providers()

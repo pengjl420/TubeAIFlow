@@ -219,6 +219,11 @@ def _generate(
 
 
 def _prompts(storyboard: StoryboardContent, configured_negative: str) -> tuple[str, str]:
+    if storyboard.image_prompt:
+        negative = ", ".join(
+            item for item in (configured_negative, storyboard.negative_prompt) if item
+        )
+        return storyboard.image_prompt, negative
     parts = [
         storyboard.visual_summary,
         f"documentary cinematic {storyboard.visual_type}",

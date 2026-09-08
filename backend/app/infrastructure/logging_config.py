@@ -2,8 +2,43 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+
+
+_task_id: ContextVar[str | None] = ContextVar("audio_task_id", default=None)
+
+
+@contextmanager
+def task_log_context(task_id: str) -> Iterator[None]:
+    """Bind a persisted task ID to this execution, including nested service calls."""
+    token = _task_id.set(task_id)
+    try:
+        yield
+    finally:
+        _task_id.reset(token)
+
+
+def current_task_id() -> str | None:
+    return _task_id.get()
+
+
+def format_task_log(value: object, task_id: str | None = None) -> str:
+    """Tag every physical line, including runner output and exception tracebacks."""
+    text = redact_sensitive(value)
+    identifier = task_id or current_task_id()
+    if not identifier:
+        return text
+    prefix = f"[task_id={identifier}] "
+    return "".join(prefix + line for line in text.splitlines(keepends=True))
+
+
+class TaskLogFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        return format_task_log(super().format(record), getattr(record, "task_id", None))
 
 
 _REDACTIONS = (
@@ -26,6 +61,8 @@ def redact_sensitive(value: object) -> str:
 
 class SensitiveDataFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
+        if not hasattr(record, "task_id"):
+            record.task_id = current_task_id()
         record.msg = redact_sensitive(record.msg)
         if record.args:
             if isinstance(record.args, dict):
@@ -63,7 +100,7 @@ def configure_logging(workspace_dir: Path, *, level: int = logging.INFO) -> Path
     handler._tubeaifolw_engine_handler = True  # type: ignore[attr-defined]
     handler.setLevel(level)
     handler.setFormatter(
-        logging.Formatter(
+        TaskLogFormatter(
             "%(asctime)s %(levelname)s %(name)s %(message)s",
             datefmt="%Y-%m-%dT%H:%M:%S%z",
         )

@@ -178,7 +178,7 @@ onBeforeUnmount(() => {
     <header class="taf-page-heading">
       <div>
         <h1>本地素材拼接</h1>
-        <p>提交多个拼接任务后，系统按提交顺序逐个处理；关闭页面不会中断队列。</p>
+        <p>选择素材与目标时长，提交后在本地队列持续处理。</p>
       </div>
       <span class="local-tool-badge"><Film :size="17" /> 队列模式</span>
     </header>
@@ -231,15 +231,15 @@ onBeforeUnmount(() => {
         </button>
       </article>
 
-      <aside class="local-merge-card queue-summary">
-        <header><span class="card-icon purple"><Clock3 :size="20" /></span><div><h2>队列说明</h2><p>当前待处理 {{ activeCount }} 个任务</p></div></header>
+      <details class="local-merge-card queue-summary">
+        <summary><span class="card-icon purple"><Clock3 :size="20" /></span><div><h2>队列与输出说明</h2><p>当前待处理 {{ activeCount }} 个任务</p></div><ChevronRight :size="18" /></summary>
         <ol>
           <li>任务严格按提交顺序执行，同一时间只运行一个拼接任务。</li>
           <li>任务与结果持久保存在本地数据库，后端重启后会自动重新排队。</li>
           <li>任务失败不会阻塞后续任务，可在列表中查看具体原因。</li>
           <li>每个任务仍会生成 MP4 和对应的 manifest.json。</li>
         </ol>
-      </aside>
+      </details>
     </div>
 
     <article class="local-merge-card task-card">

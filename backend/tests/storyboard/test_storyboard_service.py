@@ -215,6 +215,9 @@ class StoryboardServiceTests(unittest.TestCase):
         self.assertEqual(storyboard["alternative_queries"], ["historical office workers"])
         self.assertEqual(storyboard["must_include"], ["office"])
         self.assertEqual(storyboard["avoid"], ["modern smartphone"])
+        self.assertEqual(storyboard["visual_brief"]["era"], "1990s")
+        self.assertIn("Period accuracy: 1990s", storyboard["image_prompt"])
+        self.assertIn("modern smartphone", storyboard["negative_prompt"])
 
     def test_unsafe_storyboard_list_type_still_fails_after_one_repair(self) -> None:
         client = _InvalidStoryboardListDeepSeek()

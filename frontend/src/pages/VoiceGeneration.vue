@@ -41,7 +41,7 @@ const filteredTasks = computed(() => {
   const query = taskSearch.value.trim().toLocaleLowerCase()
   const priority: Record<string, number> = { running: 0, queued: 1, paused: 2, failed: 3, completed: 4 }
   return tasks.value.filter(task => statusFilter.value === 'all' || task.status === statusFilter.value)
-    .filter(task => !query || [task.output_filename, task.voice_profile_name, task.text].some(value => value.toLocaleLowerCase().includes(query)))
+    .filter(task => !query || [task.id, task.output_filename, task.voice_profile_name, task.text].some(value => value.toLocaleLowerCase().includes(query)))
     .slice().sort((a, b) => (priority[a.status] ?? 9) - (priority[b.status] ?? 9) || new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
 })
 const totalPages = computed(() => Math.max(1, Math.ceil(filteredTasks.value.length / pageSize.value)))
@@ -68,7 +68,7 @@ function setSegmentPage(task: VoiceGenerationTask, page: number) {
   segmentPages.value[task.id] = Math.min(Math.max(1, page), segmentTotalPages(task))
 }
 
-async function copyError(message: string) {
+async function copyText(message: string, successTitle: string) {
   let copied = false
   try {
     if (navigator.clipboard) {
@@ -95,7 +95,7 @@ async function copyError(message: string) {
     }
   }
   showToast(copied
-    ? { title: '错误内容已复制', description: '可以粘贴到日志、工单或其他位置。', tone: 'success' }
+    ? { title: successTitle, description: '可以粘贴到日志、工单或其他位置。', tone: 'success' }
     : { title: '复制失败', description: '浏览器未允许访问剪贴板，请重试。', tone: 'danger', duration: 4000 })
 }
 
@@ -229,13 +229,13 @@ onBeforeUnmount(() => {
 <template>
   <section class="voice-page">
     <header class="taf-page-heading">
-      <div><h1>配音生成</h1><p>逐字稿仅按换行符自动切段；每行生成一条音频，最后自动合并完整音频。</p></div>
+      <div><h1>配音生成</h1><p>配置音色与逐字稿，提交后自动生成完整音频。</p></div>
       <span class="queue-badge"><Clock3 :size="17" /> 生成队列 {{ activeCount }}</span>
     </header>
 
     <div class="page-layout">
       <article class="panel">
-        <header><span class="panel-icon"><AudioLines :size="21" /></span><div><h2>生成配音</h2><p>点击按钮时自动切段，无需提前执行切段操作。</p></div></header>
+        <header><span class="panel-icon"><AudioLines :size="21" /></span><div><h2>任务配置</h2><p>必填项完成后即可加入生成队列。</p></div></header>
         <div class="form-grid">
           <label class="field">
             <span>参考音色 <b>*</b></span>
@@ -252,7 +252,7 @@ onBeforeUnmount(() => {
           </label>
           <label class="field wide">
             <span>逐字稿文本 <b>*</b><em>{{ text.length }} / 50000 · {{ transcriptLines.length }} 段</em></span>
-            <textarea v-model="text" maxlength="50000" rows="12" aria-label="逐字稿文本" placeholder="每行输入一个需要单独生成的配音段落……" />
+            <textarea v-model="text" maxlength="50000" rows="8" aria-label="逐字稿文本" placeholder="每行输入一个需要单独生成的配音段落……" />
             <small>仅以换行符作为分段边界；空行会被忽略，不按标点或字数二次切分。</small>
           </label>
         </div>
@@ -267,15 +267,15 @@ onBeforeUnmount(() => {
         </button>
       </article>
 
-      <aside class="panel flow-info">
-        <header><span class="panel-icon purple"><Clock3 :size="21" /></span><div><h2>当前工作流程</h2><p>所有音色引擎遵循同一流程。</p></div></header>
+      <details class="panel flow-info">
+        <summary><span class="panel-icon purple"><Clock3 :size="21" /></span><div><h2>生成规则与结果说明</h2><p>换行切段、逐段生成、自动合并</p></div><ChevronRight :size="18" /></summary>
         <ol>
           <li><b>换行切段</b><span>过滤空行，保留每行文本内容和顺序。</span></li>
           <li><b>逐段生成</b><span>所选 TTS 服务依次输出独立 WAV。</span></li>
           <li><b>自动合并</b><span>全部分段成功后，按原顺序合并完整 WAV。</span></li>
           <li><b>同时保留</b><span>任务结果可试听、下载完整音频和每个分段。</span></li>
         </ol>
-      </aside>
+      </details>
     </div>
 
     <article class="panel task-panel">
@@ -284,7 +284,7 @@ onBeforeUnmount(() => {
         <button class="refresh" type="button" :disabled="loading" @click="loadPage()"><RefreshCw :class="{ spin: loading }" :size="15" />{{ loading ? '刷新中' : '刷新' }}</button>
       </header>
       <div v-if="tasks.length" class="task-toolbar">
-        <label><Search :size="16" /><input v-model="taskSearch" type="search" aria-label="搜索配音任务" placeholder="搜索文件、音色或文本…" /></label>
+        <label><Search :size="16" /><input v-model="taskSearch" type="search" aria-label="搜索配音任务" placeholder="搜索任务 ID、文件、音色或文本…" /></label>
         <select v-model="statusFilter" aria-label="配音任务状态筛选"><option value="all">全部状态</option><option value="running">正在生成</option><option value="queued">排队中</option><option value="paused">已暂停</option><option value="failed">失败</option><option value="completed">已完成</option></select>
         <span>{{ filteredTasks.length }} 个匹配任务</span>
       </div>
@@ -296,13 +296,19 @@ onBeforeUnmount(() => {
             <Loader2 v-if="task.status === 'running'" class="spin" :size="19" /><Clock3 v-else-if="task.status === 'queued'" :size="19" /><Pause v-else-if="task.status === 'paused'" :size="19" /><CheckCircle2 v-else-if="task.status === 'completed'" :size="19" /><XCircle v-else :size="19" />
           </span>
           <div class="task-main">
-            <div><strong>{{ task.output_filename }}</strong><span>{{ task.voice_profile_name }}</span><span>{{ voiceTagText(task.tts_engine, task.language) }}</span><span>{{ taskSegmentCount(task) }} 段</span></div>
+            <div class="task-summary">
+              <strong>{{ task.output_filename }}</strong><span>{{ task.voice_profile_name }}</span><span>{{ voiceTagText(task.tts_engine, task.language) }}</span><span>{{ taskSegmentCount(task) }} 段</span>
+              <div class="task-trace">
+                <span>任务 ID</span><code>{{ task.id }}</code>
+                <button type="button" :aria-label="`复制任务 ID ${task.id}`" title="复制完整任务 ID" @click="copyText(task.id, '任务 ID 已复制')">复制</button>
+              </div>
+            </div>
             <p>{{ task.text }}</p>
             <div v-if="task.error_message" class="task-error-wrap" tabindex="0" :aria-describedby="`task-error-${task.id}`">
               <span class="task-error-preview">{{ task.error_message }}</span>
               <div :id="`task-error-${task.id}`" class="task-error-tooltip" role="tooltip">
                 <p>{{ task.error_message }}</p>
-                <button type="button" aria-label="复制完整错误内容" @click.stop="copyError(task.error_message)"><Copy :size="13" />复制错误</button>
+                <button type="button" aria-label="复制完整错误内容" @click.stop="copyText(`任务 ID: ${task.id}\n${task.error_message}`, '错误内容已复制')"><Copy :size="13" />复制错误</button>
               </div>
             </div>
             <div v-if="task.audio_url" class="full-audio"><b>完整音频</b><audio controls preload="metadata" :src="voiceGenerationAudioUrl(task)" /><a :href="voiceGenerationAudioUrl(task, true)"><Download :size="14" /> 下载</a></div>
@@ -337,7 +343,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.voice-page{color:#172033}.queue-badge{align-items:center;background:#eaf2ff;border:1px solid #cfe0ff;border-radius:999px;color:#075bf5;display:flex;font-size:12px;font-weight:750;gap:7px;padding:8px 13px}.page-layout{align-items:start;display:grid;gap:16px;grid-template-columns:minmax(560px,1.45fr) minmax(300px,.65fr)}.panel{background:#fff;border:1px solid #e1e7ef;border-radius:13px;box-shadow:0 5px 22px #34435f0a;padding:20px}.panel>header{align-items:center;border-bottom:1px solid #edf0f4;display:flex;gap:11px;margin:-2px 0 20px;padding-bottom:15px}.panel h2{font-size:16px;margin:0}.panel header p{color:#7b8799;font-size:11px;margin:4px 0 0}.panel-icon{align-items:center;background:#eaf2ff;border-radius:9px;color:#0864eb;display:flex;height:38px;justify-content:center;width:38px}.panel-icon.purple{background:#f1ecff;color:#7654d7}.form-grid{display:grid;gap:17px;grid-template-columns:1fr 1fr}.field{display:grid;gap:8px}.field.wide{grid-column:1/-1}.field>span{font-size:12px;font-weight:750}.field>span em{color:#8792a3;float:right;font-size:10px;font-style:normal;font-weight:500}.field b{color:#e13e49}.field input,.field select,.field textarea{background:#fff;border:1px solid #dce3ec;border-radius:8px;box-sizing:border-box;font:inherit;outline:none;padding:11px 12px;width:100%}.field textarea{line-height:1.7;resize:vertical}.field input:focus,.field select:focus,.field textarea:focus{border-color:#0864eb;box-shadow:0 0 0 3px #0864eb12}.field small{color:#8792a3;font-size:10px}.segment-preview{background:#f7f9fc;border:1px solid #e5eaf1;border-radius:9px;margin-top:17px;padding:13px}.segment-preview>strong{font-size:11px}.segment-preview ol{display:grid;gap:7px;list-style:none;margin:10px 0 4px;padding:0}.segment-preview li{display:grid;font-size:10px;gap:9px;grid-template-columns:34px 1fr}.segment-preview li b{color:#0864eb}.segment-preview li span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.segment-preview small{color:#8792a3;font-size:9px}.submit-button{align-items:center;background:#0864eb;border:0;border-radius:9px;color:#fff;display:flex;font-size:13px;font-weight:750;gap:8px;justify-content:center;margin-top:18px;min-height:46px;width:100%}.submit-button:disabled{cursor:not-allowed;opacity:.55}.flow-info>ol{display:grid;gap:17px;list-style:none;margin:0;padding:0}.flow-info li{display:grid;gap:4px;padding-left:22px;position:relative}.flow-info li:before{background:#0864eb;border-radius:50%;color:#fff;content:counter(list-item);font-size:9px;height:16px;left:0;line-height:16px;position:absolute;text-align:center;width:16px}.flow-info li b{font-size:12px}.flow-info li span{color:#68768a;font-size:10px;line-height:1.6}.task-panel{margin-top:16px}.refresh{align-items:center;background:#f7f9fc;border:1px solid #dce3ec;border-radius:7px;color:#46556b;display:flex;gap:6px;margin-left:auto;padding:7px 13px}.empty{color:#8792a3;font-size:12px;padding:25px;text-align:center}.task-list{display:grid;gap:9px}.task-row{align-items:start;border:1px solid #e8edf3;border-radius:9px;display:grid;gap:12px;grid-template-columns:auto minmax(0,1fr) auto;padding:13px}.status-icon{align-items:center;background:#f3f0ff;border-radius:50%;color:#7654d7;display:flex;height:38px;justify-content:center;width:38px}.status-icon.running{background:#eaf2ff;color:#0864eb}.status-icon.completed{background:#e6f8f1;color:#079e6b}.status-icon.failed{background:#fff0f1;color:#d63b49}.task-main{display:grid;gap:8px;min-width:0}.task-main>div:first-child{align-items:center;display:flex;flex-wrap:wrap;gap:9px}.task-main strong{font-size:12px}.task-main>div:first-child span{background:#f2f5f9;border-radius:5px;color:#657389;font-size:9px;padding:3px 6px}.task-main>p{color:#68768a;display:-webkit-box;font-size:10px;line-height:1.5;margin:0;overflow:hidden;white-space:pre-line;-webkit-box-orient:vertical;-webkit-line-clamp:2}.task-error{color:#d63b49;font-size:10px}.full-audio{align-items:center!important;background:#f7fafc;border-radius:8px;display:grid!important;gap:9px!important;grid-template-columns:auto minmax(180px,420px) auto;padding:8px}.full-audio audio{height:32px;width:100%}.full-audio a,.segment-result a{align-items:center;color:#075bf5;display:flex;font-size:10px;font-weight:700;gap:4px}.segment-results{border-top:1px solid #edf0f4;padding-top:8px}.segment-results summary{color:#46556b;cursor:pointer;font-size:11px;font-weight:700}.segment-result{align-items:center;border-bottom:1px solid #f0f2f5;display:grid;gap:8px;grid-template-columns:34px minmax(120px,1fr) 52px minmax(180px,280px) auto;padding:8px 3px}.segment-result>b{color:#0864eb;font-size:9px}.segment-result>span{font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.segment-result>small{color:#8792a3;font-size:9px}.segment-result audio{height:28px;width:100%}.task-meta{display:grid;gap:5px;justify-items:end;text-align:right}.task-meta b{color:#7654d7;font-size:11px}.task-meta b.running{color:#0864eb}.task-meta b.completed{color:#079e6b}.task-meta b.failed{color:#d63b49}.task-meta span{color:#8792a3;font-size:9px}.spin{animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}@media(max-width:1000px){.page-layout{grid-template-columns:1fr}}@media(max-width:750px){.form-grid{grid-template-columns:1fr}.field.wide{grid-column:auto}.task-row{grid-template-columns:auto 1fr}.task-meta{grid-column:2;justify-items:start;text-align:left}.segment-result{grid-template-columns:34px 1fr 52px}.segment-result audio,.segment-result a{grid-column:2/-1}.full-audio{grid-template-columns:1fr}.full-audio audio{grid-column:1}}
+.voice-page{color:#172033}.queue-badge{align-items:center;background:#eaf2ff;border:1px solid #cfe0ff;border-radius:999px;color:#075bf5;display:flex;font-size:12px;font-weight:750;gap:7px;padding:8px 13px}.page-layout{align-items:start;display:grid;gap:16px;grid-template-columns:minmax(560px,1.45fr) minmax(300px,.65fr)}.panel{background:#fff;border:1px solid #e1e7ef;border-radius:13px;box-shadow:0 5px 22px #34435f0a;padding:20px}.panel>header{align-items:center;border-bottom:1px solid #edf0f4;display:flex;gap:11px;margin:-2px 0 20px;padding-bottom:15px}.panel h2{font-size:16px;margin:0}.panel header p{color:#7b8799;font-size:11px;margin:4px 0 0}.panel-icon{align-items:center;background:#eaf2ff;border-radius:9px;color:#0864eb;display:flex;height:38px;justify-content:center;width:38px}.panel-icon.purple{background:#f1ecff;color:#7654d7}.form-grid{display:grid;gap:17px;grid-template-columns:1fr 1fr}.field{display:grid;gap:8px}.field.wide{grid-column:1/-1}.field>span{font-size:12px;font-weight:750}.field>span em{color:#8792a3;float:right;font-size:10px;font-style:normal;font-weight:500}.field b{color:#e13e49}.field input,.field select,.field textarea{background:#fff;border:1px solid #dce3ec;border-radius:8px;box-sizing:border-box;font:inherit;outline:none;padding:11px 12px;width:100%}.field textarea{line-height:1.7;resize:vertical}.field input:focus,.field select:focus,.field textarea:focus{border-color:#0864eb;box-shadow:0 0 0 3px #0864eb12}.field small{color:#8792a3;font-size:10px}.segment-preview{background:#f7f9fc;border:1px solid #e5eaf1;border-radius:9px;margin-top:17px;padding:13px}.segment-preview>strong{font-size:11px}.segment-preview ol{display:grid;gap:7px;list-style:none;margin:10px 0 4px;padding:0}.segment-preview li{display:grid;font-size:10px;gap:9px;grid-template-columns:34px 1fr}.segment-preview li b{color:#0864eb}.segment-preview li span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.segment-preview small{color:#8792a3;font-size:9px}.submit-button{align-items:center;background:#0864eb;border:0;border-radius:9px;color:#fff;display:flex;font-size:13px;font-weight:750;gap:8px;justify-content:center;margin-top:18px;min-height:46px;width:100%}.submit-button:disabled{cursor:not-allowed;opacity:.55}.flow-info>ol{display:grid;gap:17px;list-style:none;margin:0;padding:0}.flow-info li{display:grid;gap:4px;padding-left:22px;position:relative}.flow-info li:before{background:#0864eb;border-radius:50%;color:#fff;content:counter(list-item);font-size:9px;height:16px;left:0;line-height:16px;position:absolute;text-align:center;width:16px}.flow-info li b{font-size:12px}.flow-info li span{color:#68768a;font-size:10px;line-height:1.6}.task-panel{margin-top:16px}.refresh{align-items:center;background:#f7f9fc;border:1px solid #dce3ec;border-radius:7px;color:#46556b;display:flex;gap:6px;margin-left:auto;padding:7px 13px}.empty{color:#8792a3;font-size:12px;padding:25px;text-align:center}.task-list{display:grid;gap:9px}.task-row{align-items:start;border:1px solid #e8edf3;border-radius:9px;display:grid;gap:12px;grid-template-columns:auto minmax(0,1fr) auto;padding:13px}.status-icon{align-items:center;background:#f3f0ff;border-radius:50%;color:#7654d7;display:flex;height:38px;justify-content:center;width:38px}.status-icon.running{background:#eaf2ff;color:#0864eb}.status-icon.completed{background:#e6f8f1;color:#079e6b}.status-icon.failed{background:#fff0f1;color:#d63b49}.task-main{display:grid;gap:8px;min-width:0}.task-main>.task-summary{align-items:center;display:flex;flex-wrap:wrap;gap:9px}.task-main strong{font-size:12px}.task-main>.task-summary>span{background:#f2f5f9;border-radius:5px;color:#657389;font-size:9px;padding:3px 6px}.task-main>p{color:#68768a;display:-webkit-box;font-size:10px;line-height:1.5;margin:0;overflow:hidden;white-space:pre-line;-webkit-box-orient:vertical;-webkit-line-clamp:2}.task-error{color:#d63b49;font-size:10px}.full-audio{align-items:center!important;background:#f7fafc;border-radius:8px;display:grid!important;gap:9px!important;grid-template-columns:auto minmax(180px,420px) auto;padding:8px}.full-audio audio{height:32px;width:100%}.full-audio a,.segment-result a{align-items:center;color:#075bf5;display:flex;font-size:10px;font-weight:700;gap:4px}.segment-results{border-top:1px solid #edf0f4;padding-top:8px}.segment-results summary{color:#46556b;cursor:pointer;font-size:11px;font-weight:700}.segment-result{align-items:center;border-bottom:1px solid #f0f2f5;display:grid;gap:8px;grid-template-columns:34px minmax(120px,1fr) 52px minmax(180px,280px) auto;padding:8px 3px}.segment-result>b{color:#0864eb;font-size:9px}.segment-result>span{font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.segment-result>small{color:#8792a3;font-size:9px}.segment-result audio{height:28px;width:100%}.task-meta{display:grid;gap:5px;justify-items:end;text-align:right}.task-meta b{color:#7654d7;font-size:11px}.task-meta b.running{color:#0864eb}.task-meta b.completed{color:#079e6b}.task-meta b.failed{color:#d63b49}.task-meta span{color:#8792a3;font-size:9px}.spin{animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}@media(max-width:1000px){.page-layout{grid-template-columns:1fr}}@media(max-width:750px){.form-grid{grid-template-columns:1fr}.field.wide{grid-column:auto}.task-row{grid-template-columns:auto 1fr}.task-meta{grid-column:2;justify-items:start;text-align:left}.segment-result{grid-template-columns:34px 1fr 52px}.segment-result audio,.segment-result a{grid-column:2/-1}.full-audio{grid-template-columns:1fr}.full-audio audio{grid-column:1}}
 
 /* Keep this page isolated from the global settings form grid. */
 .voice-page .form-grid .field {
@@ -369,13 +375,13 @@ onBeforeUnmount(() => {
 .taf-page-heading > div,
 .panel > header > div,
 .task-main,
-.task-main > div:first-child {
+.task-main > .task-summary {
   min-width: 0;
 }
 .taf-page-heading p,
 .panel > header p,
 .queue-badge,
-.task-main > div:first-child > span,
+.task-main > .task-summary > span,
 .task-meta > * {
   white-space: nowrap;
 }
@@ -384,7 +390,7 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.task-main > div:first-child > strong {
+.task-main > .task-summary > strong {
   max-width: 280px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -438,11 +444,15 @@ onBeforeUnmount(() => {
 .task-toolbar{align-items:center;display:flex;gap:9px;margin-bottom:12px}.task-toolbar>label{align-items:center;border:1px solid #dce3ec;border-radius:8px;color:#8290a3;display:flex;height:38px;padding:0 10px;width:min(360px,45%)}.task-toolbar input{border:0;min-width:0;outline:0;padding:0 8px;width:100%}.task-toolbar select,.task-pagination select{background:#fff;border:1px solid #dce3ec;border-radius:7px;min-height:38px;padding:0 28px 0 10px}.task-toolbar>span{color:#7a8699;font-size:11px;margin-left:auto}.task-pagination{align-items:center;border-top:1px solid #edf0f4;display:flex;gap:9px;margin-top:14px;padding-top:12px}.task-pagination>span{color:#718096;font-size:12px;margin-right:auto}.task-pagination label{align-items:center;color:#718096;display:flex;font-size:11px;gap:6px}.task-pagination select{min-height:32px}.task-pagination button{align-items:center;background:#fff;border:1px solid #dce3ec;border-radius:6px;color:#536078;display:flex;height:34px;justify-content:center;min-height:34px;width:34px}.task-pagination strong{font-size:11px}@media(max-width:650px){.task-toolbar{align-items:stretch;display:grid;grid-template-columns:1fr 140px}.task-toolbar>label{width:100%}.task-toolbar>span{grid-column:1/-1;margin:0}.task-pagination{flex-wrap:wrap}.task-pagination>span{flex-basis:100%}}
 
 /* Keep generation history compact; segment audio stays collapsed until requested. */
+.task-trace{align-items:center;display:flex;flex-wrap:wrap;gap:6px;color:#657389;font-size:10px;min-width:0}
+.task-trace code{font-family:Consolas,monospace;overflow-wrap:anywhere;user-select:all;min-width:0}
+.task-trace button{background:none;border:0;border-radius:0;color:#075bf5;cursor:pointer;flex-shrink:0;font:inherit;line-height:inherit;min-height:0;padding:0;white-space:nowrap}
+.task-trace button:hover,.task-trace button:focus-visible{color:#0649bd;text-decoration:underline}
 .task-list{gap:7px;grid-template-columns:repeat(2,minmax(0,1fr))}
 .task-row{gap:10px;padding:11px 12px}
 .status-icon{height:34px;width:34px}
 .task-main{gap:6px}
-.task-main>div:first-child{gap:7px}
+.task-main>.task-summary{gap:7px}
 .task-meta{gap:4px}
 .full-audio{gap:8px!important;padding:6px 8px}
 .full-audio audio{height:30px}

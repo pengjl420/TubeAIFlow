@@ -185,6 +185,7 @@ class VisualEnrichmentPipeline:
                 subtitle_safe_zone=float(video_cfg.get("subtitle_safe_zone", 0.18)),
                 candidates_normal=int(image_cfg.get("candidates_normal", 2)),
                 candidates_high=int(image_cfg.get("candidates_high", 3)),
+                provider=self.llm,
             )
             self.artifacts.write_json(relative, plan)
             self.artifacts.record_input_hash(relative, input_hash)

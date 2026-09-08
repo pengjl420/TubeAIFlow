@@ -2,7 +2,7 @@ import json
 
 from pydantic import ValidationError
 
-from app.integrations.llm.deepseek import DeepSeekClient
+from app.providers.llm import JSONLLMProvider, invoke_json
 from app.schemas.storyboard import SceneGroupingResult
 
 
@@ -14,7 +14,7 @@ MAX_SCENE_DURATION_MS = 15_000
 
 def group_cues(
     cues: list[dict],
-    client: DeepSeekClient,
+    client: JSONLLMProvider,
     full_script: str = "",
 ) -> tuple[list[list[dict]], list[str]]:
     groups: list[list[dict]] = []
@@ -31,19 +31,20 @@ def group_cues(
 
 def _request_groups(
     cues: list[dict],
-    client: DeepSeekClient,
+    client: JSONLLMProvider,
     full_script: str = "",
 ) -> list[list[str]]:
     system_prompt = """
 You are a documentary visual scene editor. Group consecutive subtitle cues into visual semantic scenes.
 Return JSON only. The JSON format must be:
-{"groups":[{"subtitle_ids":["id1","id2"]}]}
+{"groups":[{"subtitle_ids":["id1","id2"],"boundary_reason":"same event","confidence":0.86}]}
 Rules:
 - Every supplied subtitle id must appear exactly once and in the original order.
 - A group must contain only consecutive subtitle ids.
 - Change scene on subject, person, location, time period, event, or narration phase changes.
 - Opening scenes should usually be 3-5 seconds; normal scenes 5-10 seconds.
 - Do not translate, rewrite, or omit narration.
+- confidence is 0-1 and measures certainty that each group is one coherent visual beat.
 """.strip()
     payload = [
         {
@@ -55,22 +56,39 @@ Rules:
         for cue in cues
     ]
     result = SceneGroupingResult.model_validate(
-        client.chat_json(
+        invoke_json(
+            client,
             system_prompt,
             json.dumps(
-                {"full_script": full_script, "subtitle_cues": payload},
+                {"script_context": _compact_script_context(full_script), "subtitle_cues": payload},
                 ensure_ascii=False,
             ),
+            schema=SceneGroupingResult.model_json_schema(),
+            task="scene-grouping",
         )
     )
     return [group.subtitle_ids for group in result.groups]
+
+
+def _compact_script_context(script: str, limit: int = 4000) -> str | dict:
+    """Avoid resending an entire long-form transcript with every local batch."""
+    text = script.strip()
+    if len(text) <= limit:
+        return text
+    side = limit // 2
+    return {
+        "total_characters": len(text),
+        "opening": text[:side],
+        "closing": text[-side:],
+        "note": "Middle content omitted; use the supplied consecutive cues for local decisions.",
+    }
 
 
 def _materialize_groups(cues: list[dict], suggested_ids: list[list[str]]) -> list[list[dict]]:
     expected_ids = [cue["id"] for cue in cues]
     flattened_ids = [cue_id for group in suggested_ids for cue_id in group]
     if flattened_ids != expected_ids:
-        raise ValueError("DeepSeek 返回的字幕分组不是连续且完整的覆盖")
+        raise ValueError("LLM 返回的字幕分组不是连续且完整的覆盖")
     by_id = {cue["id"]: cue for cue in cues}
     return [[by_id[cue_id] for cue_id in group] for group in suggested_ids]
 

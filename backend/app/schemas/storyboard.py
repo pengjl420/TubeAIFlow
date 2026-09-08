@@ -1,6 +1,19 @@
 from pydantic import BaseModel, Field, field_validator
 
 
+class StoryboardVisualBrief(BaseModel):
+    subject: str = Field(min_length=1)
+    action: str = Field(min_length=1)
+    environment: str = Field(min_length=1)
+    semantic_message: str = Field(min_length=1)
+    composition: str = Field(min_length=1)
+    camera: str = "stable documentary camera"
+    era: str = ""
+    mood: str = "documentary"
+    must_include: list[str] = Field(default_factory=list)
+    must_avoid: list[str] = Field(default_factory=list)
+
+
 class StoryboardContent(BaseModel):
     visual_summary: str = Field(min_length=1)
     visual_type: str = Field(min_length=1)
@@ -25,6 +38,11 @@ class StoryboardContent(BaseModel):
     identity_risk: int = Field(default=5, ge=0, le=10)
     text_density: int = Field(default=0, ge=0, le=10)
     subject_count: int = Field(default=1, ge=0, le=20)
+    recommended_source: str = "generated_image"
+    fact_risk: str = Field(default="low", pattern="^(none|low|medium|high)$")
+    visual_brief: StoryboardVisualBrief | None = None
+    image_prompt: str = ""
+    negative_prompt: str = ""
 
     @field_validator(
         "visual_summary",
@@ -71,6 +89,8 @@ class StoryboardBatchResult(BaseModel):
 
 class SceneGroup(BaseModel):
     subtitle_ids: list[str] = Field(min_length=1)
+    boundary_reason: str = "semantic continuity"
+    confidence: float = Field(default=0.75, ge=0, le=1)
 
 
 class SceneGroupingResult(BaseModel):

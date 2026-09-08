@@ -62,6 +62,27 @@ class MockLLMProvider:
                 "narrative_mode": "explanation",
                 "emotion_curve": "steady",
             }
+        if "visual_type" in properties and "brief" in properties:
+            try:
+                payload = json.loads(prompt)
+                text = str(payload.get("voiceover") or "")
+                suggested = str(payload.get("suggested_type") or "conceptual_illustration")
+            except (json.JSONDecodeError, AttributeError):
+                text = prompt
+                suggested = "conceptual_illustration"
+            return {
+                "visual_type": suggested,
+                "brief": {
+                    "subject": text[:80] or "central narrated concept",
+                    "action": "shows one clear visual relationship",
+                    "environment": "documentary editorial setting",
+                    "semantic_message": text or "central narrated claim",
+                    "composition": "wide composition with one focal hierarchy",
+                    "mood": "documentary",
+                    "must_include": [],
+                    "must_avoid": ["visible logos", "watermark", "random text"],
+                },
+            }
         digest = _stable_digest({"prompt": prompt, "schema": schema, "options": options or {}})
         return {"mock_id": digest[:16], "summary": prompt.strip()[:160]}
 

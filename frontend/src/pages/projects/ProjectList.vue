@@ -106,7 +106,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', handleKeydown); do
 <template>
   <section class="project-page">
     <header class="project-head">
-      <div><span>LONG-FORM WORKFLOW</span><h1>项目</h1><p>从脚本开始，持续保存配音、字幕、Scene、时间轴和成片。</p></div>
+      <div><h1>项目</h1><p>集中管理长视频工程与最近生产进度。</p></div>
       <div class="head-actions"><button class="secondary" :disabled="loading" @click="load"><RefreshCw :size="16" />刷新</button><button @click="showCreate = true"><Plus :size="17" />新建项目</button></div>
     </header>
 

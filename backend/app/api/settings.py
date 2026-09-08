@@ -11,6 +11,13 @@ from app.services.projects import native_dialog_service
 router = APIRouter(tags=["settings"])
 
 
+@router.get("/settings/cleanup/status")
+def get_cleanup_status() -> dict:
+    from app.services.settings import cleanup_service
+
+    return {"success": True, "data": cleanup_service.get_status()}
+
+
 class SystemSettingsUpdate(Settings):
     pass
 

@@ -2548,7 +2548,7 @@ body {
 
 /* Project workspace and overview */
 .taf-main:has(.taf-project-workspace) { max-width: none; padding: 0; }
-.taf-project-workspace { display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: calc(100vh - 72px); }
+.taf-project-workspace { display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: 100vh; }
 .taf-project-nav { background: #fff; border-right: 1px solid #e6ebf2; padding: 19px 15px; }
 .taf-project-nav h2 { font-size: 14px; margin: 0 0 18px; padding: 0 3px; }
 .taf-project-nav nav { display: grid; }

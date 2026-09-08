@@ -1,12 +1,16 @@
 import logging
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 
 from app.infrastructure.logging_config import (
     SensitiveDataFilter,
     configure_logging,
     redact_sensitive,
+    current_task_id,
+    task_log_context,
 )
 
 
@@ -36,6 +40,34 @@ class LoggingConfigTests(unittest.TestCase):
             content = path.read_text(encoding="utf-8")
             self.assertIn("api_key=[REDACTED]", content)
             self.assertNotIn("do-not-store", content)
+
+            # Two overlapping tasks must never exchange IDs; child loggers,
+            # multiline messages and every traceback line retain the same ID.
+            barrier = Barrier(2)
+
+            def emit(task_id: str) -> None:
+                with task_log_context(task_id):
+                    barrier.wait(timeout=5)
+                    logging.getLogger("provider.nested").info("%s first\n%s second", task_id, task_id)
+                    try:
+                        raise RuntimeError(f"{task_id} password=private-secret")
+                    except RuntimeError:
+                        logging.getLogger("ffmpeg.nested").exception("%s failed", task_id)
+
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                list(pool.map(emit, ["alpha", "beta"]))
+            logging.getLogger("test").info("outside-task")
+            for handler in root.handlers:
+                handler.flush()
+            content = path.read_text(encoding="utf-8")
+            self.assertNotIn("private-secret", content)
+            for line in content.splitlines()[1:-1]:
+                self.assertRegex(line, r"^\[task_id=(alpha|beta)\] ")
+                if "beta first" in line or "beta second" in line:
+                    self.assertTrue(line.startswith("[task_id=beta]"))
+                if "alpha first" in line or "alpha second" in line:
+                    self.assertTrue(line.startswith("[task_id=alpha]"))
+            self.assertNotIn("task_id=", content.splitlines()[-1])
         finally:
             for handler in root.handlers:
                 if handler not in original_handlers:
@@ -43,6 +75,16 @@ class LoggingConfigTests(unittest.TestCase):
             root.handlers = original_handlers
             root.setLevel(original_level)
             temporary.cleanup()
+
+    def test_context_restores_outer_task_even_after_failure(self) -> None:
+        self.assertIsNone(current_task_id())
+        with task_log_context("outer"):
+            with self.assertRaises(ValueError):
+                with task_log_context("inner"):
+                    self.assertEqual(current_task_id(), "inner")
+                    raise ValueError("failed")
+            self.assertEqual(current_task_id(), "outer")
+        self.assertIsNone(current_task_id())
 
     def test_filter_handles_mapping_arguments(self) -> None:
         record = logging.LogRecord(

@@ -27,6 +27,7 @@ DEFAULT_IMAGE_CONFIG_DIR = (
     / "juggernaut_xiii_ragnarok"
     / "diffusers_config"
 ).resolve()
+DEFAULT_LOCAL_LLM_MODELS_DIR = (BASE_DIR.parent / "models" / "llm").resolve()
 DATABASE_PATH = DEFAULT_WORKSPACE_DIR / "app.db"
 _SETTINGS_OVERRIDE: ContextVar[dict | None] = ContextVar(
     "tubeaifolw_settings_override", default=None
@@ -65,6 +66,10 @@ class Settings(BaseModel):
     app_host: str = "127.0.0.1"
     app_port: int = Field(default=18080, ge=1, le=65535)
     workspace_dir: Path = DEFAULT_WORKSPACE_DIR
+    cleanup_enabled: bool = False
+    cleanup_retention_days: int = Field(default=30, ge=1, le=3650)
+    cleanup_daily_time: str = Field(default="03:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    cleanup_completed_voice_tasks: bool = False
     ffmpeg_path: str = "ffmpeg"
     ffprobe_path: str = "ffprobe"
     duix_base_url: str = "http://127.0.0.1:8383"
@@ -87,6 +92,15 @@ class Settings(BaseModel):
     deepseek_timeout_seconds: float = Field(default=60.0, gt=0, le=600)
     deepseek_max_tokens: int = Field(default=8192, ge=1, le=65536)
     deepseek_retry_count: int = Field(default=1, ge=0, le=10)
+    storyboard_llm_strategy: Literal["local", "hybrid", "cloud"] = "hybrid"
+    local_llm_base_url: str = "http://127.0.0.1:18090"
+    local_llm_model: str = "qwen3-8b-q4_k_m"
+    local_llm_models_dir: Path = DEFAULT_LOCAL_LLM_MODELS_DIR
+    local_llm_timeout_seconds: float = Field(default=180.0, gt=0, le=900)
+    local_llm_max_tokens: int = Field(default=8192, ge=512, le=65536)
+    storyboard_cloud_confidence_threshold: float = Field(default=0.68, ge=0, le=1)
+    storyboard_cloud_identity_risk_threshold: int = Field(default=8, ge=0, le=10)
+    storyboard_llm_cache_enabled: bool = True
     image_generation_model_path: Path | None = (
         DEFAULT_IMAGE_MODEL_PATH if DEFAULT_IMAGE_MODEL_PATH.is_file() else None
     )
@@ -167,6 +181,7 @@ class Settings(BaseModel):
         "premiere_pro_path",
         "duix_host_shared_dir",
         "subtitle_whisper_model_path",
+        "local_llm_models_dir",
         mode="before",
     )
     @classmethod
@@ -182,6 +197,14 @@ class Settings(BaseModel):
         if model not in {"deepseek-v4-flash", "deepseek-v4-pro"}:
             raise ValueError("Unsupported DeepSeek model")
         return model
+
+    @field_validator("local_llm_base_url", "local_llm_model")
+    @classmethod
+    def non_empty_local_llm_setting(cls, value):
+        text = str(value or "").strip()
+        if not text:
+            raise ValueError("Local LLM URL and model cannot be empty")
+        return text
 
     @field_validator("qwen_tts_dtype")
     @classmethod
@@ -284,6 +307,7 @@ def _normalize_paths(settings: Settings) -> Settings:
         "image_generation_python",
         "duix_host_shared_dir",
         "subtitle_whisper_model_path",
+        "local_llm_models_dir",
     ):
         value = getattr(settings, field_name)
         if value is not None:
@@ -295,6 +319,7 @@ def _ensure_workspace(settings: Settings) -> None:
     settings.workspace_dir.mkdir(parents=True, exist_ok=True)
     for name in ("projects", "voices", "voice_generations", "templates"):
         (settings.workspace_dir / name).mkdir(parents=True, exist_ok=True)
+    settings.local_llm_models_dir.mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache

@@ -30,6 +30,10 @@ export interface SystemSettings {
   app_host: string
   app_port: number
   workspace_dir: string
+  cleanup_enabled: boolean
+  cleanup_retention_days: number
+  cleanup_daily_time: string
+  cleanup_completed_voice_tasks: boolean
   ffmpeg_path: string
   ffprobe_path: string
   premiere_pro_path: string | null
@@ -46,6 +50,15 @@ export interface SystemSettings {
   deepseek_timeout_seconds: number
   deepseek_max_tokens: number
   deepseek_retry_count: number
+  storyboard_llm_strategy: 'local' | 'hybrid' | 'cloud'
+  local_llm_base_url: string
+  local_llm_model: string
+  local_llm_models_dir: string
+  local_llm_timeout_seconds: number
+  local_llm_max_tokens: number
+  storyboard_cloud_confidence_threshold: number
+  storyboard_cloud_identity_risk_threshold: number
+  storyboard_llm_cache_enabled: boolean
   image_generation_model_path: string | null
   image_generation_config_dir: string | null
   image_generation_python: string | null
@@ -88,6 +101,35 @@ export interface SystemSettings {
   moss_tts_max_new_tokens: number
 }
 
+export interface ModelDownloadJob {
+  id: string
+  model_id: string
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'interrupted'
+  progress: number
+  downloaded_bytes: number
+  total_bytes: number
+  path: string | null
+  message: string
+  error: string | null
+}
+
+export interface LocalLLMModel {
+  id: string
+  display_name: string
+  description: string
+  repo_id: string
+  filename: string
+  size_bytes: number
+  min_ram_gb: number
+  recommended_vram_gb: number
+  quality: 'fast' | 'balanced' | 'quality'
+  recommended: boolean
+  license: string
+  installed: boolean
+  path: string | null
+  download: ModelDownloadJob | null
+}
+
 export interface FfmpegStatus {
   installed: boolean
   ffmpeg_path: string | null
@@ -112,7 +154,35 @@ export async function getSystemSettings(): Promise<SystemSettings> {
 }
 
 export async function saveSystemSettings(settings: SystemSettings): Promise<SystemSettings> {
-  return unwrap<SystemSettings>(await apiClient.put('/settings', settings))
+  const result = unwrap<SystemSettings>(await apiClient.put('/settings', settings))
+  if (typeof result.cleanup_enabled !== 'boolean') {
+    throw new Error('当前后端不支持自动清理，清理设置未保存。请重启 TubeAiFolw 后重新设置。')
+  }
+  return result
+}
+
+export async function listLocalLLMModels(): Promise<LocalLLMModel[]> {
+  return unwrap<LocalLLMModel[]>(await apiClient.get('/models/llm'))
+}
+
+export async function downloadLocalLLMModel(modelId: string): Promise<ModelDownloadJob> {
+  return unwrap<ModelDownloadJob>(await apiClient.post(`/models/llm/${encodeURIComponent(modelId)}/download`))
+}
+
+export interface CleanupStatus {
+  enabled: boolean
+  retention_days: number
+  daily_time: string
+  completed_voice_tasks: boolean
+  worker_alive: boolean
+  catchup_pending: boolean
+  next_run_at: string | null
+  last_run: { finished_at: string; deleted_tasks: number; deleted_logs: number; errors: number } | null
+  error: string | null
+}
+
+export async function getCleanupStatus(): Promise<CleanupStatus> {
+  return unwrap<CleanupStatus>(await apiClient.get('/settings/cleanup/status'))
 }
 
 export async function clearSystemSecret(field: string): Promise<SystemSettings> {

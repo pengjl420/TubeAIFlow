@@ -11,6 +11,7 @@ from sqlmodel import Session, select
 from app.database import engine
 from app.config import get_settings
 from app.infrastructure import process_runner as task_control
+from app.infrastructure.logging_config import task_log_context
 from app.infrastructure.recycle_bin import move_existing_to_recycle_bin
 from app.models.voice_generation import VoiceGenerationTask
 from app.services.narration import tts_service, voice_profile_service
@@ -68,56 +69,59 @@ def enqueue(session: Session, *, voice_profile_id: str, text: str, output_filena
     session.add(task)
     session.commit()
     session.refresh(task)
+    with task_log_context(task.id):
+        logger.info("Voice generation queued: segments=%s", len(split_transcript_lines(content)))
     return task
 
 
 def serialize_task(session: Session, task: VoiceGenerationTask) -> dict:
-    queue_position = None
-    if task.status == "queued":
-        ahead = session.exec(select(func.count(VoiceGenerationTask.id)).where(
-            VoiceGenerationTask.status == "queued",
-            VoiceGenerationTask.queue_sequence < task.queue_sequence,
-        )).one()
-        running = session.exec(select(func.count(VoiceGenerationTask.id)).where(
-            VoiceGenerationTask.status == "running"
-        )).one()
-        queue_position = int(ahead or 0) + int(running or 0) + 1
-    data = task.model_dump()
-    profile = voice_profile_service.get_profile(session, task.voice_profile_id)
-    profile_config = voice_profile_service.load_profile_config(profile) if profile else {}
-    data["tts_engine"] = str(profile_config.get("tts_engine") or "qwen3_tts")
-    data["language"] = voice_profile_service.profile_language(profile_config)
-    data["queue_position"] = queue_position
-    data["duration_seconds"] = elapsed_seconds(task.started_at, task.finished_at)
-    data["audio_url"] = f"/api/tools/voice-generation/tasks/{task.id}/audio" if task.output_path else None
-    lines = split_transcript_lines(task.text)
-    output_dir = get_settings().workspace_dir / "voice_generations" / task.id
-    manifest_path = output_dir / "segments.json"
-    segment_results = []
-    if manifest_path.is_file():
-        try:
-            loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
-            if isinstance(loaded, list):
-                segment_results = loaded
-        except (OSError, json.JSONDecodeError):
-            logger.warning("Cannot read voice generation segment manifest: %s", manifest_path)
-    result_by_index = {int(item.get("index", 0)): item for item in segment_results if isinstance(item, dict)}
-    stem = Path(task.output_filename).stem
-    data["segments"] = [
-        {
-            "index": index,
-            "text": line,
-            "filename": f"{stem}_{index:04d}.wav",
-            "duration": result_by_index.get(index, {}).get("duration"),
-            "audio_url": (
-                f"/api/tools/voice-generation/tasks/{task.id}/segments/{index}/audio"
-                if index in result_by_index else None
-            ),
-        }
-        for index, line in enumerate(lines, start=1)
-    ]
-    data["segment_count"] = len(lines)
-    return data
+    with task_log_context(task.id):
+        queue_position = None
+        if task.status == "queued":
+            ahead = session.exec(select(func.count(VoiceGenerationTask.id)).where(
+                VoiceGenerationTask.status == "queued",
+                VoiceGenerationTask.queue_sequence < task.queue_sequence,
+            )).one()
+            running = session.exec(select(func.count(VoiceGenerationTask.id)).where(
+                VoiceGenerationTask.status == "running"
+            )).one()
+            queue_position = int(ahead or 0) + int(running or 0) + 1
+        data = task.model_dump()
+        profile = voice_profile_service.get_profile(session, task.voice_profile_id)
+        profile_config = voice_profile_service.load_profile_config(profile) if profile else {}
+        data["tts_engine"] = str(profile_config.get("tts_engine") or "qwen3_tts")
+        data["language"] = voice_profile_service.profile_language(profile_config)
+        data["queue_position"] = queue_position
+        data["duration_seconds"] = elapsed_seconds(task.started_at, task.finished_at)
+        data["audio_url"] = f"/api/tools/voice-generation/tasks/{task.id}/audio" if task.output_path else None
+        lines = split_transcript_lines(task.text)
+        output_dir = get_settings().workspace_dir / "voice_generations" / task.id
+        manifest_path = output_dir / "segments.json"
+        segment_results = []
+        if manifest_path.is_file():
+            try:
+                loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, list):
+                    segment_results = loaded
+            except (OSError, json.JSONDecodeError):
+                logger.warning("Cannot read voice generation segment manifest: %s", manifest_path)
+        result_by_index = {int(item.get("index", 0)): item for item in segment_results if isinstance(item, dict)}
+        stem = Path(task.output_filename).stem
+        data["segments"] = [
+            {
+                "index": index,
+                "text": line,
+                "filename": f"{stem}_{index:04d}.wav",
+                "duration": result_by_index.get(index, {}).get("duration"),
+                "audio_url": (
+                    f"/api/tools/voice-generation/tasks/{task.id}/segments/{index}/audio"
+                    if index in result_by_index else None
+                ),
+            }
+            for index, line in enumerate(lines, start=1)
+        ]
+        data["segment_count"] = len(lines)
+        return data
 
 
 def list_tasks(session: Session, limit: int = 100) -> list[dict]:
@@ -128,49 +132,55 @@ def list_tasks(session: Session, limit: int = 100) -> list[dict]:
 
 
 def pause_task(session: Session, task: VoiceGenerationTask) -> VoiceGenerationTask:
-    with _queue_state_lock:
-        session.refresh(task)
-        if task.status not in {"queued", "running"}:
-            raise ValueError("只有排队中或生成中的任务可以暂停")
-        was_running = task.status == "running"
-        task.status = "paused"
-        task.updated_at = utc_now_iso()
-        session.add(task)
-        session.commit()
-        session.refresh(task)
-    if was_running:
-        task_control.cancel(_runtime_id(task.id))
-    return task
+    with task_log_context(task.id):
+        with _queue_state_lock:
+            session.refresh(task)
+            if task.status not in {"queued", "running"}:
+                raise ValueError("只有排队中或生成中的任务可以暂停")
+            was_running = task.status == "running"
+            task.status = "paused"
+            task.updated_at = utc_now_iso()
+            session.add(task)
+            session.commit()
+            session.refresh(task)
+        if was_running:
+            task_control.cancel(_runtime_id(task.id))
+        logger.info("Voice generation paused")
+        return task
 
 
 def resume_task(session: Session, task: VoiceGenerationTask) -> VoiceGenerationTask:
-    with _queue_state_lock:
-        session.refresh(task)
-        if task.status != "paused":
-            raise ValueError("只有已暂停的任务可以恢复")
-        last_sequence = session.exec(select(func.max(VoiceGenerationTask.queue_sequence))).one()
-        task.status = "queued"
-        task.queue_sequence = int(last_sequence or 0) + 1
-        task.started_at = None
-        task.finished_at = None
-        task.error_message = None
-        task.updated_at = utc_now_iso()
-        session.add(task)
-        session.commit()
-        session.refresh(task)
-    return task
+    with task_log_context(task.id):
+        with _queue_state_lock:
+            session.refresh(task)
+            if task.status != "paused":
+                raise ValueError("只有已暂停的任务可以恢复")
+            last_sequence = session.exec(select(func.max(VoiceGenerationTask.queue_sequence))).one()
+            task.status = "queued"
+            task.queue_sequence = int(last_sequence or 0) + 1
+            task.started_at = None
+            task.finished_at = None
+            task.error_message = None
+            task.updated_at = utc_now_iso()
+            session.add(task)
+            session.commit()
+            session.refresh(task)
+        logger.info("Voice generation resumed and requeued")
+        return task
 
 
 def delete_task(session: Session, task: VoiceGenerationTask) -> list[str]:
-    with _queue_state_lock:
-        session.refresh(task)
-        if task.status == "running" or task_control.status(_runtime_id(task.id))["running"]:
-            raise ValueError("任务进程尚未停止，请先暂停并等待片刻后再删除")
-        output_dir = (get_settings().workspace_dir / "voice_generations" / task.id).resolve()
-        recycled = move_existing_to_recycle_bin([output_dir])
-        session.delete(task)
-        session.commit()
-    return recycled
+    with task_log_context(task.id):
+        with _queue_state_lock:
+            session.refresh(task)
+            if task.status == "running" or task_control.status(_runtime_id(task.id))["running"]:
+                raise ValueError("任务进程尚未停止，请先暂停并等待片刻后再删除")
+            output_dir = (get_settings().workspace_dir / "voice_generations" / task.id).resolve()
+            recycled = move_existing_to_recycle_bin([output_dir])
+            session.delete(task)
+            session.commit()
+        logger.info("Voice generation deleted")
+        return recycled
 
 
 def recover_interrupted_tasks(session: Session) -> int:
@@ -184,6 +194,8 @@ def recover_interrupted_tasks(session: Session) -> int:
         task.error_message = "后端重启，任务已自动重新排队"
         task.updated_at = now
         session.add(task)
+        with task_log_context(task.id):
+            logger.warning("Voice generation interrupted by restart; requeued")
     if tasks:
         session.commit()
     return len(tasks)
@@ -206,44 +218,49 @@ def process_next_task() -> bool:
             session.add(task)
             session.commit()
             task_id = task.id
-        session.refresh(task)
-        if task.status == "paused":
+        with task_log_context(task_id):
+            session.refresh(task)
+            if task.status == "paused":
+                return True
+            logger.info("Voice generation started: attempt=%s", task.attempt_count)
+            try:
+                profile = voice_profile_service.get_profile(session, task.voice_profile_id)
+                if not profile:
+                    raise ValueError("参考音色已被删除")
+                with task_control.controlled(_runtime_id(task.id), "tts"):
+                    result = tts_service.generate_segmented_audio(
+                        task.id, profile, split_transcript_lines(task.text), task.output_filename
+                    )
+            except Exception as exc:
+                if not isinstance(exc, task_control.TaskCancelledError):
+                    logger.exception("Voice generation failed: attempt=%s", task.attempt_count)
+                else:
+                    logger.info("Voice generation stopped")
+                session.rollback()
+                current = session.get(VoiceGenerationTask, task_id)
+                if current:
+                    finished = utc_now_iso()
+                    if current.status != "paused":
+                        current.status = "failed"
+                        current.error_message = str(exc)[-4000:]
+                        current.finished_at = finished
+                    current.updated_at = finished
+                    session.add(current)
+                    session.commit()
+            else:
+                current = session.get(VoiceGenerationTask, task_id)
+                if current:
+                    finished = utc_now_iso()
+                    if current.status != "paused":
+                        current.status = "completed"
+                        current.output_path = result["output_path"]
+                        current.duration = result["duration"]
+                        current.finished_at = finished
+                    current.updated_at = finished
+                    session.add(current)
+                    session.commit()
+            logger.info("Voice generation attempt finished: status=%s", current.status if current else "deleted")
             return True
-        try:
-            profile = voice_profile_service.get_profile(session, task.voice_profile_id)
-            if not profile:
-                raise ValueError("参考音色已被删除")
-            with task_control.controlled(_runtime_id(task.id), "tts"):
-                result = tts_service.generate_segmented_audio(
-                    task.id, profile, split_transcript_lines(task.text), task.output_filename
-                )
-        except Exception as exc:
-            if not isinstance(exc, task_control.TaskCancelledError):
-                logger.exception("Voice generation task %s failed", task_id)
-            session.rollback()
-            current = session.get(VoiceGenerationTask, task_id)
-            if current:
-                finished = utc_now_iso()
-                if current.status != "paused":
-                    current.status = "failed"
-                    current.error_message = str(exc)[-4000:]
-                    current.finished_at = finished
-                current.updated_at = finished
-                session.add(current)
-                session.commit()
-        else:
-            current = session.get(VoiceGenerationTask, task_id)
-            if current:
-                finished = utc_now_iso()
-                if current.status != "paused":
-                    current.status = "completed"
-                    current.output_path = result["output_path"]
-                    current.duration = result["duration"]
-                    current.finished_at = finished
-                current.updated_at = finished
-                session.add(current)
-                session.commit()
-        return True
 
 
 def wake_worker() -> None:

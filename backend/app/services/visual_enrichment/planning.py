@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
+
+from pydantic import BaseModel
 
 from app.services.visual_enrichment.models import (
     GenerationSpec,
@@ -14,9 +17,15 @@ from app.services.visual_enrichment.models import (
     VisualPlanItem,
     VisualType,
 )
+from app.services.visual_enrichment.providers import LLMProvider
 
 
 HIGH_RISK_RE = re.compile(r"\d+(?:\.\d+)?%?|医疗|法律|金融|日期|统计|收入|成本")
+
+
+class VisualPlanningDecision(BaseModel):
+    visual_type: VisualType
+    brief: VisualBrief
 
 
 def renderer_for(visual_type: VisualType) -> Renderer:
@@ -57,10 +66,12 @@ def build_visual_plan(
     subtitle_safe_zone: float = 0.18,
     candidates_normal: int = 2,
     candidates_high: int = 3,
+    provider: LLMProvider | None = None,
 ) -> VisualPlan:
     visuals = []
     for index, candidate in enumerate(selected, start=1):
-        visual_type = candidate.visual_type_hint
+        decision = _planning_decision(candidate, provider)
+        visual_type = decision.visual_type
         risk = fact_risk_for(candidate.voiceover)
         renderer = renderer_for(visual_type)
         if risk == "high" and renderer == Renderer.FLUX:
@@ -68,14 +79,7 @@ def build_visual_plan(
         priority = "high" if candidate.score >= 0.78 else "medium" if candidate.score >= 0.68 else "low"
         visual_id = f"vis_{index:04d}"
         seed = int(hashlib.sha256(f"{project_id}:{visual_id}".encode()).hexdigest()[:8], 16)
-        brief = VisualBrief(
-            subject=_brief_subject(candidate.voiceover),
-            action="communicates the narrated claim through one clear visual relationship",
-            environment="clean documentary editorial setting",
-            semantic_message=candidate.voiceover,
-            composition="wide composition with a single focal hierarchy",
-            must_avoid=["visible logos", "watermark", "random text"],
-        )
+        brief = decision.brief
         prompt = _build_prompt(candidate.voiceover, brief, subtitle_safe_zone)
         layout, animation = _presentation_for(visual_type)
         visuals.append(
@@ -107,6 +111,46 @@ def build_visual_plan(
             )
         )
     return VisualPlan(project_id=project_id, duration_ms=duration_ms, visuals=visuals)
+
+
+def _planning_decision(
+    candidate: VisualCandidate, provider: LLMProvider | None
+) -> VisualPlanningDecision:
+    fallback = VisualPlanningDecision(
+        visual_type=candidate.visual_type_hint,
+        brief=VisualBrief(
+            subject=_brief_subject(candidate.voiceover),
+            action="communicates the narrated claim through one clear visual relationship",
+            environment="clean documentary editorial setting",
+            semantic_message=candidate.voiceover,
+            composition="wide composition with a single focal hierarchy",
+            must_avoid=["visible logos", "watermark", "random text"],
+        ),
+    )
+    if provider is None:
+        return fallback
+    try:
+        raw = provider.generate_json(
+            json.dumps(
+                {
+                    "instruction": (
+                        "Plan one concrete documentary visual. Select the visual type that best "
+                        "communicates the claim; do not merely restate the narration. The brief must "
+                        "describe visible subject, action, environment and composition. Preserve "
+                        "factual uncertainty and avoid invented identities, logos or quotations."
+                    ),
+                    "voiceover": candidate.voiceover,
+                    "timing": {"start_ms": candidate.start_ms, "end_ms": candidate.end_ms},
+                    "suggested_type": candidate.visual_type_hint.value,
+                },
+                ensure_ascii=False,
+            ),
+            VisualPlanningDecision.model_json_schema(),
+            {"temperature": 0.25, "top_p": 0.8, "max_tokens": 1200},
+        )
+        return VisualPlanningDecision.model_validate(raw)
+    except (ValueError, TypeError, KeyError):
+        return fallback
 
 
 def build_overlay_timeline(plan: VisualPlan) -> OverlayTimeline:

@@ -1,17 +1,47 @@
 from __future__ import annotations
 
 import argparse
+import json
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+LLM_FILENAMES = {
+    "qwen3-4b-q4_k_m": "Qwen3-4B-Q4_K_M.gguf",
+    "qwen3-8b-q4_k_m": "Qwen3-8B-Q4_K_M.gguf",
+    "qwen3-14b-q4_k_m": "Qwen3-14B-Q4_K_M.gguf",
+}
+
+
+def _semantic_settings() -> tuple[str, Path]:
+    model_id = "qwen3-8b-q4_k_m"
+    models_dir = ROOT / "models" / "llm"
+    database = ROOT / "backend" / "workspace" / "app.db"
+    if database.is_file():
+        try:
+            with sqlite3.connect(database) as connection:
+                row = connection.execute(
+                    "SELECT config_json FROM system_settings WHERE id = 1"
+                ).fetchone()
+            payload = json.loads(row[0]) if row else {}
+            if isinstance(payload, dict):
+                model_id = str(payload.get("local_llm_model") or model_id)
+                models_dir = Path(payload.get("local_llm_models_dir") or models_dir)
+        except (sqlite3.Error, json.JSONDecodeError, OSError):
+            pass
+    if model_id not in LLM_FILENAMES:
+        raise RuntimeError(f"Unsupported local semantic model: {model_id}")
+    return model_id, models_dir.expanduser().resolve()
 
 
 def semantic_command() -> tuple[list[str], Path]:
-    executable = ROOT / "backend" / "workspace" / "tools" / "llama.cpp" / "llama-server.exe"
-    model = ROOT / "models" / "llm" / "qwen3-8b-q4_k_m" / "Qwen3-8B-Q4_K_M.gguf"
+    tools_dir = ROOT / "backend" / "workspace" / "tools" / "llama.cpp"
+    executable = next(tools_dir.rglob("llama-server.exe"), tools_dir / "llama-server.exe")
+    model_id, models_dir = _semantic_settings()
+    model = models_dir / model_id / LLM_FILENAMES[model_id]
     return (
         [
             str(executable),

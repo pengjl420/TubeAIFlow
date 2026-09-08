@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
@@ -30,6 +31,8 @@ from app.services.avatar import avatar_service
 from app.services.narration import voice_generation_queue, voice_profile_service
 from app.services.rendering import local_video_merge_queue
 from app.services.settings import system_settings_service
+from app.services.settings import cleanup_service
+from app.services.settings import llm_model_manager
 from app.services.tasks import task_worker
 
 
@@ -47,7 +50,13 @@ async def lifespan(_app: FastAPI):
     local_video_merge_queue.recover_and_start_worker()
     voice_generation_queue.recover_and_start_worker()
     task_worker.recover_and_start_worker()
-    yield
+    cleanup_stop, cleanup_thread = cleanup_service.start_worker()
+    llm_model_manager.recover_and_start_worker()
+    try:
+        yield
+    finally:
+        cleanup_stop.set()
+        await asyncio.to_thread(cleanup_thread.join)
 
 
 app = FastAPI(title="TubeAiFolw Engine", version="0.2.0", lifespan=lifespan)

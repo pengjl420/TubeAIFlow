@@ -16,6 +16,7 @@ from app.models.narration import Segment
 from app.models.narration import VoiceProfile
 from app.infrastructure import gpu_resource, process_runner as task_control
 from app.infrastructure.ffmpeg import probe_duration, run_ffmpeg
+from app.infrastructure.logging_config import current_task_id, format_task_log, task_log_context
 from app.infrastructure.project_layout import ensure_project_dirs, get_project_work_dir, load_project_config
 from app.shared.time import utc_now_iso
 from app.services.narration import voice_profile_service
@@ -31,43 +32,44 @@ def generate_single_audio(
     output_filename: str,
 ) -> dict:
     """Generate exactly one audio file without transcript segmentation."""
-    settings = get_settings()
-    profile_config = voice_profile_service.load_profile_config(profile)
-    output_dir = (settings.workspace_dir / "voice_generations" / task_id).resolve()
-    logs_dir = output_dir / "logs"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    logs_dir.mkdir(parents=True, exist_ok=True)
+    with task_log_context(task_id):
+        settings = get_settings()
+        profile_config = voice_profile_service.load_profile_config(profile)
+        output_dir = (settings.workspace_dir / "voice_generations" / task_id).resolve()
+        logs_dir = output_dir / "logs"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        logs_dir.mkdir(parents=True, exist_ok=True)
 
-    project = Project(
-        id=f"voice-generation-{task_id}",
-        name=profile.name,
-        reference_audio_path=profile.reference_audio_path,
-        config_json=json.dumps(
-            {
-                "tts_engine": str(profile_config.get("tts_engine") or "qwen3_tts"),
-                "voice_language": voice_profile_service.profile_language(profile_config),
-                "reference_audio_text": str(profile_config.get("reference_audio_text") or ""),
-                "cosyvoice_speed": voice_profile_service.profile_cosyvoice_speed(profile_config),
-            },
-            ensure_ascii=False,
-        ),
-    )
-    segment = Segment(
-        id=task_id,
-        segment_id=Path(output_filename).stem,
-        project_id=project.id,
-        segment_index=1,
-        text=text,
-    )
-    engine, reference_audio_path = _validate_configuration(project, [segment])
-    output_path = output_dir / output_filename
-    output_path.unlink(missing_ok=True)
-    _write_initial_progress(logs_dir / "tts_progress.json", [segment])
-    _run_tts_batch(engine, project, reference_audio_path, [segment], output_dir, logs_dir)
-    if not output_path.is_file():
-        raise RuntimeError(f"{_engine_label(engine)} did not create the requested audio file")
-    duration = probe_duration(output_path)
-    return {"output_path": str(output_path), "duration": duration}
+        project = Project(
+            id=f"voice-generation-{task_id}",
+            name=profile.name,
+            reference_audio_path=profile.reference_audio_path,
+            config_json=json.dumps(
+                {
+                    "tts_engine": str(profile_config.get("tts_engine") or "qwen3_tts"),
+                    "voice_language": voice_profile_service.profile_language(profile_config),
+                    "reference_audio_text": str(profile_config.get("reference_audio_text") or ""),
+                    "cosyvoice_speed": voice_profile_service.profile_cosyvoice_speed(profile_config),
+                },
+                ensure_ascii=False,
+            ),
+        )
+        segment = Segment(
+            id=task_id,
+            segment_id=Path(output_filename).stem,
+            project_id=project.id,
+            segment_index=1,
+            text=text,
+        )
+        engine, reference_audio_path = _validate_configuration(project, [segment])
+        output_path = output_dir / output_filename
+        output_path.unlink(missing_ok=True)
+        _write_initial_progress(logs_dir / "tts_progress.json", [segment])
+        _run_tts_batch(engine, project, reference_audio_path, [segment], output_dir, logs_dir)
+        if not output_path.is_file():
+            raise RuntimeError(f"{_engine_label(engine)} did not create the requested audio file")
+        duration = probe_duration(output_path)
+        return {"output_path": str(output_path), "duration": duration}
 
 
 def generate_segmented_audio(
@@ -77,89 +79,97 @@ def generate_segmented_audio(
     output_filename: str,
 ) -> dict:
     """Generate one WAV per non-empty transcript line, then merge them in order."""
-    if not texts:
-        raise ValueError("逐字稿按换行切分后没有可生成的文本")
+    with task_log_context(task_id):
+        if not texts:
+            raise ValueError("逐字稿按换行切分后没有可生成的文本")
 
-    settings = get_settings()
-    profile_config = voice_profile_service.load_profile_config(profile)
-    output_dir = (settings.workspace_dir / "voice_generations" / task_id).resolve()
-    segment_dir = output_dir / "segments"
-    logs_dir = output_dir / "logs"
-    segment_dir.mkdir(parents=True, exist_ok=True)
-    logs_dir.mkdir(parents=True, exist_ok=True)
+        settings = get_settings()
+        profile_config = voice_profile_service.load_profile_config(profile)
+        output_dir = (settings.workspace_dir / "voice_generations" / task_id).resolve()
+        segment_dir = output_dir / "segments"
+        logs_dir = output_dir / "logs"
+        segment_dir.mkdir(parents=True, exist_ok=True)
+        logs_dir.mkdir(parents=True, exist_ok=True)
 
-    output_stem = Path(output_filename).stem
-    project = Project(
-        id=f"voice-generation-{task_id}",
-        name=profile.name,
-        reference_audio_path=profile.reference_audio_path,
-        config_json=json.dumps(
-            {
-                "tts_engine": str(profile_config.get("tts_engine") or "qwen3_tts"),
-                "voice_language": voice_profile_service.profile_language(profile_config),
-                "reference_audio_text": str(profile_config.get("reference_audio_text") or ""),
-                "cosyvoice_speed": voice_profile_service.profile_cosyvoice_speed(profile_config),
-            },
-            ensure_ascii=False,
-        ),
-    )
-    segments = [
-        Segment(
-            id=f"{task_id}-{index:04d}",
-            segment_id=f"{output_stem}_{index:04d}",
-            project_id=project.id,
-            segment_index=index,
-            text=content,
+        output_stem = Path(output_filename).stem
+        project = Project(
+            id=f"voice-generation-{task_id}",
+            name=profile.name,
+            reference_audio_path=profile.reference_audio_path,
+            config_json=json.dumps(
+                {
+                    "tts_engine": str(profile_config.get("tts_engine") or "qwen3_tts"),
+                    "voice_language": voice_profile_service.profile_language(profile_config),
+                    "reference_audio_text": str(profile_config.get("reference_audio_text") or ""),
+                    "cosyvoice_speed": voice_profile_service.profile_cosyvoice_speed(profile_config),
+                },
+                ensure_ascii=False,
+            ),
         )
-        for index, content in enumerate(texts, start=1)
-    ]
-    engine, reference_audio_path = _validate_configuration(project, segments)
-    for segment in segments:
-        (segment_dir / f"{segment.segment_id}.wav").unlink(missing_ok=True)
-    _write_initial_progress(logs_dir / "tts_progress.json", segments)
-    _run_tts_batch(engine, project, reference_audio_path, segments, segment_dir, logs_dir)
+        segments = [
+            Segment(
+                id=f"{task_id}-{index:04d}",
+                segment_id=f"{output_stem}_{index:04d}",
+                project_id=project.id,
+                segment_index=index,
+                text=content,
+            )
+            for index, content in enumerate(texts, start=1)
+        ]
+        engine, reference_audio_path = _validate_configuration(project, segments)
+        logger.info("TTS configuration validated: provider=%s segments=%s", engine, len(segments))
+        for segment in segments:
+            (segment_dir / f"{segment.segment_id}.wav").unlink(missing_ok=True)
+        _write_initial_progress(logs_dir / "tts_progress.json", segments)
+        _run_tts_batch(engine, project, reference_audio_path, segments, segment_dir, logs_dir)
 
-    segment_results = []
-    for segment in segments:
-        segment_path = segment_dir / f"{segment.segment_id}.wav"
-        if not segment_path.is_file():
-            raise RuntimeError(f"{_engine_label(engine)} 未生成分段音频：{segment_path.name}")
-        segment_results.append(
-            {
-                "index": segment.segment_index,
-                "text": segment.text,
-                "filename": segment_path.name,
-                "output_path": str(segment_path),
-                "duration": probe_duration(segment_path),
-            }
+        segment_results = []
+        for segment in segments:
+            segment_path = segment_dir / f"{segment.segment_id}.wav"
+            if not segment_path.is_file():
+                raise RuntimeError(f"{_engine_label(engine)} 未生成分段音频：{segment_path.name}")
+            segment_results.append(
+                {
+                    "index": segment.segment_index,
+                    "text": segment.text,
+                    "filename": segment_path.name,
+                    "output_path": str(segment_path),
+                    "duration": probe_duration(segment_path),
+                }
+            )
+            logger.info(
+                "TTS segment ready: segment=%s duration=%.3fs",
+                segment.segment_id, segment_results[-1]["duration"],
+            )
+
+        output_path = output_dir / output_filename
+        output_path.unlink(missing_ok=True)
+        concat_path = logs_dir / "segments.txt"
+        concat_path.write_text(
+            "\n".join(
+                "file '" + Path(item["output_path"]).as_posix().replace("'", r"'\''") + "'"
+                for item in segment_results
+            ),
+            encoding="utf-8",
         )
+        logger.info("Audio merge started: segments=%s", len(segment_results))
+        run_ffmpeg([
+            "-y", "-f", "concat", "-safe", "0", "-i", str(concat_path),
+            "-c", "copy", str(output_path),
+        ])
+        if not output_path.is_file():
+            raise RuntimeError("FFmpeg 未生成合并后的完整音频")
 
-    output_path = output_dir / output_filename
-    output_path.unlink(missing_ok=True)
-    concat_path = logs_dir / "segments.txt"
-    concat_path.write_text(
-        "\n".join(
-            "file '" + Path(item["output_path"]).as_posix().replace("'", r"'\''") + "'"
-            for item in segment_results
-        ),
-        encoding="utf-8",
-    )
-    run_ffmpeg([
-        "-y", "-f", "concat", "-safe", "0", "-i", str(concat_path),
-        "-c", "copy", str(output_path),
-    ])
-    if not output_path.is_file():
-        raise RuntimeError("FFmpeg 未生成合并后的完整音频")
-
-    result = {
-        "output_path": str(output_path),
-        "duration": probe_duration(output_path),
-        "segments": segment_results,
-    }
-    (output_dir / "segments.json").write_text(
-        json.dumps(segment_results, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    return result
+        result = {
+            "output_path": str(output_path),
+            "duration": probe_duration(output_path),
+            "segments": segment_results,
+        }
+        (output_dir / "segments.json").write_text(
+            json.dumps(segment_results, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        logger.info("Audio merge completed: duration=%.3fs", result["duration"])
+        return result
 
 
 def generate_project_tts(session: Session, project: Project) -> list[Segment]:
@@ -398,10 +408,13 @@ def _run_tts_batch(
     audio_dir: Path,
     logs_dir: Path,
 ) -> None:
+    logger.info("TTS batch waiting for GPU: provider=%s segments=%s", engine, len(segments))
     with gpu_resource.exclusive_gpu(f"tts:{engine}:project:{project.id}"):
+        logger.info("TTS batch started: provider=%s", engine)
         provider_registry.runtime(engine, TTSProviderRuntime).synthesize_batch(
             project, reference_audio_path, segments, audio_dir, logs_dir
         )
+    logger.info("TTS batch completed: provider=%s", engine)
 
 
 def _run_qwen3_tts_batch(
@@ -670,6 +683,9 @@ def _execute_batch_runner(
     env["PYTHONUTF8"] = "1"
     if env_overrides:
         env.update(env_overrides)
+    if current_task_id():
+        env["TUBEAIFOLW_TASK_ID"] = current_task_id()
+    logger.info("TTS runner started: provider=%s", engine_label)
     result = _run_controlled_process(
         project_id,
         command,
@@ -682,11 +698,16 @@ def _execute_batch_runner(
         env=env,
     )
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-    (logs_dir / "tts.log").write_text(result.stdout, encoding="utf-8")
-    (logs_dir / f"tts_{timestamp}.log").write_text(result.stdout, encoding="utf-8")
+    stdout_log = format_task_log(result.stdout)
+    (logs_dir / "tts.log").write_text(stdout_log, encoding="utf-8")
+    (logs_dir / f"tts_{timestamp}.log").write_text(stdout_log, encoding="utf-8")
     if result.stderr:
-        (logs_dir / "error.log").write_text(result.stderr, encoding="utf-8")
-        (logs_dir / f"error_{timestamp}.log").write_text(result.stderr, encoding="utf-8")
+        stderr_log = format_task_log(result.stderr)
+        (logs_dir / "error.log").write_text(stderr_log, encoding="utf-8")
+        (logs_dir / f"error_{timestamp}.log").write_text(stderr_log, encoding="utf-8")
+    logger.info("TTS runner exited: provider=%s returncode=%s", engine_label, result.returncode)
+    # Preserve child output before propagating a user pause/cancellation.
+    task_control.check_cancelled(project_id)
     if result.returncode != 0 and not result_path.exists():
         message = result.stderr.strip() or result.stdout.strip() or f"{engine_label} batch failed"
         raise RuntimeError(message[-4000:])
@@ -706,7 +727,6 @@ def _run_controlled_process(project_id: str, command: list[str], **kwargs) -> su
         stdout, stderr = process.communicate()
     finally:
         task_control.unregister_process(project_id, process)
-    task_control.check_cancelled(project_id)
     return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 

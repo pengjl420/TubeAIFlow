@@ -11,6 +11,14 @@ class DeepSeekClient:
         self.settings = settings or get_settings()
         self.project_id = project_id
 
+    @property
+    def name(self) -> str:
+        return "llm.deepseek"
+
+    @property
+    def model(self) -> str:
+        return self.settings.deepseek_model
+
     def chat_json(self, system_prompt: str, user_prompt: str) -> dict:
         if not self.settings.deepseek_api_key.strip():
             raise ValueError("系统尚未配置 DeepSeek API Key")

@@ -228,7 +228,7 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="voice-page">
-    <header class="taf-page-heading">
+    <header class="taf-page-heading taf-sticky-heading">
       <div><h1>配音生成</h1><p>配置音色与逐字稿，提交后自动生成完整音频。</p></div>
       <span class="queue-badge"><Clock3 :size="17" /> 生成队列 {{ activeCount }}</span>
     </header>

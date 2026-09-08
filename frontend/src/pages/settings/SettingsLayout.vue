@@ -15,7 +15,7 @@ const navigation = [
 
 <template>
   <section class="settings-center settings-design-shell">
-    <header class="settings-title">
+    <header class="settings-title taf-settings-sticky-heading">
       <h1>系统设置</h1>
       <p>本地环境、模型、服务与生产默认值</p>
     </header>

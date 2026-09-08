@@ -322,7 +322,7 @@ onBeforeUnmount(() => { if (previewUrl.value.startsWith('blob:')) URL.revokeObje
 
 <template>
   <section class="voice-center" :class="{ 'has-drawer': drawerOpen }">
-    <header class="voice-page-header">
+    <header class="voice-page-header taf-sticky-heading">
       <div>
         <h1>音色中心</h1>
         <p>统一管理配音音色、参考音频与引擎兼容状态</p>

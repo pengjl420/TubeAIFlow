@@ -105,7 +105,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', handleKeydown); do
 
 <template>
   <section class="project-page">
-    <header class="project-head">
+    <header class="project-head taf-sticky-heading">
       <div><h1>项目</h1><p>集中管理长视频工程与最近生产进度。</p></div>
       <div class="head-actions"><button class="secondary" :disabled="loading" @click="load"><RefreshCw :size="16" />刷新</button><button @click="showCreate = true"><Plus :size="17" />新建项目</button></div>
     </header>

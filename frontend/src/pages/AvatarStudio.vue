@@ -156,7 +156,7 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="avatar-page">
-    <header class="taf-page-heading">
+    <header class="taf-page-heading taf-sticky-heading">
       <div><h1>数字人合成</h1><p>选择人物与完整旁白音频，提交后按章节生成成片。</p></div>
       <span v-if="duixAvailable" class="health ok"><i></i>Duix 服务正常</span>
       <RouterLink v-else class="health bad" to="/settings/diagnostics" title="前往系统诊断"><i></i>Duix 服务不可用 · 检查配置</RouterLink>

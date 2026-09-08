@@ -175,7 +175,7 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="local-merge-page">
-    <header class="taf-page-heading">
+    <header class="taf-page-heading taf-sticky-heading">
       <div>
         <h1>本地素材拼接</h1>
         <p>选择素材与目标时长，提交后在本地队列持续处理。</p>

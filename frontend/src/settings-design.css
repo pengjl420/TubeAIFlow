@@ -1,6 +1,7 @@
 .taf-main:has(.settings-design-shell) { max-width: none; padding: 0; }
 .settings-design-shell { color: #172033; display: block; min-height: 100vh; }
-.settings-title { background: #fbfcfe; padding: 18px 32px 12px; }
+.settings-title { background: rgba(255,255,255,.95); border-bottom: 1px solid #dde5ef; box-shadow: 0 4px 14px rgba(30,48,80,.045); padding: 16px 32px 13px; }
+.taf-settings-sticky-heading { backdrop-filter: blur(14px); position: sticky; top: 0; z-index: 12; }
 .settings-title h1 { font-size: 26px; letter-spacing: -.035em; margin: 0; }
 .settings-title p { color: #748096; font-size: 12px; margin: 4px 0 0; }
 .settings-workspace { align-items: stretch; display: grid; grid-template-columns: 205px minmax(0,1fr); min-height: calc(100vh - 149px); }
@@ -9,7 +10,7 @@
 .settings-design-shell .settings-navigation a { align-items: center; border-radius: 8px; color: #48556b; display: flex; font-size: 12px; font-weight: 600; gap: 11px; min-height: 42px; padding: 0 12px; }
 .settings-design-shell .settings-navigation a:hover { background: #f4f7fb; color: #075bf5; }
 .settings-design-shell .settings-navigation a.is-active { background: #edf3ff; color: #075bf5; }
-.settings-content { background: #fbfcfe; min-width: 0; }
+.settings-content { background: linear-gradient(145deg, #f1f5f9, #f6f8fc); min-width: 0; }
 .settings-design-page { min-height: 100%; padding: 0 24px 76px; position: relative; }
 .settings-page-head { align-items: center; border-bottom: 1px solid #edf0f4; display: flex; margin-bottom: 12px; min-height: 52px; position: relative; }
 .settings-page-head h2 { display: block; font-size: 18px; letter-spacing: -.02em; margin: 0; }

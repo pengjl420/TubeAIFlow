@@ -12,6 +12,9 @@ class TaskRun(SQLModel, table=True):
     batch_id: str | None = Field(default=None, index=True)
     batch_item_id: str | None = Field(default=None, index=True)
     workflow: str = Field(default="narration_generation", index=True)
+    job_type: str = Field(default="project_workflow", index=True)
+    scene_id: str | None = Field(default=None, index=True)
+    resource_class: str = Field(default="cpu", index=True)
     status: str = Field(default=TaskStatus.QUEUED.value, index=True)
     current_stage: str = Field(default="segmenting", index=True)
     include_video: bool = False
@@ -19,6 +22,12 @@ class TaskRun(SQLModel, table=True):
     attempt_count: int = 0
     compensation_count: int = 0
     cancel_requested: bool = False
+    pause_requested: bool = False
+    progress: float = 0.0
+    max_retries: int = 0
+    error_code: str | None = None
+    request_json: str = "{}"
+    result_json: str = "{}"
     checkpoint_json: str = "{}"
     config_snapshot_json: str = "{}"
     error_message: str | None = None

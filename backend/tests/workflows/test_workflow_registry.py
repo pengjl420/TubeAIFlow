@@ -7,6 +7,10 @@ from app.workflows import WorkflowContext, WorkflowGraph, WorkflowStep
 from app.workflows.builtin import (
     NARRATION_WORKFLOW_ID,
     VIDEO_WORKFLOW_ID,
+    SCENE_IMAGE_WORKFLOW_ID,
+    SCENE_PREVIEW_WORKFLOW_ID,
+    TIMELINE_PREVIEW_WORKFLOW_ID,
+    FINAL_RENDER_WORKFLOW_ID,
     ensure_builtin_workflows_registered,
 )
 from app.workflows.registry import workflow_registry
@@ -18,7 +22,14 @@ class WorkflowArchitectureTests(unittest.TestCase):
 
         self.assertEqual(
             {item.id for item in workflow_registry.list()},
-            {NARRATION_WORKFLOW_ID, VIDEO_WORKFLOW_ID},
+            {
+                NARRATION_WORKFLOW_ID,
+                VIDEO_WORKFLOW_ID,
+                SCENE_IMAGE_WORKFLOW_ID,
+                SCENE_PREVIEW_WORKFLOW_ID,
+                TIMELINE_PREVIEW_WORKFLOW_ID,
+                FINAL_RENDER_WORKFLOW_ID,
+            },
         )
         narration = workflow_registry.get(NARRATION_WORKFLOW_ID)
         self.assertIn("segmenting", narration.stages)
@@ -56,9 +67,7 @@ class WorkflowArchitectureTests(unittest.TestCase):
             )
 
     def test_project_config_validates_core_and_preserves_provider_extensions(self) -> None:
-        config = ProjectConfig.model_validate(
-            {"fps": 60, "provider_custom": {"temperature": 0.2}}
-        )
+        config = ProjectConfig.model_validate({"fps": 60, "provider_custom": {"temperature": 0.2}})
 
         self.assertEqual(config.fps, 60)
         self.assertEqual(config.model_dump()["provider_custom"], {"temperature": 0.2})

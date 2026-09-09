@@ -30,5 +30,21 @@ class VisualScene(SQLModel, table=True):
     storyboard_json: str | None = None
     confidence: float | None = None
     status: str = "draft"
+    locked_text: bool = False
+    locked_audio: bool = False
+    locked_visual: bool = False
+    version: int = 1
     created_at: str = Field(default_factory=utc_now_iso)
     updated_at: str = Field(default_factory=utc_now_iso)
+
+
+class SceneRevision(SQLModel, table=True):
+    __tablename__ = "scene_revisions"
+
+    id: str = Field(primary_key=True)
+    project_id: str = Field(index=True)
+    scene_id: str = Field(index=True)
+    version: int
+    change_type: str = "manual_edit"
+    snapshot_json: str
+    created_at: str = Field(default_factory=utc_now_iso)

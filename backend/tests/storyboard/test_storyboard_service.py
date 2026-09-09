@@ -10,7 +10,8 @@ from pydantic import ValidationError
 from sqlmodel import Session, SQLModel, create_engine
 
 from app.models.project import Project
-from app.models.storyboard import SubtitleCue
+from app.models.storyboard import SubtitleCue, VisualScene
+from app.schemas.storyboard import StoryboardContent
 from app.services.storyboard import storyboard_service
 from app.services.storyboard.scene_grouper import group_cues
 
@@ -298,6 +299,137 @@ class StoryboardServiceTests(unittest.TestCase):
                 self.assertEqual(result["scenes"][0]["storyboard"]["fallback_category"], "business")
                 self.assertTrue(Path(result["path"]).is_file())
             engine.dispose()
+
+    def test_update_scene_persists_manual_edits_and_refreshes_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            engine = create_engine(
+                f"sqlite:///{Path(directory) / 'storyboard.db'}",
+                connect_args={"check_same_thread": False},
+            )
+            SQLModel.metadata.create_all(engine)
+            with Session(engine) as session:
+                project = Project(id="p1", name="Project")
+                content = StoryboardContent(
+                    visual_summary="Original summary",
+                    visual_type="archive",
+                    scene_category="history",
+                    mood="serious",
+                    shot_preference="wide",
+                    primary_query="historical building",
+                    fallback_category="city",
+                    fallback_mood="neutral",
+                    confidence=0.7,
+                )
+                session.add(project)
+                session.add(
+                    VisualScene(
+                        id="p1:scene_0001",
+                        project_id="p1",
+                        scene_index=1,
+                        start_ms=0,
+                        end_ms=5000,
+                        narration="Original narration",
+                        storyboard_json=content.model_dump_json(),
+                        confidence=content.confidence,
+                        status="generated",
+                    )
+                )
+                session.commit()
+                updated_content = content.model_copy(
+                    update={"visual_summary": "Reviewed summary", "confidence": 0.9}
+                )
+                settings = SimpleNamespace(
+                    workspace_dir=Path(directory),
+                    deepseek_model="deepseek-test",
+                )
+                with patch.object(storyboard_service, "get_settings", return_value=settings):
+                    result = storyboard_service.update_scene(
+                        session,
+                        project,
+                        "p1:scene_0001",
+                        narration="Reviewed narration",
+                        storyboard=updated_content,
+                        status="reviewed",
+                    )
+
+                self.assertEqual(result["narration"], "Reviewed narration")
+                self.assertEqual(result["storyboard"]["visual_summary"], "Reviewed summary")
+                self.assertEqual(result["confidence"], 0.9)
+                self.assertEqual(result["status"], "reviewed")
+                self.assertEqual(result["version"], 2)
+                revisions = storyboard_service.list_scene_revisions(
+                    session, "p1", "p1:scene_0001"
+                )
+                self.assertEqual([item["version"] for item in revisions], [1])
+                artifact = Path(directory) / "projects" / "p1" / "storyboard" / "scenes.json"
+                self.assertEqual(
+                    json.loads(artifact.read_text(encoding="utf-8"))["scenes"][0]["status"],
+                    "reviewed",
+                )
+
+                with patch.object(storyboard_service, "get_settings", return_value=settings):
+                    result = storyboard_service.update_scene(
+                        session, project, "p1:scene_0001", locked_visual=True
+                    )
+                self.assertTrue(result["locked_visual"])
+                with self.assertRaisesRegex(ValueError, "visual is locked"):
+                    storyboard_service.update_scene(
+                        session,
+                        project,
+                        "p1:scene_0001",
+                        storyboard=updated_content.model_copy(
+                            update={"visual_summary": "Blocked change"}
+                        ),
+                    )
+                with patch.object(storyboard_service, "get_settings", return_value=settings):
+                    restored = storyboard_service.restore_scene_revision(
+                        session, project, "p1:scene_0001", revisions[0]["id"]
+                    )
+                self.assertEqual(restored["narration"], "Original narration")
+                self.assertFalse(restored["locked_visual"])
+            engine.dispose()
+
+    def test_regenerate_scene_keeps_identity_and_creates_revision(self) -> None:
+        with self.project_session(cue_count=0) as (session, project, settings):
+            content = StoryboardContent(
+                visual_summary="Original summary",
+                visual_type="archive",
+                scene_category="history",
+                mood="serious",
+                shot_preference="wide",
+                primary_query="historical building",
+                fallback_category="city",
+                fallback_mood="neutral",
+                confidence=0.7,
+            )
+            session.add(
+                VisualScene(
+                    id="p1:scene_0001",
+                    project_id="p1",
+                    scene_index=1,
+                    start_ms=0,
+                    end_ms=5000,
+                    narration="Narration",
+                    storyboard_json=content.model_dump_json(),
+                    confidence=0.7,
+                    status="reviewed",
+                )
+            )
+            session.commit()
+            with patch.object(storyboard_service, "get_settings", return_value=settings):
+                result = storyboard_service.regenerate_scene(
+                    session, project, "p1:scene_0001", client=_FakeDeepSeek()
+                )
+
+            self.assertEqual(result["id"], "p1:scene_0001")
+            self.assertEqual(result["version"], 2)
+            self.assertEqual(result["status"], "generated")
+            self.assertEqual(
+                storyboard_service.list_scene_revisions(
+                    session, "p1", "p1:scene_0001"
+                )[0]["change_type"],
+                "before_regenerate",
+            )
 
     @contextmanager
     def project_session(self, cue_count: int = 3):

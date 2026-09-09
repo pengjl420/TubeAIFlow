@@ -1,6 +1,7 @@
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from app.database import get_session
@@ -17,6 +18,191 @@ from app.workflows import narration_generation, video_synthesis
 
 
 router = APIRouter(tags=["tasks"])
+
+
+class TimelinePreviewJobRequest(BaseModel):
+    start_ms: int = Field(default=0, ge=0)
+    duration_ms: int = Field(default=30_000)
+
+
+def _enqueue_scene_job(
+    session: Session,
+    project_id: str,
+    scene_id: str,
+    *,
+    workflow: str,
+    job_type: str,
+    stage: str,
+    resource_class: str,
+) -> dict:
+    project = project_service.get_project(session, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail={"error": "Project not found"})
+    from app.models.storyboard import VisualScene
+
+    scene = session.get(VisualScene, scene_id)
+    if not scene or scene.project_id != project.id:
+        raise HTTPException(status_code=404, detail={"error": "Scene not found"})
+    active = task_service.get_active_project_task(session, project.id)
+    if active:
+        raise HTTPException(status_code=409, detail={"error": "项目已有活动 Job"})
+    task = task_service.enqueue_project_task(
+        session,
+        project,
+        workflow=workflow,
+        include_video=False,
+        current_stage=stage,
+        reuse_active=False,
+        job_type=job_type,
+        scene_id=scene.id,
+        resource_class=resource_class,
+        max_retries=2,
+    )
+    task_worker.wake_worker()
+    return {"success": True, "data": task_service.serialize_task(session, task)}
+
+
+def _enqueue_render_job(
+    session: Session,
+    project_id: str,
+    *,
+    workflow: str,
+    job_type: str,
+    stage: str,
+    request: dict | None = None,
+) -> dict:
+    project = project_service.get_project(session, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail={"error": "Project not found"})
+    active = task_service.get_active_project_task(session, project.id)
+    if active:
+        raise HTTPException(status_code=409, detail={"error": "项目已有活动 Job"})
+    task = task_service.enqueue_project_task(
+        session,
+        project,
+        workflow=workflow,
+        include_video=True,
+        current_stage=stage,
+        reuse_active=False,
+        job_type=job_type,
+        resource_class="ffmpeg",
+        max_retries=2,
+        request=request,
+    )
+    task_worker.wake_worker()
+    return {"success": True, "data": task_service.serialize_task(session, task)}
+
+
+@router.post("/projects/{project_id}/jobs/scenes/{scene_id}/images")
+def enqueue_scene_image_job(
+    project_id: str, scene_id: str, session: Session = Depends(get_session)
+) -> dict:
+    return _enqueue_scene_job(
+        session, project_id, scene_id,
+        workflow="scene_image_regeneration", job_type="scene_image_regeneration",
+        stage="generate", resource_class="gpu",
+    )
+
+
+@router.post("/projects/{project_id}/jobs/scenes/{scene_id}/preview")
+def enqueue_scene_preview_job(
+    project_id: str, scene_id: str, session: Session = Depends(get_session)
+) -> dict:
+    return _enqueue_scene_job(
+        session, project_id, scene_id,
+        workflow="scene_preview_render", job_type="scene_preview_render",
+        stage="render", resource_class="ffmpeg",
+    )
+
+
+@router.post("/projects/{project_id}/jobs/preview")
+def enqueue_timeline_preview_job(
+    project_id: str,
+    payload: TimelinePreviewJobRequest,
+    session: Session = Depends(get_session),
+) -> dict:
+    if payload.duration_ms not in {30_000, 60_000}:
+        raise HTTPException(status_code=400, detail={"error": "预览时长必须为 30 或 60 秒"})
+    return _enqueue_render_job(
+        session,
+        project_id,
+        workflow="timeline_preview_render",
+        job_type="timeline_preview_render",
+        stage="render",
+        request=payload.model_dump(),
+    )
+
+
+@router.post("/projects/{project_id}/jobs/final-render")
+def enqueue_final_render_job(
+    project_id: str, session: Session = Depends(get_session)
+) -> dict:
+    return _enqueue_render_job(
+        session,
+        project_id,
+        workflow="final_render",
+        job_type="final_render",
+        stage="visual_track",
+    )
+
+
+@router.get("/jobs/resources")
+def get_job_resources(session: Session = Depends(get_session)) -> dict:
+    return {"success": True, "data": task_service.resource_snapshot(session)}
+
+
+@router.get("/projects/{project_id}/jobs/{job_id}")
+def get_project_job(
+    project_id: str, job_id: str, session: Session = Depends(get_session)
+) -> dict:
+    task = session.get(TaskRun, job_id)
+    if not task or task.project_id != project_id:
+        raise HTTPException(status_code=404, detail={"error": "Job not found"})
+    return {"success": True, "data": task_service.serialize_task(session, task)}
+
+
+@router.post("/projects/{project_id}/jobs/{job_id}/pause")
+def pause_project_job(
+    project_id: str, job_id: str, session: Session = Depends(get_session)
+) -> dict:
+    task = session.get(TaskRun, job_id)
+    if not task or task.project_id != project_id:
+        raise HTTPException(status_code=404, detail={"error": "Job not found"})
+    task_service.request_pause(session, task)
+    session.commit()
+    if task.cancel_requested:
+        task_control.cancel(project_id)
+    return {"success": True, "data": task_service.serialize_task(session, task)}
+
+
+@router.post("/projects/{project_id}/jobs/{job_id}/resume")
+def resume_project_job(
+    project_id: str, job_id: str, session: Session = Depends(get_session)
+) -> dict:
+    task = session.get(TaskRun, job_id)
+    if not task or task.project_id != project_id:
+        raise HTTPException(status_code=404, detail={"error": "Job not found"})
+    try:
+        task_service.resume_task(session, task)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail={"error": str(exc)}) from exc
+    task_worker.wake_worker()
+    return {"success": True, "data": task_service.serialize_task(session, task)}
+
+
+@router.post("/projects/{project_id}/jobs/{job_id}/cancel")
+def cancel_project_job(
+    project_id: str, job_id: str, session: Session = Depends(get_session)
+) -> dict:
+    task = session.get(TaskRun, job_id)
+    if not task or task.project_id != project_id:
+        raise HTTPException(status_code=404, detail={"error": "Job not found"})
+    was_running = task.status == "running"
+    task_service.request_cancel(session, task)
+    session.commit()
+    if was_running:
+        task_control.cancel(project_id)
+    return {"success": True, "data": task_service.serialize_task(session, task)}
 
 
 @router.post("/projects/{project_id}/tasks/cancel")

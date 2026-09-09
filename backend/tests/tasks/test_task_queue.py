@@ -114,6 +114,40 @@ class TaskQueueTests(unittest.TestCase):
             self.assertNotEqual(second.id, first.id)
             self.assertGreater(second.queue_sequence, first.queue_sequence)
 
+    def test_resource_scheduler_skips_a_saturated_class_without_blocking_fifo(self) -> None:
+        with Session(self.engine) as session:
+            session.add_all(
+                [
+                    TaskRun(
+                        id="gpu-running",
+                        project_id="p1",
+                        queue_sequence=1,
+                        status="running",
+                        resource_class="gpu",
+                    ),
+                    TaskRun(
+                        id="gpu-queued",
+                        project_id="p2",
+                        queue_sequence=2,
+                        resource_class="gpu",
+                    ),
+                    TaskRun(
+                        id="cpu-queued",
+                        project_id="p3",
+                        queue_sequence=3,
+                        resource_class="cpu",
+                    ),
+                ]
+            )
+            session.commit()
+
+            selected = task_service.get_next_runnable_task(session)
+            resources = task_service.resource_snapshot(session)
+
+        self.assertEqual(selected.id, "cpu-queued")
+        self.assertEqual(resources["gpu"], {"limit": 1, "running": 1, "queued": 1})
+        self.assertEqual(resources["cpu"]["queued"], 1)
+
     def test_enqueue_at_ai_video_stage_sets_video_project_status(self) -> None:
         with Session(self.engine) as session:
             project = Project(id="project", name="Project", config_json="{}")
@@ -277,10 +311,16 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertIn("task_runs", table_names)
         self.assertIn("checkpoint_json", columns)
         self.assertIn("compensation_count", columns)
+        self.assertIn("job_type", columns)
+        self.assertIn("scene_id", columns)
+        self.assertIn("resource_class", columns)
+        self.assertIn("result_json", columns)
+        self.assertIn("request_json", columns)
         self.assertIn("uq_task_runs_active_project", indexes)
-        self.assertIn("uq_task_runs_single_running", indexes)
+        self.assertNotIn("uq_task_runs_single_running", indexes)
         self.assertIn("subtitle_cues", table_names)
         self.assertIn("visual_scenes", table_names)
+        self.assertIn("scene_revisions", table_names)
         self.assertIn("media_files", table_names)
         self.assertIn("media_shots", table_names)
         self.assertIn("media_keyframes", table_names)
@@ -294,7 +334,7 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertIn("avatar_clips", table_names)
         self.assertEqual(
             versions,
-            [(1,), (2,), (3,), (4,), (5,), (6,), (7,), (8,), (9,), (10,), (11,), (12,), (13,), (14,), (15,), (16,)],
+            [(1,), (2,), (3,), (4,), (5,), (6,), (7,), (8,), (9,), (10,), (11,), (12,), (13,), (14,), (15,), (16,), (17,), (18,), (19,), (20,)],
         )
 
     def test_migration_rejects_new_orphaned_project_records(self) -> None:

@@ -9,6 +9,10 @@ from app.workflows.registry import WorkflowRuntime, workflow_registry
 
 NARRATION_WORKFLOW_ID = "narration_generation"
 VIDEO_WORKFLOW_ID = "video_synthesis"
+SCENE_IMAGE_WORKFLOW_ID = "scene_image_regeneration"
+SCENE_PREVIEW_WORKFLOW_ID = "scene_preview_render"
+TIMELINE_PREVIEW_WORKFLOW_ID = "timeline_preview_render"
+FINAL_RENDER_WORKFLOW_ID = "final_render"
 
 
 def ensure_builtin_workflows_registered() -> None:
@@ -47,6 +51,60 @@ def ensure_builtin_workflows_registered() -> None:
                 produces_video=True,
                 run=_run_video_workflow,
                 initial_stage=_initial_video_stage,
+            )
+        )
+    registered = {item.id for item in workflow_registry.list()}
+    if SCENE_IMAGE_WORKFLOW_ID not in registered:
+        from app.workflows import scene_jobs
+
+        workflow_registry.register(
+            WorkflowRuntime(
+                id=SCENE_IMAGE_WORKFLOW_ID,
+                stages=frozenset({"generate"}),
+                video_stages=frozenset({"generate"}),
+                produces_video=False,
+                run=scene_jobs.run_scene_image_job,
+                initial_stage=lambda _session, _project, _include_video: "generate",
+            )
+        )
+    if SCENE_PREVIEW_WORKFLOW_ID not in registered:
+        from app.workflows import scene_jobs
+
+        workflow_registry.register(
+            WorkflowRuntime(
+                id=SCENE_PREVIEW_WORKFLOW_ID,
+                stages=frozenset({"render"}),
+                video_stages=frozenset({"render"}),
+                produces_video=False,
+                run=scene_jobs.run_scene_preview_job,
+                initial_stage=lambda _session, _project, _include_video: "render",
+            )
+        )
+    registered = {item.id for item in workflow_registry.list()}
+    if TIMELINE_PREVIEW_WORKFLOW_ID not in registered:
+        from app.workflows import render_jobs
+
+        workflow_registry.register(
+            WorkflowRuntime(
+                id=TIMELINE_PREVIEW_WORKFLOW_ID,
+                stages=frozenset({"render"}),
+                video_stages=frozenset({"render"}),
+                produces_video=False,
+                run=render_jobs.run_timeline_preview_job,
+                initial_stage=lambda _session, _project, _include_video: "render",
+            )
+        )
+    if FINAL_RENDER_WORKFLOW_ID not in registered:
+        from app.workflows import render_jobs
+
+        workflow_registry.register(
+            WorkflowRuntime(
+                id=FINAL_RENDER_WORKFLOW_ID,
+                stages=frozenset({"visual_track", "final_render"}),
+                video_stages=frozenset({"visual_track", "final_render"}),
+                produces_video=True,
+                run=render_jobs.run_final_render_job,
+                initial_stage=lambda _session, _project, _include_video: "visual_track",
             )
         )
 

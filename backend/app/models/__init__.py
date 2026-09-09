@@ -10,7 +10,7 @@ from app.models.media import (
 from app.models.narration import Segment, VoiceProfile
 from app.models.project import Project
 from app.models.settings import SystemSetting
-from app.models.storyboard import SubtitleCue, VisualScene
+from app.models.storyboard import SceneRevision, SubtitleCue, VisualScene
 from app.models.task import TaskRun
 from app.models.voice_generation import VoiceGenerationTask
 
@@ -27,6 +27,7 @@ __all__ = [
     "Project",
     "Segment",
     "SceneAssignment",
+    "SceneRevision",
     "SystemSetting",
     "SubtitleCue",
     "TaskRun",

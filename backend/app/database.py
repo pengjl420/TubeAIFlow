@@ -12,7 +12,7 @@ from sqlmodel import Session, SQLModel, create_engine
 from app.config import DATABASE_PATH
 
 
-LATEST_SCHEMA_VERSION = 16
+LATEST_SCHEMA_VERSION = 20
 logger = logging.getLogger(__name__)
 
 
@@ -450,6 +450,45 @@ def _apply_migrations() -> None:
             "ON voice_generation_tasks (status) WHERE status = 'running'",
         ],
         16: [],
+        17: [
+            "ALTER TABLE visual_scenes ADD COLUMN locked_text BOOLEAN NOT NULL DEFAULT 0",
+            "ALTER TABLE visual_scenes ADD COLUMN locked_audio BOOLEAN NOT NULL DEFAULT 0",
+            "ALTER TABLE visual_scenes ADD COLUMN locked_visual BOOLEAN NOT NULL DEFAULT 0",
+            "ALTER TABLE visual_scenes ADD COLUMN version INTEGER NOT NULL DEFAULT 1",
+            """
+            CREATE TABLE IF NOT EXISTS scene_revisions (
+                id VARCHAR NOT NULL PRIMARY KEY,
+                project_id VARCHAR NOT NULL,
+                scene_id VARCHAR NOT NULL,
+                version INTEGER NOT NULL,
+                change_type VARCHAR NOT NULL DEFAULT 'manual_edit',
+                snapshot_json VARCHAR NOT NULL,
+                created_at VARCHAR NOT NULL
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_scene_revisions_project_id ON scene_revisions (project_id)",
+            "CREATE INDEX IF NOT EXISTS ix_scene_revisions_scene_id ON scene_revisions (scene_id)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_scene_revisions_scene_version ON scene_revisions (scene_id, version)",
+        ],
+        18: [
+            "ALTER TABLE task_runs ADD COLUMN job_type VARCHAR NOT NULL DEFAULT 'project_workflow'",
+            "ALTER TABLE task_runs ADD COLUMN scene_id VARCHAR",
+            "ALTER TABLE task_runs ADD COLUMN resource_class VARCHAR NOT NULL DEFAULT 'cpu'",
+            "ALTER TABLE task_runs ADD COLUMN pause_requested BOOLEAN NOT NULL DEFAULT 0",
+            "ALTER TABLE task_runs ADD COLUMN progress FLOAT NOT NULL DEFAULT 0",
+            "ALTER TABLE task_runs ADD COLUMN max_retries INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE task_runs ADD COLUMN error_code VARCHAR",
+            "ALTER TABLE task_runs ADD COLUMN result_json VARCHAR NOT NULL DEFAULT '{}'",
+            "CREATE INDEX IF NOT EXISTS ix_task_runs_job_type ON task_runs (job_type)",
+            "CREATE INDEX IF NOT EXISTS ix_task_runs_scene_id ON task_runs (scene_id)",
+            "CREATE INDEX IF NOT EXISTS ix_task_runs_resource_class ON task_runs (resource_class)",
+        ],
+        19: [
+            "DROP INDEX IF EXISTS uq_task_runs_single_running",
+        ],
+        20: [
+            "ALTER TABLE task_runs ADD COLUMN request_json VARCHAR NOT NULL DEFAULT '{}'",
+        ],
     }
     with engine.begin() as connection:
         connection.exec_driver_sql(
@@ -570,6 +609,8 @@ def _install_referential_integrity_triggers(connection) -> None:
         ("task_runs", "project_id", "projects", "id"),
         ("subtitle_cues", "project_id", "projects", "id"),
         ("visual_scenes", "project_id", "projects", "id"),
+        ("scene_revisions", "project_id", "projects", "id"),
+        ("scene_revisions", "scene_id", "visual_scenes", "id"),
         ("media_shots", "media_file_id", "media_files", "id"),
         ("media_keyframes", "media_shot_id", "media_shots", "id"),
         ("scene_assignments", "project_id", "projects", "id"),

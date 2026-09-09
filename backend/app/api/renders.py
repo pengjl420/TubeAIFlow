@@ -22,6 +22,7 @@ from app.services.rendering import (
     rough_cut_service,
     scene_renderer,
     timeline_composer,
+    timeline_editor_service,
     visual_track_composer,
 )
 
@@ -33,6 +34,45 @@ class VideoSettingsRequest(BaseModel):
     media_video_dir: str
 
 
+class TimelineClipUpdateRequest(BaseModel):
+    sequence_index: int | None = None
+    display_duration_ms: int | None = None
+    trim_start_ms: int | None = None
+    trim_end_ms: int | None = None
+    playback_speed: float | None = None
+    motion_type: str | None = None
+    zoom_start: float | None = None
+    zoom_end: float | None = None
+    pan_direction: str | None = None
+    crop_anchor: str | None = None
+    transition: str | None = None
+
+
+@router.get("/projects/{project_id}/timeline/editor")
+def get_timeline_editor(project_id: str, session: Session = Depends(get_session)) -> dict:
+    project = _require_project(session, project_id)
+    return {"success": True, "data": timeline_editor_service.timeline(session, project)}
+
+
+@router.put("/projects/{project_id}/timeline/clips/{clip_id}")
+def update_timeline_clip(
+    project_id: str,
+    clip_id: str,
+    payload: TimelineClipUpdateRequest,
+    session: Session = Depends(get_session),
+) -> dict:
+    project = _require_project(session, project_id)
+    try:
+        data = timeline_editor_service.update_visual_clip(
+            session, project, clip_id, payload.model_dump(exclude_unset=True)
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail={"error": str(exc)}) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+    return {"success": True, "data": data}
+
+
 @router.post("/projects/{project_id}/video/settings")
 def save_video_settings(
     project_id: str,
@@ -41,11 +81,15 @@ def save_video_settings(
 ) -> dict:
     project = project_service.get_project(session, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
+        raise HTTPException(
+            status_code=404, detail={"success": False, "error": "Project not found"}
+        )
     try:
         return {
             "success": True,
-            "data": rough_cut_service.save_video_settings(session, project, payload.media_video_dir),
+            "data": rough_cut_service.save_video_settings(
+                session, project, payload.media_video_dir
+            ),
         }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"success": False, "error": str(exc)}) from exc
@@ -55,7 +99,9 @@ def save_video_settings(
 def compose_video(project_id: str, session: Session = Depends(get_session)) -> dict:
     project = project_service.get_project(session, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
+        raise HTTPException(
+            status_code=404, detail={"success": False, "error": "Project not found"}
+        )
     try:
         project = project_service.ensure_output_filename(session, project)
         with task_control.controlled(project_id, "video"):
@@ -79,7 +125,9 @@ def compose_video(project_id: str, session: Session = Depends(get_session)) -> d
 def video_status(project_id: str, session: Session = Depends(get_session)) -> dict:
     project = project_service.get_project(session, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
+        raise HTTPException(
+            status_code=404, detail={"success": False, "error": "Project not found"}
+        )
     return {"success": True, "data": rough_cut_service.read_video_progress(project)}
 
 
@@ -129,16 +177,11 @@ def intelligent_render_status(project_id: str, session: Session = Depends(get_se
     )
     scene_ids = {scene.id for scene in scenes}
     assignments = list(
-        session.exec(
-            select(SceneAssignment).where(SceneAssignment.project_id == project_id)
-        ).all()
+        session.exec(select(SceneAssignment).where(SceneAssignment.project_id == project_id)).all()
     )
     assignments = [item for item in assignments if item.scene_id in scene_ids]
     scene_coverages = [timeline_composer.scene_coverage(session, scene) for scene in scenes]
-    completed_scene_count = sum(
-        coverage["complete"]
-        for coverage in scene_coverages
-    )
+    completed_scene_count = sum(coverage["complete"] for coverage in scene_coverages)
     rendered = sum(scene_renderer.scene_output_path(project, scene).is_file() for scene in scenes)
     work_dir = get_project_work_dir(project, get_settings().workspace_dir)
     intelligent_render_complete = (work_dir / "reports" / "render_report.json").is_file()
@@ -175,5 +218,7 @@ def intelligent_render_status(project_id: str, session: Session = Depends(get_se
 def _require_project(session: Session, project_id: str):
     project = project_service.get_project(session, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
+        raise HTTPException(
+            status_code=404, detail={"success": False, "error": "Project not found"}
+        )
     return project

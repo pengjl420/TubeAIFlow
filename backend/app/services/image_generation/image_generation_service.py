@@ -61,6 +61,17 @@ def generate_project_images(session: Session, project: Project) -> dict:
     )
 
 
+def regenerate_scene_images(
+    session: Session, project: Project, scene_id: str
+) -> dict:
+    scene = session.get(VisualScene, scene_id)
+    if not scene or scene.project_id != project.id:
+        raise ValueError("Visual scene does not exist")
+    if scene.locked_visual:
+        raise ValueError("Scene visual is locked")
+    return _generate(session, project, [scene], force=True)
+
+
 def _generate(
     session: Session,
     project: Project,

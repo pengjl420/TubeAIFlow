@@ -40,6 +40,10 @@ def _is_video_task(task: TaskRun, stage: str | None = None) -> bool:
         return task.workflow == VIDEO_WORKFLOW_ID
 
 
+def _updates_project_lifecycle(task: TaskRun) -> bool:
+    return task.job_type in {"project_workflow", "final_render"} or bool(task.batch_id)
+
+
 def start_worker() -> None:
     global _worker_thread
     with _worker_lock:
@@ -100,13 +104,14 @@ def recover_interrupted_tasks(session: Session) -> int:
         session.add(task)
         project = session.get(Project, task.project_id)
         if project:
-            project.status = (
-                "cancelled"
-                if task.status == "cancelled"
-                else "video_in_progress"
-                if _is_video_task(task)
-                else "narration_in_progress"
-            )
+            if _updates_project_lifecycle(task):
+                project.status = (
+                    "cancelled"
+                    if task.status == "cancelled"
+                    else "video_in_progress"
+                    if _is_video_task(task)
+                    else "narration_in_progress"
+                )
             project.updated_at = now
             session.add(project)
         if item:
@@ -163,11 +168,7 @@ def recover_interrupted_tasks(session: Session) -> int:
 
 def process_next_task() -> bool:
     with Session(engine) as session:
-        task = session.exec(
-            select(TaskRun)
-            .where(TaskRun.status == "queued")
-            .order_by(TaskRun.queue_sequence, TaskRun.created_at, TaskRun.id)
-        ).first()
+        task = task_service.get_next_runnable_task(session)
         if not task:
             return False
 
@@ -194,11 +195,12 @@ def process_next_task() -> bool:
         task.started_at = task.started_at or now
         task.updated_at = now
         task.error_message = None
-        project.status = (
-            "video_in_progress"
-            if _is_video_task(task)
-            else "narration_in_progress"
-        )
+        if _updates_project_lifecycle(task):
+            project.status = (
+                "video_in_progress"
+                if _is_video_task(task)
+                else "narration_in_progress"
+            )
         project.updated_at = now
         session.add(task)
         session.add(project)
@@ -241,11 +243,12 @@ def process_next_task() -> bool:
                 session.add(current_item)
             current_project = session.get(Project, current.project_id)
             if current_project:
-                current_project.status = (
-                    "video_in_progress"
-                    if _is_video_task(current, stage)
-                    else "narration_in_progress"
-                )
+                if _updates_project_lifecycle(current):
+                    current_project.status = (
+                        "video_in_progress"
+                        if _is_video_task(current, stage)
+                        else "narration_in_progress"
+                    )
                 current_project.updated_at = changed_at
                 session.add(current_project)
             session.commit()
@@ -308,6 +311,7 @@ def _complete_task(session: Session, task_id: str) -> None:
     task.status = "completed"
     task.current_stage = "completed"
     task.cancel_requested = False
+    task.pause_requested = False
     task.lease_owner = None
     task.heartbeat_at = now
     task.finished_at = now
@@ -317,11 +321,12 @@ def _complete_task(session: Session, task_id: str) -> None:
     session.add(task)
     project = session.get(Project, task.project_id)
     if project:
-        project.status = (
-            "completed"
-            if get_workflow_runtime(task.workflow).produces_video or task.include_video
-            else "narration_ready"
-        )
+        if _updates_project_lifecycle(task):
+            project.status = (
+                "completed"
+                if get_workflow_runtime(task.workflow).produces_video or task.include_video
+                else "narration_ready"
+            )
         project.updated_at = now
         session.add(project)
     item = session.get(BatchItem, task.batch_item_id) if task.batch_item_id else None
@@ -354,11 +359,13 @@ def _fail_task(
     task.finished_at = now
     task.updated_at = now
     task.error_message = (error or "生成失败")[-4000:]
+    task.error_code = "JOB_EXECUTION_FAILED"
     _append_checkpoint_event(task, "failed", task.current_stage, now, task.error_message)
     session.add(task)
     project = session.get(Project, task.project_id)
     if project:
-        project.status = "failed"
+        if _updates_project_lifecycle(task):
+            project.status = "failed"
         project.updated_at = now
         session.add(project)
     if item:
@@ -390,24 +397,27 @@ def _cancel_task(session: Session, task_id: str, error: str) -> None:
     batch = session.get(BatchJob, task.batch_id) if task.batch_id else None
     item = session.get(BatchItem, task.batch_item_id) if task.batch_item_id else None
     paused_by_batch = bool(batch and batch.status == "paused")
-    task.status = "paused" if paused_by_batch else "cancelled"
+    paused = paused_by_batch or task.pause_requested
+    task.status = "paused" if paused else "cancelled"
     task.cancel_requested = False
+    task.pause_requested = False
     task.lease_owner = None
     task.heartbeat_at = now
     task.updated_at = now
-    task.finished_at = None if paused_by_batch else now
-    task.error_message = "批次已暂停，可从当前阶段继续" if paused_by_batch else error
-    _append_checkpoint_event(task, "paused" if paused_by_batch else "cancelled", task.current_stage, now)
+    task.finished_at = None if paused else now
+    task.error_message = "任务已暂停，可从当前阶段继续" if paused else error
+    _append_checkpoint_event(task, "paused" if paused else "cancelled", task.current_stage, now)
     session.add(task)
     project = session.get(Project, task.project_id)
     if project:
-        project.status = "created" if paused_by_batch else "cancelled"
+        if _updates_project_lifecycle(task):
+            project.status = "created" if paused else "cancelled"
         project.updated_at = now
         session.add(project)
     if item:
-        item.status = "pending" if paused_by_batch else "failed"
+        item.status = "pending" if paused else "failed"
         item.error_message = task.error_message
-        item.finished_at = None if paused_by_batch else now
+        item.finished_at = None if paused else now
         item.updated_at = now
         session.add(item)
     session.commit()

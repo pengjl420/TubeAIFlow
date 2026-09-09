@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute } from 'vue-router'
-import { CheckCircle2, CircleStop, FileAudio, FileText, Info, Loader2, Play, RefreshCw, Video } from 'lucide-vue-next'
-import { cancelProjectTask, getProject, getProjectOutputs, getProjectScript, getProjectTask, projectOutputUrl, saveProjectScript, startProjectWorkflow, type ProjectOutputs, type ProjectTask } from '../../api/projects'
+import { CheckCircle2, CircleStop, FileAudio, FileText, History, Info, Loader2, Lock, Play, RefreshCw, Save, Video } from 'lucide-vue-next'
+import { cancelProjectTask, getProject, getProjectOutputs, getProjectScenes, getProjectScript, getProjectTask, getSceneRevisions, projectOutputUrl, regenerateProjectScene, restoreSceneRevision, saveProjectScript, startProjectWorkflow, updateProjectScene, type ProjectOutputs, type ProjectTask } from '../../api/projects'
 import type { Project } from '../../types/project'
+import type { SceneRevision, VisualScene } from '../../types/storyboard'
 import { confirmAction, usePageFeedback } from '../../services/feedback'
+import SceneVisualWorkspace from '../../components/projects/SceneVisualWorkspace.vue'
+import TimelineWorkspace from '../../components/projects/TimelineWorkspace.vue'
 
 const route = useRoute()
 const projectId = computed(() => String(route.params.projectId))
@@ -13,6 +16,10 @@ const task = ref<ProjectTask | null>(null)
 const outputs = ref<ProjectOutputs | null>(null)
 const script = ref('')
 const savedScript = ref('')
+const scenes = ref<VisualScene[]>([])
+const selectedSceneId = ref('')
+const sceneDraft = ref<VisualScene | null>(null)
+const revisions = ref<SceneRevision[]>([])
 const selectedStage = ref('script')
 const loading = ref(true)
 const saving = ref(false)
@@ -24,6 +31,11 @@ usePageFeedback(error, message, { errorTitle: '项目工作流错误' })
 
 const active = computed(() => Boolean(task.value?.running || task.value?.queued))
 const scriptDirty = computed(() => script.value !== savedScript.value)
+const selectedScene = computed(() => scenes.value.find(scene => scene.id === selectedSceneId.value) || null)
+const sceneDirty = computed(() => Boolean(
+  sceneDraft.value && selectedScene.value
+  && JSON.stringify(sceneDraft.value) !== JSON.stringify(selectedScene.value),
+))
 const scriptCharacters = computed(() => script.value.trim().length)
 const estimatedMinutes = computed(() => Math.max(0, Math.round(scriptCharacters.value / 260)))
 const stages = [
@@ -45,8 +57,8 @@ const selectedStageDetail = computed(() => stageDetails[selectedStage.value])
 async function load(silent = false) {
   if (!silent) loading.value = true
   try {
-    const [projectData, taskData, outputData, scriptData] = await Promise.all([
-      getProject(projectId.value), getProjectTask(projectId.value), getProjectOutputs(projectId.value), getProjectScript(projectId.value),
+    const [projectData, taskData, outputData, scriptData, sceneData] = await Promise.all([
+      getProject(projectId.value), getProjectTask(projectId.value), getProjectOutputs(projectId.value), getProjectScript(projectId.value), getProjectScenes(projectId.value),
     ])
     project.value = projectData
     task.value = taskData
@@ -55,12 +67,106 @@ async function load(silent = false) {
       script.value = scriptData.text
       savedScript.value = scriptData.text
     }
+    scenes.value = sceneData
+    const currentScene = sceneData.find(scene => scene.id === selectedSceneId.value) || sceneData[0]
+    if (!sceneDirty.value && currentScene) setSceneDraft(currentScene)
+    if (!currentScene) {
+      selectedSceneId.value = ''
+      sceneDraft.value = null
+    }
     if (taskData?.stage && stages.some(item => item[0] === taskData.stage)) selectedStage.value = taskData.stage
   } catch (reason) {
     if (!silent) error.value = reason instanceof Error ? reason.message : '加载项目失败'
   } finally {
     if (!silent) loading.value = false
   }
+}
+
+function cloneScene(scene: VisualScene): VisualScene {
+  return JSON.parse(JSON.stringify(scene)) as VisualScene
+}
+
+function setSceneDraft(scene: VisualScene) {
+  selectedSceneId.value = scene.id
+  sceneDraft.value = cloneScene(scene)
+  void loadRevisions(scene.id)
+}
+
+async function loadRevisions(sceneId: string) {
+  try { revisions.value = await getSceneRevisions(projectId.value, sceneId) }
+  catch { revisions.value = [] }
+}
+
+async function selectScene(scene: VisualScene) {
+  if (scene.id === selectedSceneId.value) return
+  if (sceneDirty.value) {
+    const discard = await confirmAction({ title: 'Scene 尚未保存', description: '切换 Scene 会丢失当前修改。', confirmText: '放弃修改', tone: 'warning' })
+    if (!discard) return
+  }
+  setSceneDraft(scene)
+}
+
+async function saveScene() {
+  const draft = sceneDraft.value
+  if (!draft?.storyboard || !draft.narration.trim()) return
+  saving.value = true
+  try {
+    const updated = await updateProjectScene(projectId.value, draft.id, {
+      narration: draft.narration,
+      storyboard: draft.storyboard,
+      status: 'reviewed',
+      locked_text: draft.locked_text,
+      locked_audio: draft.locked_audio,
+      locked_visual: draft.locked_visual,
+    })
+    const index = scenes.value.findIndex(scene => scene.id === updated.id)
+    if (index >= 0) scenes.value[index] = updated
+    setSceneDraft(updated)
+    message.value = `Scene ${updated.scene_index} 已保存`
+  } catch (reason) {
+    error.value = reason instanceof Error ? reason.message : '保存 Scene 失败'
+  } finally { saving.value = false }
+}
+
+async function restoreRevision(revision: SceneRevision) {
+  const restore = await confirmAction({
+    title: `恢复 Scene 版本 ${revision.version}`,
+    description: '当前版本会先自动保存到历史，然后恢复所选版本。',
+    confirmText: '恢复此版本',
+    tone: 'warning',
+  })
+  if (!restore || !sceneDraft.value) return
+  operating.value = true
+  try {
+    const updated = await restoreSceneRevision(projectId.value, sceneDraft.value.id, revision.id)
+    const index = scenes.value.findIndex(scene => scene.id === updated.id)
+    if (index >= 0) scenes.value[index] = updated
+    setSceneDraft(updated)
+    message.value = `已恢复到版本 ${revision.version}`
+  } catch (reason) {
+    error.value = reason instanceof Error ? reason.message : '恢复 Scene 版本失败'
+  } finally { operating.value = false }
+}
+
+async function regenerateScene() {
+  if (!sceneDraft.value || sceneDraft.value.locked_visual) return
+  const regenerate = await confirmAction({
+    title: `重新生成 Scene ${sceneDraft.value.scene_index}`,
+    description: '将重新生成视觉规划并解除当前素材分配；当前版本会保存在历史中。',
+    confirmText: '重新生成',
+    tone: 'warning',
+  })
+  if (!regenerate) return
+  operating.value = true
+  try {
+    const updated = await regenerateProjectScene(projectId.value, sceneDraft.value.id)
+    const index = scenes.value.findIndex(scene => scene.id === updated.id)
+    if (index >= 0) scenes.value[index] = updated
+    setSceneDraft(updated)
+    message.value = `Scene ${updated.scene_index} 已重新生成`
+  } catch (reason) {
+    error.value = reason instanceof Error ? reason.message : '重新生成 Scene 失败'
+  } finally { operating.value = false }
 }
 
 async function saveScript() {
@@ -106,15 +212,22 @@ function taskStatusLabel(status?: string) {
   return ({ queued: '排队中', running: '运行中', paused: '已暂停', completed: '已完成', failed: '失败', cancelled: '已取消', idle: '未开始' } as Record<string, string>)[status || 'idle'] || status || '未开始'
 }
 
+function formatTime(milliseconds: number) {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000))
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+}
+
 function handleBeforeUnload(event: BeforeUnloadEvent) {
-  if (!scriptDirty.value) return
+  if (!scriptDirty.value && !sceneDirty.value) return
   event.preventDefault()
   event.returnValue = ''
 }
 
 async function canLeaveProject() {
-  if (!scriptDirty.value) return true
-  return confirmAction({ title: '脚本尚未保存', description: '离开项目会丢失当前脚本修改。', confirmText: '放弃修改并离开', tone: 'warning' })
+  if (!scriptDirty.value && !sceneDirty.value) return true
+  return confirmAction({ title: '修改尚未保存', description: '离开项目会丢失当前脚本或 Scene 修改。', confirmText: '放弃修改并离开', tone: 'warning' })
 }
 
 onBeforeRouteLeave(canLeaveProject)
@@ -125,15 +238,19 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', handleBeforeU
 
 <template>
   <section v-if="project" class="workspace-page">
-    <header class="taf-sticky-heading"><div><RouterLink to="/projects">项目</RouterLink><span>/</span><strong>{{ project.name }}</strong><p>{{ project.output_dir }}</p></div><div class="actions"><button class="secondary" @click="load()"><RefreshCw :size="15" />刷新</button><button v-if="active" class="danger" :disabled="operating" @click="cancelWorkflow"><CircleStop :size="16" />停止</button><button v-else :disabled="operating || !project.script_clean_path" @click="runWorkflow"><Play :size="16" />运行工作流</button></div></header>
+    <header class="taf-sticky-heading"><div><RouterLink to="/projects">项目</RouterLink><span>/</span><strong>{{ project.name }}</strong><p>{{ project.output_dir }}</p></div><div class="actions"><button class="secondary" @click="load()"><RefreshCw :size="15" />刷新</button><button v-if="selectedStage === 'storyboard' && sceneDraft" class="secondary" :disabled="operating || active || sceneDirty || sceneDraft.locked_visual" @click="regenerateScene"><RefreshCw :size="15" />重做 Scene</button><button v-if="active" class="danger" :disabled="operating" @click="cancelWorkflow"><CircleStop :size="16" />停止</button><button v-else :disabled="operating || !project.script_clean_path" @click="runWorkflow"><Play :size="16" />运行工作流</button></div></header>
 
     <nav class="stage-bar" aria-label="项目生产阶段"><button v-for="([id, label], index) in stages" :key="id" type="button" :class="{ reached: stageReached(id), current: task?.stage === id, selected: selectedStage === id }" :aria-current="task?.stage === id ? 'step' : undefined" @click="selectedStage = id"><span><CheckCircle2 v-if="stageReached(id)" :size="14" /><b v-else>{{ index + 1 }}</b></span><small>{{ label }}</small></button></nav>
     <section class="stage-context" aria-live="polite"><Info :size="17" /><div><strong>{{ stages.find(item => item[0] === selectedStage)?.[1] }}</strong><span>{{ selectedStageDetail.description }}</span></div><small>预期产物：{{ selectedStageDetail.output }}</small></section>
 
-    <div class="workspace-grid">
-      <aside><h2>Scene / 输入</h2><div class="scene-empty"><FileText :size="28" /><strong>{{ task && stageReached('storyboard') ? 'Scene 数据准备中' : '从脚本开始' }}</strong><span>{{ task && stageReached('storyboard') ? '完成分镜后，这里将承载 Scene 级重做、锁定与异常复核。' : '保存脚本并运行工作流后，Scene 会在这里逐步生成。' }}</span></div><div class="input-summary"><span>脚本字符</span><strong>{{ scriptCharacters.toLocaleString() }}</strong><span>预计旁白</span><strong>约 {{ estimatedMinutes }} 分钟</strong></div></aside>
-      <main><div class="panel-head"><div><h1>脚本</h1><p>导入完整逐字稿。TTS 分段与字幕切分会保持解耦。</p></div><button :disabled="saving || !script.trim() || active || !scriptDirty" @click="saveScript">{{ saving ? '保存中…' : scriptDirty ? '保存脚本' : '已保存' }}</button></div><textarea v-model="script" :disabled="active" placeholder="在此粘贴 20～60 分钟长视频逐字稿…" /><div class="editor-footer"><span :class="{ dirty: scriptDirty }">{{ scriptDirty ? '有未保存修改' : '脚本已保存' }}</span><span>{{ scriptCharacters.toLocaleString() }} 字符 · 约 {{ estimatedMinutes }} 分钟旁白</span></div><div class="privacy">默认仅在本机处理。当前项目不会自动上传完整脚本到第三方服务。</div></main>
-      <aside class="inspector"><h2>项目状态</h2><dl><dt>生命周期</dt><dd>{{ projectStatusLabel(project.status) }}</dd><dt>任务状态</dt><dd>{{ taskStatusLabel(task?.status) }}</dd><dt>当前阶段</dt><dd>{{ stages.find(item => item[0] === task?.stage)?.[1] || '尚未开始' }}</dd><dt>排队位置</dt><dd>{{ task?.queue_position || '—' }}</dd></dl><p v-if="task?.error_message" class="task-error">{{ task.error_message }}</p><h2>产物 <small v-if="outputs?.files.length">{{ outputs.files.length }}</small></h2><div class="artifacts"><a v-for="file in outputs?.files" :key="file.path" :href="projectOutputUrl(projectId, file.path)" target="_blank" rel="noopener"><FileAudio v-if="file.name.endsWith('.wav')" :size="14" /><Video v-else-if="file.name.endsWith('.mp4')" :size="14" /><FileText v-else :size="14" />{{ file.relative_path }}</a><span v-if="!outputs?.files.length">暂无输出文件</span></div></aside>
+    <div class="workspace-grid" :class="{ 'visual-mode': selectedStage === 'image_generation' || selectedStage === 'visual_track' }">
+      <SceneVisualWorkspace v-if="sceneDraft && selectedStage === 'image_generation'" :project-id="projectId" :scene="sceneDraft" />
+      <TimelineWorkspace v-if="sceneDraft && selectedStage === 'visual_track'" :project-id="projectId" :scene="sceneDraft" />
+      <aside class="scene-sidebar"><h2>Scene <small v-if="scenes.length">{{ scenes.length }}</small></h2><div v-if="scenes.length" class="scene-list"><button v-for="scene in scenes" :key="scene.id" type="button" :class="{ selected: scene.id === selectedSceneId }" @click="selectScene(scene)"><span><b>{{ String(scene.scene_index).padStart(2, '0') }}</b><small>{{ formatTime(scene.start_ms) }}–{{ formatTime(scene.end_ms) }}</small></span><strong>{{ scene.storyboard?.visual_summary || scene.narration }}</strong><em>{{ scene.status === 'reviewed' ? '已复核' : scene.status === 'generated' ? '已生成' : '草稿' }}</em></button></div><div v-else class="scene-empty"><FileText :size="28" /><strong>{{ task && stageReached('storyboard') ? 'Scene 数据准备中' : '从脚本开始' }}</strong><span>{{ task && stageReached('storyboard') ? 'Storyboard 完成后将在这里显示 Scene。' : '保存脚本并运行工作流后，Scene 会在这里逐步生成。' }}</span></div><div class="input-summary"><span>脚本字符</span><strong>{{ scriptCharacters.toLocaleString() }}</strong><span>预计旁白</span><strong>约 {{ estimatedMinutes }} 分钟</strong></div></aside>
+      <main v-if="selectedStage === 'storyboard' && sceneDraft?.storyboard" class="scene-editor"><div class="panel-head"><div><h1>Scene {{ sceneDraft.scene_index }}</h1><p>{{ formatTime(sceneDraft.start_ms) }}–{{ formatTime(sceneDraft.end_ms) }} · {{ ((sceneDraft.end_ms - sceneDraft.start_ms) / 1000).toFixed(1) }} 秒 · 版本 {{ sceneDraft.version }}</p></div><button :disabled="saving || active || !sceneDirty || !sceneDraft.narration.trim()" @click="saveScene"><Save :size="14" />{{ saving ? '保存中…' : sceneDirty ? '保存 Scene' : '已保存' }}</button></div><div class="lock-bar"><Lock :size="14" /><label><input v-model="sceneDraft.locked_text" type="checkbox" />锁定文本</label><label><input v-model="sceneDraft.locked_audio" type="checkbox" />锁定音频</label><label><input v-model="sceneDraft.locked_visual" type="checkbox" />锁定视觉</label><small>锁定内容不会被自动工作流覆盖</small></div><div class="scene-form"><label class="wide"><span>旁白文本</span><textarea v-model="sceneDraft.narration" rows="5" :disabled="selectedScene?.locked_text" /></label><label><span>视觉类型</span><input v-model="sceneDraft.storyboard.visual_type" :disabled="selectedScene?.locked_visual" /></label><label><span>推荐来源</span><select v-model="sceneDraft.storyboard.recommended_source" :disabled="selectedScene?.locked_visual"><option value="stock_video">Stock Video</option><option value="archive">Archive</option><option value="generated_image">AI Image</option><option value="generated_video">AI Video</option><option value="chart">Chart</option><option value="map">Map</option><option value="timeline">Timeline</option><option value="document">Document</option><option value="text_card">Text Card</option></select></label><label class="wide"><span>视觉摘要</span><textarea v-model="sceneDraft.storyboard.visual_summary" rows="3" :disabled="selectedScene?.locked_visual" /></label><label><span>场景分类</span><input v-model="sceneDraft.storyboard.scene_category" :disabled="selectedScene?.locked_visual" /></label><label><span>情绪</span><input v-model="sceneDraft.storyboard.mood" :disabled="selectedScene?.locked_visual" /></label><label class="wide"><span>素材搜索词</span><input v-model="sceneDraft.storyboard.primary_query" :disabled="selectedScene?.locked_visual" /></label><label class="wide"><span>图片 Prompt</span><textarea v-model="sceneDraft.storyboard.image_prompt" rows="5" :disabled="selectedScene?.locked_visual" /></label><label class="wide"><span>Negative Prompt</span><textarea v-model="sceneDraft.storyboard.negative_prompt" rows="3" :disabled="selectedScene?.locked_visual" /></label></div><div class="editor-footer"><span :class="{ dirty: sceneDirty }">{{ sceneDirty ? '有未保存修改' : 'Scene 已保存' }}</span><span>置信度 {{ Math.round((sceneDraft.confidence || 0) * 100) }}% · 事实风险 {{ sceneDraft.storyboard.fact_risk }}</span></div></main>
+      <main v-else-if="selectedStage === 'storyboard'" class="scene-editor-empty"><FileText :size="34" /><h1>暂无可编辑 Scene</h1><p>先运行到 Storyboard 阶段，系统会根据旁白节奏生成 Scene。</p></main>
+      <main v-else><div class="panel-head"><div><h1>脚本</h1><p>导入完整逐字稿。TTS 分段与字幕切分会保持解耦。</p></div><button :disabled="saving || !script.trim() || active || !scriptDirty" @click="saveScript">{{ saving ? '保存中…' : scriptDirty ? '保存脚本' : '已保存' }}</button></div><textarea v-model="script" :disabled="active" placeholder="在此粘贴 20～60 分钟长视频逐字稿…" /><div class="editor-footer"><span :class="{ dirty: scriptDirty }">{{ scriptDirty ? '有未保存修改' : '脚本已保存' }}</span><span>{{ scriptCharacters.toLocaleString() }} 字符 · 约 {{ estimatedMinutes }} 分钟旁白</span></div><div class="privacy">默认仅在本机处理。当前项目不会自动上传完整脚本到第三方服务。</div></main>
+      <aside class="inspector"><template v-if="selectedStage === 'storyboard' && sceneDraft"><h2><History :size="13" />版本历史 <small>当前 v{{ sceneDraft.version }}</small></h2><div class="revision-list"><button v-for="revision in revisions" :key="revision.id" type="button" :disabled="operating" @click="restoreRevision(revision)"><span>版本 {{ revision.version }}</span><small>{{ new Date(revision.created_at).toLocaleString() }}</small></button><span v-if="!revisions.length">保存修改后会在这里保留历史版本</span></div></template><template v-else><h2>项目状态</h2><dl><dt>生命周期</dt><dd>{{ projectStatusLabel(project.status) }}</dd><dt>任务状态</dt><dd>{{ taskStatusLabel(task?.status) }}</dd><dt>当前阶段</dt><dd>{{ stages.find(item => item[0] === task?.stage)?.[1] || '尚未开始' }}</dd><dt>排队位置</dt><dd>{{ task?.queue_position || '—' }}</dd></dl><p v-if="task?.error_message" class="task-error">{{ task.error_message }}</p></template><h2>产物 <small v-if="outputs?.files.length">{{ outputs.files.length }}</small></h2><div class="artifacts"><a v-for="file in outputs?.files" :key="file.path" :href="projectOutputUrl(projectId, file.path)" target="_blank" rel="noopener"><FileAudio v-if="file.name.endsWith('.wav')" :size="14" /><Video v-else-if="file.name.endsWith('.mp4')" :size="14" /><FileText v-else :size="14" />{{ file.relative_path }}</a><span v-if="!outputs?.files.length">暂无输出文件</span></div></aside>
     </div>
     <footer class="job-strip"><Loader2 v-if="active" class="spin" :size="16" /><CheckCircle2 v-else :size="16" /><strong>{{ active ? `正在执行：${task?.stage}` : '本地 Engine 已就绪' }}</strong><span>所有耗时步骤通过持久化任务运行，关闭页面不会中断任务。</span></footer>
   </section>
@@ -141,5 +258,10 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', handleBeforeU
 </template>
 
 <style scoped>
-.workspace-page{color:#172033}.workspace-page>header{align-items:center;display:flex;justify-content:space-between;margin-bottom:14px}.workspace-page header>div:first-child{align-items:center;display:flex;flex-wrap:wrap;font-size:12px;gap:7px}.workspace-page header a{color:#075bf5}.workspace-page header p{color:#7f8a9d;flex-basis:100%;font-size:11px;margin:1px 0}.actions{display:flex;gap:7px}.actions button,.panel-head button{align-items:center;background:#075bf5;border-radius:7px;color:#fff;display:flex;font-size:12px;font-weight:700;gap:5px;min-height:38px;padding:7px 12px}.actions .secondary{background:#fff;border:1px solid #dae2ed;color:#536078}.actions .danger{background:#d94956}.stage-bar{background:#fff;border:1px solid #e0e6ef;border-radius:10px;display:grid;grid-template-columns:repeat(8,1fr);margin-bottom:8px;padding:8px}.stage-bar button{align-items:center;background:transparent;border-radius:7px;color:#8d98a9;display:flex;gap:7px;min-height:42px;padding:6px;position:relative}.stage-bar button:not(:last-child):after{background:#e1e6ed;content:'';height:1px;position:absolute;right:2px;width:22%}.stage-bar button:hover,.stage-bar button.selected{background:#f4f7fb}.stage-bar button.selected{box-shadow:inset 0 0 0 1px #c9dcff}.stage-bar span{align-items:center;background:#eef1f5;border-radius:50%;display:flex;height:25px;justify-content:center;width:25px}.stage-bar b{font-size:10px}.stage-bar small{font-size:11px}.stage-bar .reached{color:#0a9b6c}.stage-bar .reached span{background:#e4f8ef}.stage-bar .current{color:#075bf5;font-weight:800}.stage-context{align-items:center;background:#f3f7ff;border:1px solid #dce8ff;border-radius:8px;color:#58709a;display:flex;gap:9px;margin-bottom:12px;padding:9px 11px}.stage-context>div{display:grid;gap:2px}.stage-context strong{color:#29466f;font-size:12px}.stage-context span{font-size:11px}.stage-context>small{font-size:10px;margin-left:auto}.workspace-grid{display:grid;gap:12px;grid-template-columns:210px minmax(420px,1fr) 250px;min-height:520px}.workspace-grid>aside,.workspace-grid>main{background:#fff;border:1px solid #e0e6ee;border-radius:10px;padding:14px}.workspace-grid h2{font-size:13px;margin:0 0 12px}.workspace-grid h2 small{color:#8490a3;float:right;font-size:11px}.scene-empty{align-items:center;color:#8490a3;display:flex;flex-direction:column;gap:7px;padding:50px 10px;text-align:center}.scene-empty strong{color:#526078;font-size:13px}.scene-empty span{font-size:11px;line-height:1.6}.input-summary{border-top:1px solid #edf0f4;display:grid;font-size:11px;gap:7px;grid-template-columns:1fr auto;padding-top:12px}.input-summary span{color:#7f8a9d}.panel-head{align-items:start;display:flex;justify-content:space-between}.panel-head h1{font-size:19px;margin:0}.panel-head p{color:#8290a4;font-size:11px;margin:5px 0 12px}.workspace-grid textarea{border:1px solid #dce3ec;border-radius:8px;font-family:inherit;font-size:13px;line-height:1.8;min-height:390px;padding:13px;resize:vertical;width:100%}.editor-footer{align-items:center;color:#7b8799;display:flex;font-size:11px;justify-content:space-between;padding-top:7px}.editor-footer span:first-child{color:#0a9567}.editor-footer .dirty{color:#a96a08}.privacy{background:#f4f8ff;border-radius:7px;color:#55709b;font-size:11px;margin-top:9px;padding:8px 10px}.inspector dl{display:grid;font-size:11px;gap:8px;grid-template-columns:75px 1fr}.inspector dt{color:#7f8a9d}.inspector dd{font-weight:700;margin:0;overflow:hidden;text-overflow:ellipsis}.inspector h2:nth-of-type(2){border-top:1px solid #ebeff4;margin-top:16px;padding-top:14px}.task-error{background:#fff0f1;color:#c23d49;font-size:11px;padding:8px}.artifacts{display:grid;gap:6px;max-height:300px;overflow:auto}.artifacts a{align-items:center;color:#41628e;display:flex;font-size:11px;gap:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.artifacts>span{color:#9aa4b3;font-size:11px}.job-strip{align-items:center;background:#172033;border-radius:9px;color:#fff;display:flex;font-size:11px;gap:7px;margin-top:12px;padding:11px 13px}.job-strip span{color:#aeb9ca;margin-left:auto}.spin{animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.workspace-loading{color:#7d899b;padding:60px;text-align:center}@media(max-width:1050px){.workspace-grid{grid-template-columns:1fr}.workspace-grid>aside:first-child{display:none}.stage-bar{overflow:auto}.stage-bar button{min-width:105px}.stage-context>small{display:none}}@media(max-width:700px){.workspace-page>header{align-items:flex-start;display:grid;gap:10px}.stage-bar{display:flex}.stage-context span{display:none}.job-strip span{display:none}.editor-footer{align-items:flex-start;display:grid;gap:3px}}
+.workspace-page{color:#172033}.workspace-page>header{align-items:center;display:flex;justify-content:space-between;margin-bottom:14px}.workspace-page header>div:first-child{align-items:center;display:flex;flex-wrap:wrap;font-size:12px;gap:7px}.workspace-page header a{color:#075bf5}.workspace-page header p{color:#7f8a9d;flex-basis:100%;font-size:11px;margin:1px 0}.actions{display:flex;gap:7px}.actions button,.panel-head button{align-items:center;background:#075bf5;border-radius:7px;color:#fff;display:flex;font-size:12px;font-weight:700;gap:5px;min-height:38px;padding:7px 12px}.actions .secondary{background:#fff;border:1px solid #dae2ed;color:#536078}.actions .danger{background:#d94956}.stage-bar{background:#fff;border:1px solid #e0e6ef;border-radius:10px;display:grid;grid-template-columns:repeat(8,1fr);margin-bottom:8px;padding:8px}.stage-bar button{align-items:center;background:transparent;border-radius:7px;color:#8d98a9;display:flex;gap:7px;min-height:42px;padding:6px;position:relative}.stage-bar button:not(:last-child):after{background:#e1e6ed;content:'';height:1px;position:absolute;right:2px;width:22%}.stage-bar button:hover,.stage-bar button.selected{background:#f4f7fb}.stage-bar button.selected{box-shadow:inset 0 0 0 1px #c9dcff}.stage-bar span{align-items:center;background:#eef1f5;border-radius:50%;display:flex;height:25px;justify-content:center;width:25px}.stage-bar b{font-size:10px}.stage-bar small{font-size:11px}.stage-bar .reached{color:#0a9b6c}.stage-bar .reached span{background:#e4f8ef}.stage-bar .current{color:#075bf5;font-weight:800}.stage-context{align-items:center;background:#f3f7ff;border:1px solid #dce8ff;border-radius:8px;color:#58709a;display:flex;gap:9px;margin-bottom:12px;padding:9px 11px}.stage-context>div{display:grid;gap:2px}.stage-context strong{color:#29466f;font-size:12px}.stage-context span{font-size:11px}.stage-context>small{font-size:10px;margin-left:auto}.workspace-grid{display:grid;gap:12px;grid-template-columns:230px minmax(420px,1fr) 250px;min-height:520px}.workspace-grid>aside,.workspace-grid>main{background:#fff;border:1px solid #e0e6ee;border-radius:10px;padding:14px}.workspace-grid h2{font-size:13px;margin:0 0 12px}.workspace-grid h2 small{color:#8490a3;float:right;font-size:11px}.scene-empty,.scene-editor-empty{align-items:center;color:#8490a3;display:flex;flex-direction:column;gap:7px;padding:50px 10px;text-align:center}.scene-empty strong{color:#526078;font-size:13px}.scene-empty span,.scene-editor-empty p{font-size:11px;line-height:1.6}.scene-editor-empty h1{color:#526078;font-size:16px;margin:4px 0 0}.scene-list{display:grid;gap:6px;max-height:390px;overflow:auto}.scene-list button{background:#f7f9fc;border:1px solid transparent;border-radius:8px;color:#536078;display:grid;gap:5px;padding:9px;text-align:left;width:100%}.scene-list button:hover{border-color:#cbd9ee}.scene-list button.selected{background:#edf4ff;border-color:#9fc0f6}.scene-list button>span{align-items:center;display:flex;justify-content:space-between}.scene-list b{color:#075bf5;font-size:11px}.scene-list small{color:#8490a3;font-size:9px}.scene-list strong{display:-webkit-box;font-size:11px;font-weight:650;line-height:1.45;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:2}.scene-list em{color:#8090a7;font-size:9px;font-style:normal}.input-summary{border-top:1px solid #edf0f4;display:grid;font-size:11px;gap:7px;grid-template-columns:1fr auto;margin-top:12px;padding-top:12px}.input-summary span{color:#7f8a9d}.panel-head{align-items:start;display:flex;justify-content:space-between}.panel-head h1{font-size:19px;margin:0}.panel-head p{color:#8290a4;font-size:11px;margin:5px 0 12px}.workspace-grid>main:not(.scene-editor) textarea{border:1px solid #dce3ec;border-radius:8px;font-family:inherit;font-size:13px;line-height:1.8;min-height:390px;padding:13px;resize:vertical;width:100%}.scene-form{display:grid;gap:11px;grid-template-columns:1fr 1fr}.scene-form label{display:grid;gap:5px}.scene-form label.wide{grid-column:1/-1}.scene-form label>span{color:#526078;font-size:11px;font-weight:700}.scene-form input,.scene-form select,.scene-form textarea{background:#fff;border:1px solid #dce3ec;border-radius:7px;font:inherit;font-size:12px;line-height:1.55;min-height:38px;padding:8px;width:100%}.scene-form textarea{min-height:auto;resize:vertical}.scene-form input:focus,.scene-form select:focus,.scene-form textarea:focus{border-color:#75a8f5;box-shadow:0 0 0 3px rgba(7,91,245,.08);outline:0}.editor-footer{align-items:center;color:#7b8799;display:flex;font-size:11px;justify-content:space-between;padding-top:7px}.editor-footer span:first-child{color:#0a9567}.editor-footer .dirty{color:#a96a08}.privacy{background:#f4f8ff;border-radius:7px;color:#55709b;font-size:11px;margin-top:9px;padding:8px 10px}.inspector dl{display:grid;font-size:11px;gap:8px;grid-template-columns:75px 1fr}.inspector dt{color:#7f8a9d}.inspector dd{font-weight:700;margin:0;overflow:hidden;text-overflow:ellipsis}.inspector h2:nth-of-type(2){border-top:1px solid #ebeff4;margin-top:16px;padding-top:14px}.task-error{background:#fff0f1;color:#c23d49;font-size:11px;padding:8px}.artifacts{display:grid;gap:6px;max-height:300px;overflow:auto}.artifacts a{align-items:center;color:#41628e;display:flex;font-size:11px;gap:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.artifacts>span{color:#9aa4b3;font-size:11px}.job-strip{align-items:center;background:#172033;border-radius:9px;color:#fff;display:flex;font-size:11px;gap:7px;margin-top:12px;padding:11px 13px}.job-strip span{color:#aeb9ca;margin-left:auto}.spin{animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.workspace-loading{color:#7d899b;padding:60px;text-align:center}@media(max-width:1050px){.workspace-grid{grid-template-columns:1fr}.workspace-grid>aside:first-child{display:block}.stage-bar{overflow:auto}.stage-bar button{min-width:105px}.stage-context>small{display:none}}@media(max-width:700px){.workspace-page>header{align-items:flex-start;display:grid;gap:10px}.stage-bar{display:flex}.stage-context span{display:none}.job-strip span{display:none}.editor-footer{align-items:flex-start;display:grid;gap:3px}.scene-form{grid-template-columns:1fr}.scene-form label.wide{grid-column:auto}}
+</style>
+
+<style scoped>
+.lock-bar{align-items:center;background:#f7f9fc;border:1px solid #e4e9f1;border-radius:8px;display:flex;font-size:11px;gap:12px;margin-bottom:12px;padding:9px}.lock-bar label{align-items:center;display:flex;gap:5px}.lock-bar small{color:#8490a3;margin-left:auto}.scene-form input:disabled,.scene-form select:disabled,.scene-form textarea:disabled{background:#f2f4f7;color:#8b95a5}.revision-list{display:grid;gap:6px;max-height:210px;overflow:auto}.revision-list>button{background:#f7f9fc;border:1px solid #e2e7ef;border-radius:7px;display:grid;gap:2px;padding:8px;text-align:left}.revision-list>button:hover{border-color:#9fc0f6}.revision-list span{font-size:10px}.revision-list small{color:#8792a4;font-size:9px}.revision-list>span{color:#929cad;line-height:1.5}.inspector h2{align-items:center;display:flex;gap:5px}.inspector h2 small{margin-left:auto}@media(max-width:700px){.lock-bar{align-items:flex-start;flex-wrap:wrap}.lock-bar small{flex-basis:100%;margin-left:0}}
+.workspace-grid.visual-mode>.scene-sidebar{grid-column:1}.workspace-grid.visual-mode>.visual-workspace{grid-column:2}.workspace-grid.visual-mode>main:not(.visual-workspace){display:none}.workspace-grid.visual-mode>.inspector{grid-column:3}@media(max-width:1050px){.workspace-grid.visual-mode>.scene-sidebar,.workspace-grid.visual-mode>.visual-workspace,.workspace-grid.visual-mode>.inspector{grid-column:1}}
 </style>

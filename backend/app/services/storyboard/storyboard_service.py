@@ -1,6 +1,7 @@
 import json
 import logging
 import math
+import uuid
 
 from pydantic import ValidationError
 from sqlalchemy import delete
@@ -15,8 +16,9 @@ from app.infrastructure.project_layout import (
 )
 from app.providers.llm import JSONLLMProvider, build_storyboard_llm, invoke_json
 from app.models.narration import Segment
+from app.models.media import SceneAssignment
 from app.models.project import Project
-from app.models.storyboard import SubtitleCue, VisualScene
+from app.models.storyboard import SceneRevision, SubtitleCue, VisualScene
 from app.schemas.storyboard import StoryboardBatchResult, StoryboardContent
 from app.services.storyboard.query_builder import normalize_storyboard
 from app.services.storyboard.scene_grouper import GROUPING_PROMPT_VERSION, group_cues
@@ -75,20 +77,52 @@ def generate_storyboard(
         scenes_per_request=1 if storyboard_mode == project_service.STORYBOARD_MODE_SEGMENTS else SCENES_PER_REQUEST,
     )
 
-    session.exec(delete(VisualScene).where(VisualScene.project_id == project.id))
+    existing_scenes = {
+        scene.id: scene
+        for scene in session.exec(
+            select(VisualScene).where(VisualScene.project_id == project.id)
+        ).all()
+    }
+    generated_ids = {value["id"] for value in scene_values}
+    stale_locked = [
+        scene.scene_index
+        for scene_id, scene in existing_scenes.items()
+        if scene_id not in generated_ids
+        and (scene.locked_text or scene.locked_audio or scene.locked_visual)
+    ]
+    if stale_locked:
+        indexes = ", ".join(str(index) for index in stale_locked)
+        raise ValueError(f"Scene {indexes} is locked; unlock it before regrouping Storyboard")
     now = utc_now_iso()
     for value in scene_values:
         content = storyboard_by_scene[value["id"]]
-        session.add(
-            VisualScene(
+        existing = existing_scenes.get(value["id"])
+        if existing:
+            _save_revision(session, existing, "workflow_regenerate")
+            existing.start_ms = value["start_ms"]
+            existing.end_ms = value["end_ms"]
+            existing.subtitle_ids_json = value["subtitle_ids_json"]
+            if not existing.locked_text:
+                existing.narration = value["narration"]
+            if not existing.locked_visual:
+                existing.storyboard_json = content.model_dump_json()
+                existing.confidence = content.confidence
+                existing.status = "generated"
+            existing.version += 1
+            existing.updated_at = now
+            session.add(existing)
+        else:
+            session.add(VisualScene(
                 **value,
                 storyboard_json=content.model_dump_json(),
                 confidence=content.confidence,
                 status="generated",
                 created_at=now,
                 updated_at=now,
-            )
-        )
+            ))
+    for scene_id, existing in existing_scenes.items():
+        if scene_id not in generated_ids:
+            session.delete(existing)
     session.commit()
 
     scenes = list_scenes(session, project.id)
@@ -110,6 +144,208 @@ def list_scenes(session: Session, project_id: str) -> list[dict]:
         .order_by(VisualScene.scene_index)
     ).all()
     return [_serialize_scene(scene) for scene in scenes]
+
+
+def update_scene(
+    session: Session,
+    project: Project,
+    scene_id: str,
+    *,
+    narration: str | None = None,
+    storyboard: StoryboardContent | None = None,
+    status: str | None = None,
+    locked_text: bool | None = None,
+    locked_audio: bool | None = None,
+    locked_visual: bool | None = None,
+) -> dict:
+    scene = session.get(VisualScene, scene_id)
+    if not scene or scene.project_id != project.id:
+        raise LookupError("Scene not found")
+    original_snapshot = json.dumps(_serialize_scene(scene), ensure_ascii=False)
+    changed = False
+    derived_outputs_changed = False
+    if narration is not None:
+        normalized_narration = narration.strip()
+        if not normalized_narration:
+            raise ValueError("Scene narration cannot be empty")
+        if normalized_narration != scene.narration:
+            if scene.locked_text:
+                raise ValueError("Scene text is locked")
+            scene.narration = normalized_narration
+            changed = True
+            derived_outputs_changed = True
+    if storyboard is not None:
+        serialized_storyboard = storyboard.model_dump_json()
+        if serialized_storyboard != scene.storyboard_json:
+            if scene.locked_visual:
+                raise ValueError("Scene visual is locked")
+            scene.storyboard_json = serialized_storyboard
+            scene.confidence = storyboard.confidence
+            changed = True
+            derived_outputs_changed = True
+    if status is not None:
+        normalized_status = status.strip().lower()
+        if normalized_status not in {"draft", "generated", "reviewed"}:
+            raise ValueError("Unsupported Scene status")
+        if scene.status != normalized_status:
+            scene.status = normalized_status
+            changed = True
+    for field_name, value in (
+        ("locked_text", locked_text),
+        ("locked_audio", locked_audio),
+        ("locked_visual", locked_visual),
+    ):
+        if value is not None and getattr(scene, field_name) != value:
+            setattr(scene, field_name, value)
+            changed = True
+    if not changed:
+        return _serialize_scene(scene)
+    _save_revision(session, scene, "manual_edit", snapshot_json=original_snapshot)
+    scene.version += 1
+    scene.updated_at = utc_now_iso()
+    project.updated_at = scene.updated_at
+    session.add(scene)
+    session.add(project)
+    session.commit()
+    session.refresh(scene)
+    if derived_outputs_changed:
+        from app.services.storyboard.scene_workspace_service import invalidate_scene_outputs
+
+        invalidate_scene_outputs(project, scene)
+    scenes = list_scenes(session, project.id)
+    _refresh_artifact_after_manual_edit(project, scenes)
+    return _serialize_scene(scene)
+
+
+def list_scene_revisions(session: Session, project_id: str, scene_id: str) -> list[dict]:
+    scene = session.get(VisualScene, scene_id)
+    if not scene or scene.project_id != project_id:
+        raise LookupError("Scene not found")
+    revisions = session.exec(
+        select(SceneRevision)
+        .where(SceneRevision.scene_id == scene_id)
+        .order_by(SceneRevision.version.desc())
+    ).all()
+    return [
+        {
+            "id": revision.id,
+            "scene_id": revision.scene_id,
+            "version": revision.version,
+            "change_type": revision.change_type,
+            "created_at": revision.created_at,
+        }
+        for revision in revisions
+    ]
+
+
+def restore_scene_revision(
+    session: Session, project: Project, scene_id: str, revision_id: str
+) -> dict:
+    scene = session.get(VisualScene, scene_id)
+    revision = session.get(SceneRevision, revision_id)
+    if (
+        not scene
+        or scene.project_id != project.id
+        or not revision
+        or revision.project_id != project.id
+        or revision.scene_id != scene.id
+    ):
+        raise LookupError("Scene revision not found")
+    snapshot = json.loads(revision.snapshot_json)
+    _save_revision(session, scene, "before_restore")
+    scene.narration = str(snapshot["narration"])
+    storyboard = snapshot.get("storyboard")
+    scene.storyboard_json = (
+        StoryboardContent.model_validate(storyboard).model_dump_json() if storyboard else None
+    )
+    scene.confidence = snapshot.get("confidence")
+    scene.status = str(snapshot.get("status") or "draft")
+    scene.locked_text = bool(snapshot.get("locked_text", False))
+    scene.locked_audio = bool(snapshot.get("locked_audio", False))
+    scene.locked_visual = bool(snapshot.get("locked_visual", False))
+    scene.version += 1
+    scene.updated_at = utc_now_iso()
+    project.updated_at = scene.updated_at
+    session.add(scene)
+    session.add(project)
+    session.commit()
+    session.refresh(scene)
+    from app.services.storyboard.scene_workspace_service import invalidate_scene_outputs
+
+    invalidate_scene_outputs(project, scene)
+    scenes = list_scenes(session, project.id)
+    _refresh_artifact_after_manual_edit(project, scenes)
+    return _serialize_scene(scene)
+
+
+def regenerate_scene(
+    session: Session,
+    project: Project,
+    scene_id: str,
+    client: JSONLLMProvider | None = None,
+) -> dict:
+    scene = session.get(VisualScene, scene_id)
+    if not scene or scene.project_id != project.id:
+        raise LookupError("Scene not found")
+    if scene.locked_visual:
+        raise ValueError("Scene visual is locked")
+    llm_client = client or build_storyboard_llm(project.id)
+    all_scenes = session.exec(
+        select(VisualScene)
+        .where(VisualScene.project_id == project.id)
+        .order_by(VisualScene.scene_index)
+    ).all()
+    content = _generate_storyboard_content(
+        [
+            {
+                "id": scene.id,
+                "start_ms": scene.start_ms,
+                "end_ms": scene.end_ms,
+                "narration": scene.narration,
+            }
+        ],
+        llm_client,
+        full_script="\n".join(item.narration for item in all_scenes),
+        scenes_per_request=1,
+    )[scene.id]
+    _save_revision(session, scene, "before_regenerate")
+    scene.storyboard_json = content.model_dump_json()
+    scene.confidence = content.confidence
+    scene.status = "generated"
+    scene.version += 1
+    scene.updated_at = utc_now_iso()
+    project.updated_at = scene.updated_at
+    session.exec(delete(SceneAssignment).where(SceneAssignment.scene_id == scene.id))
+    session.add(scene)
+    session.add(project)
+    session.commit()
+    session.refresh(scene)
+    from app.services.storyboard.scene_workspace_service import invalidate_scene_outputs
+
+    invalidate_scene_outputs(project, scene)
+    scenes = list_scenes(session, project.id)
+    _refresh_artifact_after_manual_edit(project, scenes)
+    return _serialize_scene(scene)
+
+
+def _save_revision(
+    session: Session,
+    scene: VisualScene,
+    change_type: str,
+    *,
+    snapshot_json: str | None = None,
+) -> None:
+    session.add(
+        SceneRevision(
+            id=uuid.uuid4().hex,
+            project_id=scene.project_id,
+            scene_id=scene.id,
+            version=scene.version,
+            change_type=change_type,
+            snapshot_json=snapshot_json
+            or json.dumps(_serialize_scene(scene), ensure_ascii=False),
+        )
+    )
 
 
 def _load_narration_units(session: Session, project_id: str) -> list[dict]:
@@ -410,6 +646,10 @@ def _serialize_scene(scene: VisualScene) -> dict:
         "storyboard": storyboard,
         "confidence": scene.confidence,
         "status": scene.status,
+        "locked_text": scene.locked_text,
+        "locked_audio": scene.locked_audio,
+        "locked_visual": scene.locked_visual,
+        "version": scene.version,
     }
 
 
@@ -436,3 +676,23 @@ def _write_artifact(
     }
     write_json_atomic(path, payload)
     return path
+
+
+def _refresh_artifact_after_manual_edit(project: Project, scenes: list[dict]) -> None:
+    base_dir = get_project_work_dir(project, get_settings().workspace_dir)
+    ensure_project_dirs(base_dir)
+    path = base_dir / "storyboard" / "scenes.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    payload.update(
+        {
+            "project_id": project.id,
+            "updated_at": utc_now_iso(),
+            "scenes": scenes,
+        }
+    )
+    write_json_atomic(path, payload)

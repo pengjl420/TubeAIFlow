@@ -11,12 +11,9 @@ router = APIRouter(tags=["quality"])
 
 @router.post("/projects/{project_id}/quality/check")
 def run_quality_check(project_id: str, session: Session = Depends(get_session)) -> dict:
-    project = _require_project(session, project_id)
-    try:
-        data = qa_service.run_quality_check(session, project)
-    except (OSError, RuntimeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail={"success": False, "error": str(exc)}) from exc
-    return {"success": True, "data": data}
+    from app.api.tasks import enqueue_quality_check_job
+
+    return enqueue_quality_check_job(project_id, session)
 
 
 @router.get("/projects/{project_id}/quality/report")

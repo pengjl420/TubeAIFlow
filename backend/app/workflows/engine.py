@@ -14,6 +14,7 @@ class WorkflowContext:
     session: Session
     project: Project
     include_video: bool = False
+    artifact_exists: Callable[[str], bool] | None = None
 
 
 StepHandler = Callable[[WorkflowContext], str]
@@ -31,6 +32,7 @@ class WorkflowStep:
     input_artifacts: tuple[str, ...] = ()
     output_artifacts: tuple[str, ...] = ()
     cacheable: bool = False
+    cached_next_stage: str | None = None
 
 
 class WorkflowGraph:
@@ -43,6 +45,19 @@ class WorkflowGraph:
             raise ValueError("Workflow must contain at least one step")
         if len(self._steps) != len(step_values):
             raise ValueError("Workflow step ids must be unique")
+        known: set[str] = set()
+        for step in step_values:
+            missing = set(step.depends_on) - known
+            if missing:
+                raise ValueError(
+                    f"Workflow step {step.id} has missing or forward dependencies: "
+                    + ", ".join(sorted(missing))
+                )
+            if step.cacheable and step.output_artifacts and not step.cached_next_stage:
+                raise ValueError(
+                    f"Cacheable workflow step {step.id} must declare cached_next_stage"
+                )
+            known.add(step.id)
 
     @property
     def stages(self) -> frozenset[str]:
@@ -66,9 +81,40 @@ class WorkflowGraph:
         """Execute known steps until reaching a terminal or another workflow graph."""
         stage = current_stage
         while stage in self._steps:
-            next_stage = self._steps[stage].run(context)
+            step = self._steps[stage]
+            self._require_artifacts(context, step, step.input_artifacts, "input")
+            if (
+                step.cacheable
+                and step.output_artifacts
+                and all(self._artifact_exists(context, name) for name in step.output_artifacts)
+            ):
+                next_stage = step.cached_next_stage or ""
+            else:
+                next_stage = step.run(context)
+                self._require_artifacts(context, step, step.output_artifacts, "output")
             if not next_stage or next_stage == stage:
                 raise RuntimeError(f"Workflow step {stage} did not advance")
             on_stage_changed(next_stage)
             stage = next_stage
         return stage
+
+    @staticmethod
+    def _artifact_exists(context: WorkflowContext, name: str) -> bool:
+        if context.artifact_exists is None:
+            raise RuntimeError(f"Workflow has no artifact resolver for {name}")
+        return bool(context.artifact_exists(name))
+
+    @classmethod
+    def _require_artifacts(
+        cls,
+        context: WorkflowContext,
+        step: WorkflowStep,
+        artifacts: tuple[str, ...],
+        kind: str,
+    ) -> None:
+        missing = [name for name in artifacts if not cls._artifact_exists(context, name)]
+        if missing:
+            raise RuntimeError(
+                f"Workflow step {step.id} is missing {kind} artifacts: "
+                + ", ".join(missing)
+            )

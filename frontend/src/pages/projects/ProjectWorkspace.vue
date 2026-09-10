@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute } from 'vue-router'
 import { CheckCircle2, CircleStop, Download, FileAudio, FileText, Folder, History, Info, Loader2, Lock, Play, RefreshCw, Save, Settings2, Video, X } from 'lucide-vue-next'
-import { cancelProjectTask, exportProjectFcpxml, exportProjectPrproj, getProject, getProjectOutputs, getProjectScenes, getProjectScript, getProjectTask, getSceneRevisions, projectOutputUrl, regenerateProjectScene, restoreSceneRevision, saveProjectScript, startProjectWorkflow, updateProjectScene, updateProjectSettings, updateProjectVideoSettings, type ProjectOutputs, type ProjectSettingsInput, type ProjectTask } from '../../api/projects'
+import { cancelProjectTask, enqueueSceneStoryboardJob, exportProjectFcpxml, exportProjectPrproj, getProject, getProjectOutputs, getProjectScenes, getProjectScript, getProjectTask, getSceneRevisions, projectOutputUrl, restoreSceneRevision, saveProjectScript, startProjectWorkflow, updateProjectScene, updateProjectSettings, updateProjectVideoSettings, type ProjectOutputs, type ProjectSettingsInput, type ProjectTask } from '../../api/projects'
 import { listVoices, type VoiceProfile } from '../../api/voices'
 import { selectDirectory } from '../../api/settings'
 import type { Project, VideoGenerationMode } from '../../types/project'
@@ -167,11 +167,8 @@ async function regenerateScene() {
   if (!regenerate) return
   operating.value = true
   try {
-    const updated = await regenerateProjectScene(projectId.value, sceneDraft.value.id)
-    const index = scenes.value.findIndex(scene => scene.id === updated.id)
-    if (index >= 0) scenes.value[index] = updated
-    setSceneDraft(updated)
-    message.value = `Scene ${updated.scene_index} 已重新生成`
+    task.value = await enqueueSceneStoryboardJob(projectId.value, sceneDraft.value.id)
+    message.value = `Scene ${sceneDraft.value.scene_index} 已加入重生成队列`
   } catch (reason) {
     error.value = reason instanceof Error ? reason.message : '重新生成 Scene 失败'
   } finally { operating.value = false }

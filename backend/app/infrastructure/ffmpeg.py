@@ -129,6 +129,89 @@ def detect_silence_intervals(
     return intervals
 
 
+def analyze_audio_quality(audio_path: Path, project_id: str | None = None) -> dict:
+    """Measure loudness peaks and long silence without loading audio into memory."""
+    stderr = _run_ffmpeg_analysis(
+        [
+            "-hide_banner", "-nostats", "-i", str(audio_path),
+            "-af", "volumedetect,silencedetect=noise=-35dB:d=2", "-f", "null", "-",
+        ],
+        project_id,
+    )
+    mean_match = re.search(r"mean_volume:\s*(-?(?:inf|[0-9.]+))\s*dB", stderr)
+    max_match = re.search(r"max_volume:\s*(-?(?:inf|[0-9.]+))\s*dB", stderr)
+    starts = [float(value) for value in re.findall(r"silence_start:\s*([0-9.]+)", stderr)]
+    ends = [float(value) for value in re.findall(r"silence_end:\s*([0-9.]+)", stderr)]
+    return {
+        "mean_volume_db": _parse_db(mean_match.group(1)) if mean_match else None,
+        "max_volume_db": _parse_db(max_match.group(1)) if max_match else None,
+        "silence_intervals": [
+            {"start": start, "end": end, "duration": end - start}
+            for start, end in zip(starts, ends, strict=False)
+            if end >= start
+        ],
+    }
+
+
+def detect_video_anomalies(video_path: Path, project_id: str | None = None) -> dict:
+    """Detect sustained black and frozen ranges using streaming FFmpeg filters."""
+    stderr = _run_ffmpeg_analysis(
+        [
+            "-hide_banner", "-nostats", "-i", str(video_path), "-an",
+            "-vf", "blackdetect=d=1:pix_th=0.10,freezedetect=n=-50dB:d=3",
+            "-f", "null", "-",
+        ],
+        project_id,
+    )
+    black = [
+        {"start": float(start), "end": float(end), "duration": float(duration)}
+        for start, end, duration in re.findall(
+            r"black_start:([0-9.]+)\s+black_end:([0-9.]+)\s+black_duration:([0-9.]+)",
+            stderr,
+        )
+    ]
+    freeze_starts = [float(value) for value in re.findall(r"freeze_start:\s*([0-9.]+)", stderr)]
+    freeze_ends = [float(value) for value in re.findall(r"freeze_end:\s*([0-9.]+)", stderr)]
+    frozen = [
+        {"start": start, "end": end, "duration": end - start}
+        for start, end in zip(freeze_starts, freeze_ends, strict=False)
+        if end >= start
+    ]
+    return {"black_intervals": black, "freeze_intervals": frozen}
+
+
+def _run_ffmpeg_analysis(args: list[str], project_id: str | None) -> str:
+    settings = get_settings()
+    command = [_resolve_tool(settings.ffmpeg_path), *args]
+    try:
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError(f"FFmpeg executable was not found: {command[0]}") from exc
+    if project_id:
+        task_control.register_process(project_id, process)
+    try:
+        _stdout, stderr = process.communicate()
+    finally:
+        if project_id:
+            task_control.unregister_process(project_id, process)
+    if project_id:
+        task_control.check_cancelled(project_id)
+    if process.returncode != 0:
+        raise RuntimeError(stderr.strip() or "FFmpeg analysis failed")
+    return stderr
+
+
+def _parse_db(value: str) -> float:
+    return float("-inf") if value.lower() == "-inf" else float(value)
+
+
 def probe_media(media_path: Path) -> dict:
     """Read stable container and primary-video metadata with ffprobe."""
     settings = get_settings()

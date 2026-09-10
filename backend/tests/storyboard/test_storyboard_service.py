@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.models.project import Project
+from app.models.media import GeneratedImageVariant, SceneAssignment
 from app.models.storyboard import SubtitleCue, VisualScene
 from app.schemas.storyboard import StoryboardContent
 from app.services.storyboard import storyboard_service
@@ -153,6 +154,33 @@ class _PercentScoreRepairDeepSeek(_FakeDeepSeek):
 
 
 class StoryboardServiceTests(unittest.TestCase):
+    def test_visual_invalidation_marks_old_candidates_stale(self) -> None:
+        with self.project_session(cue_count=1) as (session, project, _settings):
+            scene = VisualScene(
+                id="scene-old", project_id=project.id, scene_index=1,
+                start_ms=0, end_ms=3000, narration="Narration",
+            )
+            variant = GeneratedImageVariant(
+                id="variant-old", project_id=project.id, scene_id=scene.id,
+                variant_index=1, path="old.png", prompt="old", model_path="model",
+                input_signature="old-signature", seed=1, width=1920, height=1080,
+                steps=20, guidance_scale=5, status="completed",
+            )
+            assignment = SceneAssignment(
+                id="assignment-old", project_id=project.id, scene_id=scene.id,
+                media_shot_id="shot-old",
+            )
+            session.add_all([scene, variant, assignment])
+            session.commit()
+            assignment_id = assignment.id
+            variant_id = variant.id
+
+            storyboard_service._invalidate_scene_visual_records(session, scene.id)
+            session.commit()
+
+            self.assertIsNone(session.get(SceneAssignment, assignment_id))
+            self.assertEqual(session.get(GeneratedImageVariant, variant_id).status, "stale")
+
     def test_video_storyboard_regeneration_does_not_predelete_locked_scenes(self) -> None:
         with self.project_session(cue_count=1) as (session, project, settings):
             with patch.object(storyboard_service, "get_settings", return_value=settings):

@@ -4,7 +4,12 @@ from pathlib import Path
 from sqlmodel import Session, select
 
 from app.config import get_settings
-from app.infrastructure.ffmpeg import probe_duration, probe_media
+from app.infrastructure.ffmpeg import (
+    analyze_audio_quality,
+    detect_video_anomalies,
+    probe_duration,
+    probe_media,
+)
 from app.infrastructure.atomic_files import write_json_atomic
 from app.infrastructure.project_layout import (
     get_final_audio_path,
@@ -81,6 +86,7 @@ def run_quality_check(session: Session, project: Project) -> dict:
                     subtitle_id=cue.id,
                     suggestion="重新生成字幕时间轴",
                 )
+        _check_audio_analysis(audio_path, project.id, issues)
     _check_subtitles(cues, issues, get_settings())
     if not get_final_srt_path(project, get_settings().workspace_dir).is_file():
         _issue(issues, "subtitle_missing", "error", "项目 SRT 字幕文件不存在")
@@ -140,6 +146,8 @@ def run_quality_check(session: Session, project: Project) -> dict:
                 scene_id=scene.id,
             )
 
+    _check_repetition(session, scenes, all_assignments, issues)
+
     video_metadata = None
     if video_path.is_file():
         try:
@@ -173,6 +181,7 @@ def run_quality_check(session: Session, project: Project) -> dict:
                 )
         except RuntimeError as exc:
             _issue(issues, "video_probe_failed", "error", str(exc))
+        _check_video_analysis(video_path, project.id, issues)
 
     report = {
         "passed": not any(item["severity"] == "error" for item in issues),
@@ -287,6 +296,88 @@ def _check_subtitles(cues: list[SubtitleCue], issues: list[dict], settings) -> N
                 suggestion="缩短字幕文字或延长显示时间",
             )
         previous_end = cue.end_ms
+
+
+def _check_audio_analysis(audio_path: Path, project_id: str, issues: list[dict]) -> None:
+    try:
+        analysis = analyze_audio_quality(audio_path, project_id)
+    except RuntimeError as exc:
+        _issue(issues, "audio_analysis_failed", "warning", str(exc))
+        return
+    mean_volume = analysis.get("mean_volume_db")
+    max_volume = analysis.get("max_volume_db")
+    if mean_volume is not None and mean_volume < -30:
+        _issue(issues, "audio_too_quiet", "warning", f"平均音量过低（{mean_volume:.1f} dB）")
+    if max_volume is not None and max_volume >= -0.1:
+        _issue(issues, "audio_clipping_risk", "warning", f"峰值接近 0 dB（{max_volume:.1f} dB）")
+    for interval in analysis.get("silence_intervals", []):
+        if float(interval.get("duration", 0)) >= 5:
+            _issue(
+                issues,
+                "audio_long_silence",
+                "warning",
+                f"检测到 {float(interval['duration']):.1f} 秒长静音",
+            )
+
+
+def _check_video_analysis(video_path: Path, project_id: str, issues: list[dict]) -> None:
+    try:
+        analysis = detect_video_anomalies(video_path, project_id)
+    except RuntimeError as exc:
+        _issue(issues, "video_analysis_failed", "warning", str(exc))
+        return
+    for interval in analysis.get("black_intervals", []):
+        _issue(
+            issues,
+            "sustained_black_frame",
+            "warning",
+            f"检测到 {float(interval['duration']):.1f} 秒持续黑帧",
+        )
+    for interval in analysis.get("freeze_intervals", []):
+        _issue(
+            issues,
+            "sustained_freeze_frame",
+            "warning",
+            f"检测到 {float(interval['duration']):.1f} 秒冻结画面",
+        )
+
+
+def _check_repetition(
+    session: Session,
+    scenes: list[VisualScene],
+    assignments: list[SceneAssignment],
+    issues: list[dict],
+) -> None:
+    scene_index = {scene.id: scene.scene_index for scene in scenes}
+    media_by_scene: list[tuple[int, str]] = []
+    for assignment in assignments:
+        shot = session.get(MediaShot, assignment.media_shot_id)
+        if shot and assignment.scene_id in scene_index:
+            media_by_scene.append((scene_index[assignment.scene_id], shot.media_file_id))
+    media_by_scene.sort()
+    counts: dict[str, int] = {}
+    for _index, media_id in media_by_scene:
+        counts[media_id] = counts.get(media_id, 0) + 1
+    for media_id, count in counts.items():
+        if count >= 3:
+            _issue(
+                issues,
+                "repeated_asset",
+                "warning",
+                f"同一素材在 {count} 个镜头中重复使用",
+                suggestion=f"替换素材 {media_id} 的部分使用位置",
+            )
+
+    consecutive = 1
+    for previous, current in zip(media_by_scene, media_by_scene[1:], strict=False):
+        consecutive = consecutive + 1 if previous[1] == current[1] else 1
+        if consecutive == 3:
+            _issue(
+                issues,
+                "consecutive_repeated_asset",
+                "warning",
+                "同一素材连续用于至少 3 个 Scene",
+            )
 
 
 def _duration_or_issue(path: Path, issue_type: str, message: str, issues: list[dict]) -> float | None:

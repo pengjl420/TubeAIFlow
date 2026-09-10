@@ -57,9 +57,10 @@ async function select(variantId: string) {
 async function scanAndMatch() {
   operating.value = true
   try {
-    const result = await scanProjectAssets(props.projectId)
+    const scanJob = await waitForJob(await scanProjectAssets(props.projectId))
+    const result = scanJob.result || {}
     localCandidates.value = await getLocalAssetCandidates(props.projectId, props.scene.id)
-    scanSummary.value = `发现 ${result.discovered}，新增索引 ${result.indexed}，跳过 ${result.skipped}`
+    scanSummary.value = `发现 ${Number(result.discovered || 0)}，新增索引 ${Number(result.indexed || 0)}，跳过 ${Number(result.skipped || 0)}`
   } catch (reason) { showToast({ title: '本地素材索引失败', description: reason instanceof Error ? reason.message : String(reason), tone: 'danger' }) }
   finally { operating.value = false }
 }
@@ -136,7 +137,7 @@ onMounted(load)
 
 <template>
   <main class="visual-workspace">
-    <header><div><h1>Scene {{ scene.scene_index }} · {{ previewMode ? '预览' : '素材审阅' }}</h1><p>{{ scene.storyboard?.visual_summary }}</p></div><div class="header-actions"><button v-if="!previewMode" :disabled="operating || scene.locked_visual" @click="regenerateCandidates">重新生成候选</button><button v-if="assets?.assignments.length" class="clear" :disabled="operating" @click="clearSelection"><Trash2 :size="13" />清除分配</button></div></header>
+    <header><div><h1>Scene {{ scene.scene_index }} · {{ previewMode ? '预览' : '素材审阅' }}</h1><p>{{ scene.storyboard?.visual_summary }}</p></div><div class="header-actions"><button v-if="!previewMode" :disabled="operating || scene.locked_visual" @click="regenerateCandidates">重新生成候选</button><button v-if="assets?.assignments.length" class="clear" :disabled="operating || scene.locked_visual" @click="clearSelection"><Trash2 :size="13" />清除分配</button></div></header>
     <div v-if="job && ['queued', 'running', 'paused'].includes(job.status)" class="job-status"><Loader2 v-if="job.status !== 'paused'" class="spin" :size="15" /><CirclePause v-else :size="15" /><span>{{ job.status === 'queued' ? 'Job 排队中' : job.status === 'paused' ? 'Job 已暂停' : `正在执行 ${job.stage}` }}</span><b>{{ Math.round(job.progress || 0) }}%</b><button v-if="job.status === 'paused'" @click="resumeJob">继续</button><button v-else @click="pauseJob">暂停</button></div>
     <div v-if="loading" class="empty"><Loader2 class="spin" :size="24" />加载素材…</div>
     <template v-else-if="previewMode">
@@ -145,7 +146,7 @@ onMounted(load)
     </template>
     <template v-else>
       <nav class="source-tabs"><button :class="{ active: sourceTab === 'generated' }" @click="sourceTab = 'generated'">AI 图片</button><button :class="{ active: sourceTab === 'local' }" @click="loadLocalCandidates">本地素材</button></nav>
-      <template v-if="sourceTab === 'generated'"><div v-if="assets?.variants.length" class="candidate-grid"><article v-for="variant in assets.variants" :key="variant.id" :class="{ selected: variant.selected }"><div class="image-wrap"><img v-if="variant.status === 'completed'" :src="projectOutputUrl(projectId, variant.path)" :alt="`候选 ${variant.variant_index}`" /><div v-else><Image :size="24" />{{ variant.status }}</div><span v-if="variant.selected"><CheckCircle2 :size="14" />已选</span></div><div><strong>候选 {{ variant.variant_index }}</strong><small>{{ variant.width }}×{{ variant.height }} · Seed {{ variant.seed }}</small><p>{{ variant.prompt }}</p><button :disabled="operating || variant.status !== 'completed' || variant.selected" @click="select(variant.id)">{{ variant.selected ? '当前素材' : '使用此素材' }}</button></div></article></div><div v-else class="empty"><Image :size="30" /><strong>暂无图片候选</strong><span>运行视觉生成阶段后，可在这里比较并人工选择素材。</span></div></template>
+      <template v-if="sourceTab === 'generated'"><div v-if="assets?.variants.length" class="candidate-grid"><article v-for="variant in assets.variants" :key="variant.id" :class="{ selected: variant.selected }"><div class="image-wrap"><img v-if="variant.status === 'completed'" :src="projectOutputUrl(projectId, variant.path)" :alt="`候选 ${variant.variant_index}`" /><div v-else><Image :size="24" />{{ variant.status }}</div><span v-if="variant.selected"><CheckCircle2 :size="14" />已选</span></div><div><strong>候选 {{ variant.variant_index }}</strong><small>{{ variant.width }}×{{ variant.height }} · Seed {{ variant.seed }}</small><p>{{ variant.prompt }}</p><button :disabled="operating || scene.locked_visual || variant.status !== 'completed' || variant.selected" @click="select(variant.id)">{{ variant.selected ? '当前素材' : '使用此素材' }}</button></div></article></div><div v-else class="empty"><Image :size="30" /><strong>暂无图片候选</strong><span>运行视觉生成阶段后，可在这里比较并人工选择素材。</span></div></template>
       <template v-else><div class="local-toolbar"><div><strong>Scene 语义匹配</strong><small>{{ scanSummary || '按文件名、标签、画面规格与项目内重复情况排序' }}</small></div><button :disabled="operating || scene.locked_visual" @click="scanAndMatch"><FolderSearch :size="14" />扫描并匹配</button></div><div v-if="localCandidates.length" class="candidate-grid local-grid"><article v-for="candidate in localCandidates" :key="candidate.id"><div class="image-wrap"><img v-if="candidate.media_type === 'image'" :src="localAssetUrl(projectId, candidate.path)" :alt="candidate.filename" /><video v-else muted preload="metadata" :src="localAssetUrl(projectId, candidate.path)" /><span>{{ Math.round(candidate.score * 100) }}% · {{ candidate.status }}</span></div><div><strong>{{ candidate.filename }}</strong><small>{{ candidate.width || '—' }}×{{ candidate.height || '—' }}<template v-if="candidate.duration_ms"> · {{ (candidate.duration_ms / 1000).toFixed(1) }} 秒</template></small><p>{{ candidate.description }}<template v-if="candidate.conflicts.length"> · 已在本项目使用</template></p><button :disabled="operating || scene.locked_visual" @click="selectLocal(candidate.id)">使用此素材</button></div></article></div><div v-else class="empty"><FolderSearch :size="30" /><strong>暂无本地素材候选</strong><span>在项目设置中配置素材目录，然后扫描建立本地索引。</span><button :disabled="operating || scene.locked_visual" @click="scanAndMatch">扫描素材目录</button></div></template>
     </template>
   </main>

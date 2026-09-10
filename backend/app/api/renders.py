@@ -7,7 +7,6 @@ from sqlmodel import select
 
 from app.config import get_settings
 from app.database import get_session
-from app.infrastructure import process_runner as task_control
 from app.infrastructure.project_layout import (
     get_final_fcpxml_path,
     get_final_video_path,
@@ -17,14 +16,7 @@ from app.models.media import SceneAssignment
 from app.models.storyboard import VisualScene
 from app.services.projects import project_service
 from app.services.quality import qa_service
-from app.services.rendering import (
-    final_renderer,
-    rough_cut_service,
-    scene_renderer,
-    timeline_composer,
-    timeline_editor_service,
-    visual_track_composer,
-)
+from app.services.rendering import rough_cut_service, scene_renderer, timeline_composer, timeline_editor_service
 
 
 router = APIRouter(tags=["videos"])
@@ -97,28 +89,9 @@ def save_video_settings(
 
 @router.post("/projects/{project_id}/video/compose")
 def compose_video(project_id: str, session: Session = Depends(get_session)) -> dict:
-    project = project_service.get_project(session, project_id)
-    if not project:
-        raise HTTPException(
-            status_code=404, detail={"success": False, "error": "Project not found"}
-        )
-    try:
-        project = project_service.ensure_output_filename(session, project)
-        with task_control.controlled(project_id, "video"):
-            path = rough_cut_service.compose_video(session, project)
-        return {"success": True, "data": {"path": str(path)}}
-    except rough_cut_service.VideoCompositionRunningError as exc:
-        raise HTTPException(status_code=409, detail={"success": False, "error": str(exc)}) from exc
-    except task_control.TaskCancelledError as exc:
-        raise HTTPException(status_code=400, detail={"success": False, "error": str(exc)}) from exc
-    except (ValueError, RuntimeError, OSError) as exc:
-        try:
-            rough_cut_service.mark_video_progress_failed(project, str(exc))
-        except OSError:
-            # Preserve the original composition error if the progress file is
-            # itself temporarily unavailable.
-            pass
-        raise HTTPException(status_code=400, detail={"success": False, "error": str(exc)}) from exc
+    from app.api.tasks import enqueue_rough_cut_job
+
+    return enqueue_rough_cut_job(project_id, session)
 
 
 @router.get("/projects/{project_id}/video/status")
@@ -133,36 +106,25 @@ def video_status(project_id: str, session: Session = Depends(get_session)) -> di
 
 @router.post("/projects/{project_id}/render/scenes/{scene_id}")
 def render_scene(project_id: str, scene_id: str, session: Session = Depends(get_session)) -> dict:
-    project = _require_project(session, project_id)
-    scene = session.get(VisualScene, scene_id)
-    if not scene or scene.project_id != project_id:
-        raise HTTPException(status_code=404, detail={"success": False, "error": "视觉场景不存在"})
-    try:
-        data = scene_renderer.render_scene(session, project, scene)
-    except (OSError, RuntimeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail={"success": False, "error": str(exc)}) from exc
-    return {"success": True, "data": data}
+    # Preserve the legacy URL while execution moves to the durable Job protocol.
+    from app.api.tasks import enqueue_scene_preview_job
+
+    return enqueue_scene_preview_job(project_id, scene_id, session)
 
 
 @router.post("/projects/{project_id}/render/final")
 def render_final(project_id: str, session: Session = Depends(get_session)) -> dict:
-    project = _require_project(session, project_id)
-    try:
-        visual_track_composer.compose_visual_track(session, project)
-        data = final_renderer.compose_final_video(session, project)
-    except (OSError, RuntimeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail={"success": False, "error": str(exc)}) from exc
-    return {"success": True, "data": data}
+    # Preserve the legacy URL while execution moves to the durable Job protocol.
+    from app.api.tasks import enqueue_final_render_job
+
+    return enqueue_final_render_job(project_id, session)
 
 
 @router.post("/projects/{project_id}/render/visual-track")
 def render_visual_track(project_id: str, session: Session = Depends(get_session)) -> dict:
-    project = _require_project(session, project_id)
-    try:
-        data = visual_track_composer.compose_visual_track(session, project)
-    except (OSError, RuntimeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail={"success": False, "error": str(exc)}) from exc
-    return {"success": True, "data": data}
+    from app.api.tasks import enqueue_visual_track_job
+
+    return enqueue_visual_track_job(project_id, session)
 
 
 @router.get("/projects/{project_id}/render/status")

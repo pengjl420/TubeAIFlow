@@ -78,8 +78,15 @@ class GenerationCheckpointTests(unittest.TestCase):
     def setUp(self) -> None:
         self.ffmpeg_patch = patch.object(narration_generation, "ensure_ffmpeg_available")
         self.ffmpeg_patch.start()
+        # These unit tests mock stage implementations, so no real artifacts are
+        # written. Artifact contract behavior is covered by workflow engine tests.
+        self.artifact_patch = patch.object(
+            narration_generation, "_artifact_exists", return_value=True
+        )
+        self.artifact_patch.start()
 
     def tearDown(self) -> None:
+        self.artifact_patch.stop()
         self.ffmpeg_patch.stop()
 
     def test_generation_resumes_from_audio_merge_checkpoint(self) -> None:

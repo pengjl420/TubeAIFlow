@@ -108,6 +108,7 @@ def generate_storyboard(
     now = utc_now_iso()
     for value in scene_values:
         content = storyboard_by_scene[value["id"]]
+        content_json = content.model_dump_json()
         existing = existing_scenes.get(value["id"])
         if existing:
             _save_revision(session, existing, "workflow_regenerate")
@@ -117,7 +118,9 @@ def generate_storyboard(
             if not existing.locked_text:
                 existing.narration = value["narration"]
             if not existing.locked_visual:
-                existing.storyboard_json = content.model_dump_json()
+                if existing.storyboard_json != content_json:
+                    _invalidate_scene_visual_records(session, existing.id)
+                existing.storyboard_json = content_json
                 existing.confidence = content.confidence
                 existing.status = "generated"
             existing.version += 1
@@ -126,7 +129,7 @@ def generate_storyboard(
         else:
             session.add(VisualScene(
                 **value,
-                storyboard_json=content.model_dump_json(),
+                storyboard_json=content_json,
                 confidence=content.confidence,
                 status="generated",
                 created_at=now,
@@ -332,7 +335,7 @@ def regenerate_scene(
     scene.version += 1
     scene.updated_at = utc_now_iso()
     project.updated_at = scene.updated_at
-    session.exec(delete(SceneAssignment).where(SceneAssignment.scene_id == scene.id))
+    _invalidate_scene_visual_records(session, scene.id)
     session.add(scene)
     session.add(project)
     session.commit()
@@ -343,6 +346,18 @@ def regenerate_scene(
     scenes = list_scenes(session, project.id)
     _refresh_artifact_after_manual_edit(project, scenes)
     return _serialize_scene(scene)
+
+
+def _invalidate_scene_visual_records(session: Session, scene_id: str) -> None:
+    """Detach rendered choices and make candidates from an older brief unselectable."""
+    session.exec(delete(SceneAssignment).where(SceneAssignment.scene_id == scene_id))
+    variants = session.exec(
+        select(GeneratedImageVariant).where(GeneratedImageVariant.scene_id == scene_id)
+    ).all()
+    for variant in variants:
+        variant.status = "stale"
+        variant.updated_at = utc_now_iso()
+        session.add(variant)
 
 
 def _save_revision(

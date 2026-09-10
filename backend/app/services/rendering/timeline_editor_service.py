@@ -114,6 +114,8 @@ def update_visual_clip(
     scene = session.get(VisualScene, assignment.scene_id)
     if not scene:
         raise LookupError("Scene not found")
+    if scene.locked_visual:
+        raise ValueError("Scene visual is locked")
     allowed = {
         "sequence_index",
         "display_duration_ms",

@@ -4,6 +4,8 @@ from sqlmodel import Session, select
 
 from app.infrastructure import process_runner as task_control
 from app.infrastructure.ffmpeg import ensure_ffmpeg_available
+from app.config import get_settings
+from app.infrastructure.project_layout import get_final_video_path, get_project_work_dir
 from app.models.project import Project
 from app.models.storyboard import SubtitleCue, VisualScene
 from app.services.image_generation import (
@@ -49,7 +51,12 @@ def run_video_synthesis(
     if stage not in STAGES:
         raise ValueError(f"Unknown video synthesis stage: {stage}")
     _VIDEO_GRAPH.execute(
-        WorkflowContext(session=session, project=project, include_video=True),
+        WorkflowContext(
+            session=session,
+            project=project,
+            include_video=True,
+            artifact_exists=lambda name: _artifact_exists(session, project, name),
+        ),
         stage,
         on_stage_changed,
     )
@@ -107,6 +114,7 @@ _VIDEO_GRAPH = WorkflowGraph(
             input_artifacts=("subtitle_timeline",),
             output_artifacts=("scene_plan",),
             cacheable=True,
+            cached_next_stage="image_generation",
         ),
         WorkflowStep(
             "image_generation",
@@ -116,6 +124,7 @@ _VIDEO_GRAPH = WorkflowGraph(
             input_artifacts=("scene_plan",),
             output_artifacts=("scene_assets",),
             cacheable=True,
+            cached_next_stage="scene_render",
         ),
         WorkflowStep(
             "scene_render",
@@ -125,6 +134,7 @@ _VIDEO_GRAPH = WorkflowGraph(
             input_artifacts=("scene_assets",),
             output_artifacts=("scene_renders",),
             cacheable=True,
+            cached_next_stage="visual_track",
         ),
         WorkflowStep(
             "visual_track",
@@ -198,3 +208,24 @@ def _scene_has_assignment(session: Session, scene_id: str) -> bool:
     return session.exec(
         select(SceneAssignment.id).where(SceneAssignment.scene_id == scene_id).limit(1)
     ).first() is not None
+
+
+def _artifact_exists(session: Session, project: Project, name: str) -> bool:
+    settings = get_settings()
+    scenes = _scenes(session, project.id)
+    work_dir = get_project_work_dir(project, settings.workspace_dir)
+    if name == "subtitle_timeline":
+        return has_subtitles(session, project.id)
+    if name == "scene_plan":
+        return bool(scenes) and all(bool(scene.storyboard_json) for scene in scenes)
+    if name == "scene_assets":
+        return bool(scenes) and all(_scene_has_assignment(session, scene.id) for scene in scenes)
+    if name == "scene_renders":
+        return bool(scenes) and all(scene_renderer.scene_output_path(project, scene).is_file() for scene in scenes)
+    if name == "visual_track":
+        return (work_dir / "renders" / "visual_track.mp4").is_file()
+    if name == "final_video":
+        return get_final_video_path(project, settings.workspace_dir).is_file()
+    if name == "quality_report":
+        return qa_service.read_report(project) is not None
+    return False

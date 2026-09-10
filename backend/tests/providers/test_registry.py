@@ -1,9 +1,14 @@
 import unittest
+import tempfile
+from pathlib import Path
+from unittest.mock import Mock
 
 from app.providers import (
     ProviderCapability,
     ProviderCategory,
     ImageProviderRuntime,
+    ImageBatchRequest,
+    ProviderBillingMode,
     TTSProviderRuntime,
     provider_registry,
 )
@@ -50,6 +55,40 @@ class ProviderRegistryTests(unittest.TestCase):
             provider_registry.runtime("image.local_sdxl", ImageProviderRuntime),
             ImageProviderRuntime,
         )
+
+    def test_local_provider_cost_contract_does_not_invent_cloud_cost(self) -> None:
+        tts = provider_registry.runtime("tts.cosyvoice", TTSProviderRuntime)
+        estimate = tts.estimate_cost(character_count=1234)
+
+        self.assertEqual(estimate.billing, ProviderBillingMode.LOCAL)
+        self.assertEqual(estimate.estimated_usd, 0)
+        self.assertEqual(estimate.usage, {"characters": 1234})
+
+    def test_image_provider_health_reports_missing_local_assets(self) -> None:
+        runtime = ImageProviderRuntime(generate_batch=Mock())
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            request = ImageBatchRequest(
+                project_id="p1",
+                jobs=({}, {}),
+                batch_path=root / "batch.json",
+                result_path=root / "result.json",
+                progress_path=root / "progress.json",
+                python_path=root / "missing-python.exe",
+                model_path=root / "missing-model.safetensors",
+                config_dir=root / "missing-config",
+                device="cpu",
+                dtype="float32",
+                cpu_offload=False,
+            )
+
+            health = runtime.health_check(request)
+            estimate = runtime.estimate_cost(request)
+
+        self.assertFalse(health.available)
+        self.assertIn("missing-python.exe", health.error or "")
+        self.assertEqual(estimate.billing, ProviderBillingMode.LOCAL)
+        self.assertEqual(estimate.usage, {"images": 2})
 
 
 if __name__ == "__main__":

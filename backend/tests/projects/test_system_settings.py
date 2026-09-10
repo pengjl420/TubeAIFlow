@@ -14,6 +14,11 @@ from app.services.settings.system_settings_service import (
 
 
 class SettingsModelTests(unittest.TestCase):
+    def test_engine_host_is_clamped_to_loopback(self) -> None:
+        self.assertEqual(Settings(app_host="0.0.0.0").app_host, "127.0.0.1")
+        self.assertEqual(Settings(app_host="192.168.1.20").app_host, "127.0.0.1")
+        self.assertEqual(Settings(app_host="localhost").app_host, "localhost")
+
     def test_empty_optional_paths_become_none(self) -> None:
         settings = Settings(
             qwen_tts_root="",

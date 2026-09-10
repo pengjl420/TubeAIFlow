@@ -152,6 +152,19 @@ class TimelineEditorServiceTests(unittest.TestCase):
         saved = Path(self.temp_dir.name) / "projects" / project.id / "timeline" / "timeline.json"
         self.assertEqual(json.loads(saved.read_text(encoding="utf-8"))["format_version"], 1)
 
+    def test_locked_visual_rejects_timeline_edits(self) -> None:
+        with Session(self.engine) as session:
+            project, first, _ = self._seed(session)
+            scene = session.get(VisualScene, first.scene_id)
+            scene.locked_visual = True
+            session.add(scene)
+            session.commit()
+
+            with self.assertRaisesRegex(ValueError, "visual is locked"):
+                timeline_editor_service.update_visual_clip(
+                    session, project, first.id, {"display_duration_ms": 2_000}
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -70,7 +70,12 @@ def run_project_generation(
                 "Scene audio is locked: " + ", ".join(str(index) for index in locked_indexes)
             )
     stage = _NARRATION_GRAPH.execute(
-        WorkflowContext(session=session, project=project, include_video=include_video),
+        WorkflowContext(
+            session=session,
+            project=project,
+            include_video=include_video,
+            artifact_exists=lambda name: _artifact_exists(session, project, name),
+        ),
         stage,
         on_stage_changed,
     )
@@ -176,6 +181,7 @@ _NARRATION_GRAPH = WorkflowGraph(
             input_artifacts=("segments",),
             output_artifacts=("segment_audio",),
             cacheable=True,
+            cached_next_stage="audio_merge",
         ),
         WorkflowStep(
             "audio_merge",
@@ -217,6 +223,32 @@ def _stage_after_narration(project: Project, include_video: bool) -> str:
     }:
         return "storyboard"
     return "completed"
+
+
+def _artifact_exists(session: Session, project: Project, name: str) -> bool:
+    segments = list(
+        session.exec(
+            select(Segment)
+            .where(Segment.project_id == project.id)
+            .order_by(Segment.segment_index)
+        ).all()
+    )
+    if name == "segments":
+        return bool(segments)
+    if name == "segment_audio":
+        return bool(segments) and all(
+            item.status == "completed"
+            and bool(item.audio_path)
+            and Path(item.audio_path or "").is_file()
+            for item in segments
+        )
+    if name == "narration_audio":
+        return get_final_audio_path(project, get_settings().workspace_dir).is_file()
+    if name == "subtitle_timeline":
+        return _narration_outputs_exist(session, project)
+    if name == "final_video":
+        return get_final_video_path(project, get_settings().workspace_dir).is_file()
+    return False
 
 
 def resource_class(stage: str) -> ResourceClass:

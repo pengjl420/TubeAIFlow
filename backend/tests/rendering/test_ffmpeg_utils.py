@@ -81,6 +81,31 @@ class FfmpegUtilsTests(unittest.TestCase):
 
         self.assertEqual(intervals, [(10.25, 10.85), (42.0, 42.5)])
 
+    @patch("app.infrastructure.ffmpeg._run_ffmpeg_analysis")
+    def test_audio_quality_parser_reports_volume_and_long_silence(self, run_mock) -> None:
+        run_mock.return_value = (
+            "mean_volume: -31.5 dB\nmax_volume: -0.0 dB\n"
+            "silence_start: 10.0\nsilence_end: 16.5 | silence_duration: 6.5\n"
+        )
+
+        result = ffmpeg.analyze_audio_quality(Path("voice.wav"), "project-1")
+
+        self.assertEqual(result["mean_volume_db"], -31.5)
+        self.assertEqual(result["max_volume_db"], 0.0)
+        self.assertEqual(result["silence_intervals"][0]["duration"], 6.5)
+
+    @patch("app.infrastructure.ffmpeg._run_ffmpeg_analysis")
+    def test_video_anomaly_parser_reports_black_and_freeze_ranges(self, run_mock) -> None:
+        run_mock.return_value = (
+            "black_start:1.0 black_end:3.5 black_duration:2.5\n"
+            "freeze_start: 8.0\nfreeze_end: 12.0 | freeze_duration: 4.0\n"
+        )
+
+        result = ffmpeg.detect_video_anomalies(Path("video.mp4"), "project-1")
+
+        self.assertEqual(result["black_intervals"][0]["duration"], 2.5)
+        self.assertEqual(result["freeze_intervals"][0]["duration"], 4.0)
+
 
 if __name__ == "__main__":
     unittest.main()

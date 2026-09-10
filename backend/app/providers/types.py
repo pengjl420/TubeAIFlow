@@ -24,6 +24,22 @@ class ProviderCapability(StrEnum):
     LONG_CONTEXT = "long_context"
 
 
+class ProviderBillingMode(StrEnum):
+    LOCAL = "local"
+    EXTERNAL = "external"
+
+
+class ProviderCostEstimate(BaseModel):
+    billing: ProviderBillingMode
+    estimated_usd: float = Field(ge=0)
+    usage: dict[str, int | float | str] = Field(default_factory=dict)
+
+
+class ProviderHealth(BaseModel):
+    available: bool
+    error: str | None = None
+
+
 class ProviderMetadata(BaseModel):
     id: str = Field(pattern=r"^[a-z][a-z0-9_.-]+$")
     category: ProviderCategory

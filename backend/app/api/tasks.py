@@ -104,6 +104,18 @@ def enqueue_scene_image_job(
     )
 
 
+@router.post("/projects/{project_id}/jobs/scenes/{scene_id}/storyboard")
+def enqueue_scene_storyboard_job(
+    project_id: str, scene_id: str, session: Session = Depends(get_session)
+) -> dict:
+    return _enqueue_scene_job(
+        session, project_id, scene_id,
+        workflow="scene_storyboard_regeneration",
+        job_type="scene_storyboard_regeneration",
+        stage="generate", resource_class="api",
+    )
+
+
 @router.post("/projects/{project_id}/jobs/scenes/{scene_id}/preview")
 def enqueue_scene_preview_job(
     project_id: str, scene_id: str, session: Session = Depends(get_session)
@@ -143,6 +155,58 @@ def enqueue_final_render_job(
         workflow="final_render",
         job_type="final_render",
         stage="scene_render",
+    )
+
+
+@router.post("/projects/{project_id}/jobs/assets/scan")
+def enqueue_asset_scan_job(
+    project_id: str, session: Session = Depends(get_session)
+) -> dict:
+    return _enqueue_render_job(
+        session,
+        project_id,
+        workflow="asset_library_scan",
+        job_type="asset_library_scan",
+        stage="scan",
+    )
+
+
+@router.post("/projects/{project_id}/jobs/quality-check")
+def enqueue_quality_check_job(
+    project_id: str, session: Session = Depends(get_session)
+) -> dict:
+    return _enqueue_render_job(
+        session,
+        project_id,
+        workflow="quality_check",
+        job_type="quality_check",
+        stage="analyze",
+    )
+
+
+@router.post("/projects/{project_id}/jobs/visual-track")
+def enqueue_visual_track_job(
+    project_id: str, session: Session = Depends(get_session)
+) -> dict:
+    return _enqueue_render_job(
+        session,
+        project_id,
+        workflow="visual_track_render",
+        job_type="visual_track_render",
+        stage="render",
+    )
+
+
+@router.post("/projects/{project_id}/jobs/rough-cut")
+def enqueue_rough_cut_job(
+    project_id: str, session: Session = Depends(get_session)
+) -> dict:
+    return _enqueue_render_job(
+        session,
+        project_id,
+        workflow="rough_cut_render",
+        job_type="rough_cut_render",
+        stage="render",
     )
 
 

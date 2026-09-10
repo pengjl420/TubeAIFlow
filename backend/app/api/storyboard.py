@@ -1,18 +1,13 @@
-import uuid
-
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlmodel import Session
 
 from app.database import get_session
-from app.infrastructure import process_runner as task_control
 from app.services.narration import subtitle_service
 from app.services.projects import project_service
 from app.services.storyboard import storyboard_service
 from app.services.storyboard import scene_workspace_service
-from app.services.image_generation import image_generation_service
 from app.schemas.storyboard import StoryboardContent
-from app.models.storyboard import VisualScene
 
 
 router = APIRouter(tags=["subtitles"])
@@ -132,14 +127,10 @@ def regenerate_project_scene(
     scene_id: str,
     session: Session = Depends(get_session),
 ) -> dict:
-    project = _require_project(session, project_id)
-    try:
-        scene = storyboard_service.regenerate_scene(session, project, scene_id)
-    except LookupError as exc:
-        raise HTTPException(status_code=404, detail={"error": str(exc)}) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
-    return {"success": True, "data": scene}
+    # Preserve the legacy URL while execution moves to the durable Job protocol.
+    from app.api.tasks import enqueue_scene_storyboard_job
+
+    return enqueue_scene_storyboard_job(project_id, scene_id, session)
 
 
 @router.get("/projects/{project_id}/storyboard/scenes/{scene_id}/assets")
@@ -178,26 +169,10 @@ def clear_scene_asset(project_id: str, scene_id: str, session: Session = Depends
 
 @router.post("/projects/{project_id}/storyboard/scenes/{scene_id}/assets/regenerate")
 def regenerate_scene_assets(project_id: str, scene_id: str, session: Session = Depends(get_session)) -> dict:
-    project = _require_project(session, project_id)
-    try:
-        with task_control.controlled(project.id, "image_generation"):
-            image_generation_service.regenerate_scene_images(
-                session,
-                project,
-                scene_id,
-                regeneration_id=uuid.uuid4().hex,
-            )
-        scene = session.get(VisualScene, scene_id)
-        if scene:
-            scene_workspace_service.invalidate_scene_outputs(project, scene)
-        data = scene_workspace_service.scene_assets(session, project, scene_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
-    except RuntimeError as exc:
-        if "already has a running" in str(exc):
-            raise HTTPException(status_code=409, detail={"error": str(exc)}) from exc
-        raise HTTPException(status_code=500, detail={"error": str(exc)}) from exc
-    return {"success": True, "data": data}
+    # Preserve the legacy URL while image generation becomes durable and cancellable.
+    from app.api.tasks import enqueue_scene_image_job
+
+    return enqueue_scene_image_job(project_id, scene_id, session)
 
 
 def _require_project(session: Session, project_id: str):

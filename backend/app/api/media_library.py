@@ -26,11 +26,9 @@ def _project(session: Session, project_id: str):
 
 @router.post("/projects/{project_id}/assets/scan")
 def scan_assets(project_id: str, session: Session = Depends(get_session)) -> dict:
-    try:
-        data = asset_library_service.scan_project_directory(session, _project(session, project_id))
-    except (OSError, RuntimeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
-    return {"success": True, "data": data}
+    from app.api.tasks import enqueue_asset_scan_job
+
+    return enqueue_asset_scan_job(project_id, session)
 
 
 @router.get("/projects/{project_id}/storyboard/scenes/{scene_id}/assets/candidates")

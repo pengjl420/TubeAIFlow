@@ -6,6 +6,7 @@ from app.models.task import TaskRun
 from app.services.rendering import (
     final_renderer,
     preview_renderer,
+    rough_cut_service,
     scene_renderer,
     visual_track_composer,
 )
@@ -15,6 +16,8 @@ from app.workflows.engine import StageChanged
 
 TIMELINE_PREVIEW_WORKFLOW_ID = "timeline_preview_render"
 FINAL_RENDER_WORKFLOW_ID = "final_render"
+VISUAL_TRACK_WORKFLOW_ID = "visual_track_render"
+ROUGH_CUT_WORKFLOW_ID = "rough_cut_render"
 
 
 def run_timeline_preview_job(
@@ -62,6 +65,38 @@ def run_final_render_job(
         on_stage_changed("final_render")
     result = final_renderer.compose_final_video(session, project)
     _finish(session, task, result)
+    on_stage_changed("completed")
+
+
+def run_visual_track_job(
+    session: Session,
+    project: Project,
+    current_stage: str,
+    _include_video: bool,
+    on_stage_changed: StageChanged,
+) -> None:
+    if current_stage != "render":
+        raise ValueError(f"Unknown Visual Track Job stage: {current_stage}")
+    task = _running_task(session, project.id, VISUAL_TRACK_WORKFLOW_ID)
+    _set_progress(session, task, 10)
+    result = visual_track_composer.compose_visual_track(session, project)
+    _finish(session, task, result)
+    on_stage_changed("completed")
+
+
+def run_rough_cut_job(
+    session: Session,
+    project: Project,
+    current_stage: str,
+    _include_video: bool,
+    on_stage_changed: StageChanged,
+) -> None:
+    if current_stage != "render":
+        raise ValueError(f"Unknown Rough Cut Job stage: {current_stage}")
+    task = _running_task(session, project.id, ROUGH_CUT_WORKFLOW_ID)
+    _set_progress(session, task, 10)
+    path = rough_cut_service.compose_video(session, project)
+    _finish(session, task, {"path": str(path)})
     on_stage_changed("completed")
 
 

@@ -9,8 +9,13 @@ from app.workflows.builtin import (
     VIDEO_WORKFLOW_ID,
     SCENE_IMAGE_WORKFLOW_ID,
     SCENE_PREVIEW_WORKFLOW_ID,
+    SCENE_STORYBOARD_WORKFLOW_ID,
     TIMELINE_PREVIEW_WORKFLOW_ID,
     FINAL_RENDER_WORKFLOW_ID,
+    ASSET_SCAN_WORKFLOW_ID,
+    QUALITY_CHECK_WORKFLOW_ID,
+    ROUGH_CUT_WORKFLOW_ID,
+    VISUAL_TRACK_WORKFLOW_ID,
     ensure_builtin_workflows_registered,
 )
 from app.workflows.registry import workflow_registry
@@ -27,8 +32,13 @@ class WorkflowArchitectureTests(unittest.TestCase):
                 VIDEO_WORKFLOW_ID,
                 SCENE_IMAGE_WORKFLOW_ID,
                 SCENE_PREVIEW_WORKFLOW_ID,
+                SCENE_STORYBOARD_WORKFLOW_ID,
                 TIMELINE_PREVIEW_WORKFLOW_ID,
                 FINAL_RENDER_WORKFLOW_ID,
+                ASSET_SCAN_WORKFLOW_ID,
+                QUALITY_CHECK_WORKFLOW_ID,
+                ROUGH_CUT_WORKFLOW_ID,
+                VISUAL_TRACK_WORKFLOW_ID,
             },
         )
         narration = workflow_registry.get(NARRATION_WORKFLOW_ID)
@@ -65,6 +75,60 @@ class WorkflowArchitectureTests(unittest.TestCase):
                 (
                     WorkflowStep("same", lambda _context: "completed"),
                     WorkflowStep("same", lambda _context: "completed"),
+                )
+            )
+
+    def test_graph_rejects_missing_inputs_and_outputs(self) -> None:
+        graph = WorkflowGraph(
+            (
+                WorkflowStep(
+                    "one",
+                    lambda _context: "completed",
+                    input_artifacts=("input",),
+                    output_artifacts=("output",),
+                ),
+            )
+        )
+        available: set[str] = set()
+        context = WorkflowContext(
+            session=Mock(), project=Mock(), artifact_exists=available.__contains__
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "missing input artifacts"):
+            graph.execute(context, "one", Mock())
+
+        available.add("input")
+        with self.assertRaisesRegex(RuntimeError, "missing output artifacts"):
+            graph.execute(context, "one", Mock())
+
+    def test_graph_skips_verified_cacheable_step(self) -> None:
+        run = Mock(return_value="completed")
+        transitions: list[str] = []
+        graph = WorkflowGraph(
+            (
+                WorkflowStep(
+                    "one",
+                    run,
+                    output_artifacts=("output",),
+                    cacheable=True,
+                    cached_next_stage="completed",
+                ),
+            )
+        )
+        context = WorkflowContext(
+            session=Mock(), project=Mock(), artifact_exists=lambda name: name == "output"
+        )
+
+        self.assertEqual(graph.execute(context, "one", transitions.append), "completed")
+        run.assert_not_called()
+        self.assertEqual(transitions, ["completed"])
+
+    def test_graph_rejects_forward_dependency(self) -> None:
+        with self.assertRaisesRegex(ValueError, "forward dependencies"):
+            WorkflowGraph(
+                (
+                    WorkflowStep("two", lambda _context: "completed", depends_on=("one",)),
+                    WorkflowStep("one", lambda _context: "completed"),
                 )
             )
 

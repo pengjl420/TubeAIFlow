@@ -6,13 +6,33 @@ from app.models.storyboard import VisualScene
 from app.models.task import TaskRun
 from app.services.image_generation import image_generation_service
 from app.services.rendering import scene_renderer
-from app.services.storyboard import scene_workspace_service
+from app.services.storyboard import scene_workspace_service, storyboard_service
 from app.shared.time import utc_now_iso
 from app.workflows.engine import StageChanged
 
 
 SCENE_IMAGE_WORKFLOW_ID = "scene_image_regeneration"
 SCENE_PREVIEW_WORKFLOW_ID = "scene_preview_render"
+SCENE_STORYBOARD_WORKFLOW_ID = "scene_storyboard_regeneration"
+
+
+def run_scene_storyboard_job(
+    session: Session, project: Project, current_stage: str,
+    _include_video: bool, on_stage_changed: StageChanged,
+) -> None:
+    task = _running_task(session, project.id, SCENE_STORYBOARD_WORKFLOW_ID)
+    if current_stage != "generate":
+        raise ValueError(f"Unknown Scene Storyboard Job stage: {current_stage}")
+    task.progress = 5
+    session.add(task)
+    session.commit()
+    result = storyboard_service.regenerate_scene(session, project, _scene_id(task))
+    task.result_json = dump_json(result)
+    task.progress = 100
+    task.updated_at = utc_now_iso()
+    session.add(task)
+    session.commit()
+    on_stage_changed("completed")
 
 
 def run_scene_image_job(

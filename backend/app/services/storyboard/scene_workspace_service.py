@@ -66,6 +66,7 @@ def assign_generated_variant(
     session: Session, project: Project, scene_id: str, variant_id: str
 ) -> dict:
     scene = _scene(session, project, scene_id)
+    _assert_visual_editable(scene)
     variant = session.get(GeneratedImageVariant, variant_id)
     if not variant or variant.project_id != project.id or variant.scene_id != scene.id:
         raise LookupError("Image candidate not found")
@@ -91,6 +92,7 @@ def assign_generated_variant(
 
 def clear_scene_assignments(session: Session, project: Project, scene_id: str) -> dict:
     scene = _scene(session, project, scene_id)
+    _assert_visual_editable(scene)
     session.exec(delete(SceneAssignment).where(SceneAssignment.scene_id == scene.id))
     session.commit()
     invalidate_scene_outputs(project, scene)
@@ -122,6 +124,11 @@ def _scene(session: Session, project: Project, scene_id: str) -> VisualScene:
     if not scene or scene.project_id != project.id:
         raise LookupError("Scene not found")
     return scene
+
+
+def _assert_visual_editable(scene: VisualScene) -> None:
+    if scene.locked_visual:
+        raise ValueError("Scene visual is locked")
 
 
 def _assignment_value(assignment: SceneAssignment, shot: MediaShot, media: MediaFile) -> dict:

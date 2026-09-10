@@ -252,12 +252,12 @@ export async function restoreSceneRevision(
   )
 }
 
-export async function regenerateProjectScene(
+export async function enqueueSceneStoryboardJob(
   projectId: string,
   sceneId: string,
-): Promise<VisualScene> {
-  return unwrap<VisualScene>(
-    await apiClient.post(`/projects/${projectId}/storyboard/scenes/${encodeURIComponent(sceneId)}/regenerate`, undefined, { timeout: 120000 }),
+): Promise<ProjectTask> {
+  return unwrap<ProjectTask>(
+    await apiClient.post(`/projects/${projectId}/jobs/scenes/${encodeURIComponent(sceneId)}/storyboard`),
   )
 }
 
@@ -277,8 +277,8 @@ export async function regenerateSceneImages(projectId: string, sceneId: string):
   return unwrap<SceneAssets>(await apiClient.post(`/projects/${projectId}/storyboard/scenes/${encodeURIComponent(sceneId)}/assets/regenerate`, undefined, { timeout: 600000 }))
 }
 
-export async function scanProjectAssets(projectId: string): Promise<{ discovered: number; indexed: number; skipped: number; errors: unknown[] }> {
-  return unwrap(await apiClient.post(`/projects/${projectId}/assets/scan`, undefined, { timeout: 0 }))
+export async function scanProjectAssets(projectId: string): Promise<ProjectTask> {
+  return unwrap<ProjectTask>(await apiClient.post(`/projects/${projectId}/jobs/assets/scan`))
 }
 
 export async function getLocalAssetCandidates(projectId: string, sceneId: string, refresh = false): Promise<LocalAssetCandidate[]> {

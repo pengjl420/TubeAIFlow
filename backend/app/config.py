@@ -161,6 +161,12 @@ class Settings(BaseModel):
     subtitle_whisper_compute_type: Literal["float16", "int8_float16", "int8", "float32"] = "float16"
     subtitle_whisper_beam_size: int = Field(default=5, ge=1, le=20)
 
+    @field_validator("app_host", mode="before")
+    @classmethod
+    def force_loopback_host(cls, value):
+        host = str(value or "").strip().lower()
+        return host if host in {"127.0.0.1", "localhost"} else "127.0.0.1"
+
     @field_validator(
         "qwen_tts_root",
         "qwen_tts_python",

@@ -16,7 +16,7 @@ from app.infrastructure.project_layout import (
 )
 from app.providers.llm import JSONLLMProvider, build_storyboard_llm, invoke_json
 from app.models.narration import Segment
-from app.models.media import SceneAssignment
+from app.models.media import GeneratedImageVariant, SceneAssignment
 from app.models.project import Project
 from app.models.storyboard import SceneRevision, SubtitleCue, VisualScene
 from app.schemas.storyboard import StoryboardBatchResult, StoryboardContent
@@ -93,6 +93,18 @@ def generate_storyboard(
     if stale_locked:
         indexes = ", ".join(str(index) for index in stale_locked)
         raise ValueError(f"Scene {indexes} is locked; unlock it before regrouping Storyboard")
+    changed_locked = [
+        existing.scene_index
+        for value in scene_values
+        if (existing := existing_scenes.get(value["id"]))
+        and _locked_scene_membership_changed(existing, value)
+    ]
+    if changed_locked:
+        indexes = ", ".join(str(index) for index in changed_locked)
+        raise ValueError(
+            f"Scene {indexes} is locked and its subtitle grouping changed; "
+            "unlock it before regrouping Storyboard"
+        )
     now = utc_now_iso()
     for value in scene_values:
         content = storyboard_by_scene[value["id"]]
@@ -122,6 +134,11 @@ def generate_storyboard(
             ))
     for scene_id, existing in existing_scenes.items():
         if scene_id not in generated_ids:
+            session.exec(delete(SceneAssignment).where(SceneAssignment.scene_id == scene_id))
+            session.exec(
+                delete(GeneratedImageVariant).where(GeneratedImageVariant.scene_id == scene_id)
+            )
+            session.exec(delete(SceneRevision).where(SceneRevision.scene_id == scene_id))
             session.delete(existing)
     session.commit()
 
@@ -424,6 +441,19 @@ def _build_scene_values(project_id: str, cue_groups: list[list[dict]]) -> list[d
             }
         )
     return values
+
+
+def _locked_scene_membership_changed(scene: VisualScene, value: dict) -> bool:
+    subtitle_changed = scene.subtitle_ids_json != value["subtitle_ids_json"]
+    narration_changed = scene.narration != value["narration"]
+    timing_changed = scene.start_ms != value["start_ms"] or scene.end_ms != value["end_ms"]
+    if scene.locked_audio and (subtitle_changed or timing_changed):
+        return True
+    if scene.locked_text and (subtitle_changed or narration_changed):
+        return True
+    if scene.locked_visual and (subtitle_changed or narration_changed):
+        return True
+    return False
 
 
 def _load_segment_visual_hints(project: Project) -> list[str]:

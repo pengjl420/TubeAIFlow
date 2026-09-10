@@ -56,7 +56,7 @@ def enqueue_project_task(
     commit: bool = True,
     job_type: str = "project_workflow",
     scene_id: str | None = None,
-    resource_class: str = ResourceClass.CPU.value,
+    resource_class: str | None = None,
     max_retries: int = 0,
     request: dict | None = None,
 ) -> TaskRun:
@@ -77,7 +77,11 @@ def enqueue_project_task(
             workflow=workflow,
             job_type=job_type,
             scene_id=scene_id,
-            resource_class=ResourceClass(resource_class).value,
+            resource_class=resource_class_for_stage(
+                workflow,
+                current_stage,
+                fallback=resource_class or ResourceClass.CPU.value,
+            ),
             status=initial_status,
             current_stage=current_stage,
             include_video=include_video,
@@ -107,10 +111,31 @@ def enqueue_project_task(
     return task
 
 
+def resource_class_for_stage(workflow: str, stage: str, *, fallback: str) -> str:
+    try:
+        return get_workflow_runtime(workflow).resource_class(stage).value
+    except ValueError:
+        return ResourceClass(fallback).value
+
+
 def get_latest_project_task(session: Session, project_id: str) -> TaskRun | None:
     return session.exec(
         select(TaskRun)
         .where(TaskRun.project_id == project_id)
+        .order_by(TaskRun.queue_sequence.desc())
+    ).first()
+
+
+def get_project_status_task(session: Session, project_id: str) -> TaskRun | None:
+    active = get_active_project_task(session, project_id)
+    if active:
+        return active
+    return session.exec(
+        select(TaskRun)
+        .where(
+            TaskRun.project_id == project_id,
+            TaskRun.job_type.in_(["project_workflow", "final_render"]),
+        )
         .order_by(TaskRun.queue_sequence.desc())
     ).first()
 

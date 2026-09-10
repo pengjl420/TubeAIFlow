@@ -6,11 +6,13 @@ from dataclasses import dataclass
 from sqlmodel import Session
 
 from app.models.project import Project
+from app.domain.states import ResourceClass
 from app.workflows.engine import StageChanged
 
 
 WorkflowRunner = Callable[[Session, Project, str, bool, StageChanged], None]
 InitialStageResolver = Callable[[Session, Project, bool], str]
+ResourceClassResolver = Callable[[str], ResourceClass]
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,6 +23,7 @@ class WorkflowRuntime:
     produces_video: bool
     run: WorkflowRunner
     initial_stage: InitialStageResolver
+    resource_class: ResourceClassResolver
 
 
 class WorkflowRegistry:

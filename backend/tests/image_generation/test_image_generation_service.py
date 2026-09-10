@@ -22,6 +22,14 @@ from app.services.image_generation import image_generation_service
 
 
 class ImageGenerationServiceTests(unittest.TestCase):
+    def test_regeneration_seed_changes_between_requests_but_is_stable_for_retry(self) -> None:
+        first = image_generation_service._regeneration_seed("p", "s", 1, "job-1")
+        retry = image_generation_service._regeneration_seed("p", "s", 1, "job-1")
+        next_request = image_generation_service._regeneration_seed("p", "s", 1, "job-2")
+
+        self.assertEqual(first, retry)
+        self.assertNotEqual(first, next_request)
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
@@ -128,6 +136,69 @@ class ImageGenerationServiceTests(unittest.TestCase):
             variants = session.exec(select(GeneratedImageVariant)).all()
             self.assertTrue(all(item.status == "completed" for item in variants))
             self.assertTrue(all(item.generation_seconds == 1.5 for item in variants))
+
+    def test_failed_regeneration_keeps_previous_successful_candidates(self) -> None:
+        with Session(self.engine) as session:
+            project, scene = self._project_scene(session)
+
+            def successful_batch(_project, _python, _model, _config, batch_path, result_path, *_args):
+                results = []
+                for job in json.loads(batch_path.read_text(encoding="utf-8")):
+                    output = Path(job["output_path"])
+                    output.parent.mkdir(parents=True, exist_ok=True)
+                    Image.new("RGB", (job["width"], job["height"]), (70, 80, 90)).save(output)
+                    results.append({"variant_id": job["variant_id"], "status": "completed"})
+                result_path.write_text(json.dumps(results), encoding="utf-8")
+
+            def failed_batch(_project, _python, _model, _config, batch_path, result_path, *_args):
+                jobs = json.loads(batch_path.read_text(encoding="utf-8"))
+                result_path.write_text(
+                    json.dumps(
+                        [
+                            {"variant_id": job["variant_id"], "status": "failed", "error": "boom"}
+                            for job in jobs
+                        ]
+                    ),
+                    encoding="utf-8",
+                )
+
+            with (
+                patch.object(image_generation_service, "get_settings", return_value=self.settings),
+                patch.object(
+                    image_generation_service.gpu_resource,
+                    "exclusive_gpu",
+                    return_value=nullcontext(),
+                ),
+                patch.object(image_generation_service, "_run_batch", side_effect=successful_batch),
+            ):
+                image_generation_service.generate_project_images(session, project)
+
+            original = list(
+                session.exec(
+                    select(GeneratedImageVariant).where(
+                        GeneratedImageVariant.scene_id == scene.id,
+                        GeneratedImageVariant.status == "completed",
+                    )
+                ).all()
+            )
+            original_paths = [Path(item.path) for item in original]
+
+            with (
+                patch.object(image_generation_service, "get_settings", return_value=self.settings),
+                patch.object(
+                    image_generation_service.gpu_resource,
+                    "exclusive_gpu",
+                    return_value=nullcontext(),
+                ),
+                patch.object(image_generation_service, "_run_batch", side_effect=failed_batch),
+                self.assertRaisesRegex(RuntimeError, "2 个图片候选生成失败"),
+            ):
+                image_generation_service.regenerate_scene_images(
+                    session, project, scene.id, regeneration_id="attempt-1"
+                )
+
+            self.assertTrue(all(session.get(GeneratedImageVariant, item.id) for item in original))
+            self.assertTrue(all(path.is_file() for path in original_paths))
 
     def _project_scene(self, session: Session):
         project = Project(id="project-1", name="Generated", output_dir=str(self.root))

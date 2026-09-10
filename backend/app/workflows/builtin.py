@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from sqlmodel import Session
 
+from app.domain.states import ResourceClass
 from app.models.project import Project
 from app.workflows.engine import StageChanged
 from app.workflows.registry import WorkflowRuntime, workflow_registry
@@ -38,6 +39,7 @@ def ensure_builtin_workflows_registered() -> None:
                 produces_video=False,
                 run=_run_narration_workflow,
                 initial_stage=_initial_narration_stage,
+                resource_class=_narration_resource_class,
             )
         )
     if VIDEO_WORKFLOW_ID not in registered:
@@ -51,6 +53,7 @@ def ensure_builtin_workflows_registered() -> None:
                 produces_video=True,
                 run=_run_video_workflow,
                 initial_stage=_initial_video_stage,
+                resource_class=_video_resource_class,
             )
         )
     registered = {item.id for item in workflow_registry.list()}
@@ -65,6 +68,7 @@ def ensure_builtin_workflows_registered() -> None:
                 produces_video=False,
                 run=scene_jobs.run_scene_image_job,
                 initial_stage=lambda _session, _project, _include_video: "generate",
+                resource_class=lambda _stage: ResourceClass.GPU,
             )
         )
     if SCENE_PREVIEW_WORKFLOW_ID not in registered:
@@ -78,6 +82,7 @@ def ensure_builtin_workflows_registered() -> None:
                 produces_video=False,
                 run=scene_jobs.run_scene_preview_job,
                 initial_stage=lambda _session, _project, _include_video: "render",
+                resource_class=lambda _stage: ResourceClass.FFMPEG,
             )
         )
     registered = {item.id for item in workflow_registry.list()}
@@ -92,6 +97,7 @@ def ensure_builtin_workflows_registered() -> None:
                 produces_video=False,
                 run=render_jobs.run_timeline_preview_job,
                 initial_stage=lambda _session, _project, _include_video: "render",
+                resource_class=lambda _stage: ResourceClass.FFMPEG,
             )
         )
     if FINAL_RENDER_WORKFLOW_ID not in registered:
@@ -100,11 +106,12 @@ def ensure_builtin_workflows_registered() -> None:
         workflow_registry.register(
             WorkflowRuntime(
                 id=FINAL_RENDER_WORKFLOW_ID,
-                stages=frozenset({"visual_track", "final_render"}),
-                video_stages=frozenset({"visual_track", "final_render"}),
+                stages=frozenset({"scene_render", "visual_track", "final_render"}),
+                video_stages=frozenset({"scene_render", "visual_track", "final_render"}),
                 produces_video=True,
                 run=render_jobs.run_final_render_job,
-                initial_stage=lambda _session, _project, _include_video: "visual_track",
+                initial_stage=lambda _session, _project, _include_video: "scene_render",
+                resource_class=lambda _stage: ResourceClass.FFMPEG,
             )
         )
 
@@ -156,3 +163,15 @@ def _initial_video_stage(
     from app.workflows import video_synthesis
 
     return video_synthesis.initial_stage(session, project.id)
+
+
+def _narration_resource_class(stage: str) -> ResourceClass:
+    from app.workflows import narration_generation
+
+    return narration_generation.resource_class(stage)
+
+
+def _video_resource_class(stage: str) -> ResourceClass:
+    from app.workflows import video_synthesis
+
+    return video_synthesis.resource_class(stage)

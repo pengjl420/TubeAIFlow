@@ -4,6 +4,7 @@ import threading
 import uuid
 from contextlib import ExitStack
 
+from sqlalchemy import text
 from sqlmodel import Session, select
 
 from app.database import engine
@@ -26,10 +27,14 @@ _COMPATIBILITY_WORKFLOW_MODULES = (narration_generation, video_synthesis)
 
 
 logger = logging.getLogger(__name__)
-_worker_thread: threading.Thread | None = None
+_worker_threads: list[threading.Thread] = []
 _worker_lock = threading.Lock()
 _wake_event = threading.Event()
 _worker_id = f"{os.getpid()}-{uuid.uuid4().hex[:8]}"
+
+
+class _StageBoundaryReached(RuntimeError):
+    """Yield a persisted workflow at a stage boundary for resource re-scheduling."""
 
 
 def _is_video_task(task: TaskRun, stage: str | None = None) -> bool:
@@ -45,13 +50,17 @@ def _updates_project_lifecycle(task: TaskRun) -> bool:
 
 
 def start_worker() -> None:
-    global _worker_thread
     with _worker_lock:
-        if _worker_thread and _worker_thread.is_alive():
-            _wake_event.set()
-            return
-        _worker_thread = threading.Thread(target=_worker_loop, name="task-worker", daemon=True)
-        _worker_thread.start()
+        _worker_threads[:] = [thread for thread in _worker_threads if thread.is_alive()]
+        worker_count = sum(task_service.DEFAULT_RESOURCE_LIMITS.values())
+        for index in range(len(_worker_threads), worker_count):
+            thread = threading.Thread(
+                target=_worker_loop,
+                name=f"task-worker-{index + 1}",
+                daemon=True,
+            )
+            _worker_threads.append(thread)
+            thread.start()
     _wake_event.set()
 
 
@@ -76,7 +85,20 @@ def recover_interrupted_tasks(session: Session) -> int:
         if batch:
             touched_batch_ids.add(batch.id)
         item = session.get(BatchItem, task.batch_item_id) if task.batch_item_id else None
-        if task.cancel_requested and not (batch and batch.status == "paused"):
+        pause_requested = task.pause_requested or bool(batch and batch.status == "paused")
+        if pause_requested:
+            task.status = "paused"
+            task.cancel_requested = False
+            task.pause_requested = False
+            task.finished_at = None
+            task.error_message = "任务在暂停过程中被中断，已保持暂停状态"
+            _append_checkpoint_event(task, "paused", task.current_stage, now)
+            if item:
+                item.status = "pending"
+                item.current_stage = task.current_stage
+                item.error_message = task.error_message
+                item.finished_at = None
+        elif task.cancel_requested:
             task.status = "cancelled"
             task.finished_at = now
             task.error_message = "任务在取消过程中被中断，启动恢复后保持取消状态"
@@ -85,8 +107,9 @@ def recover_interrupted_tasks(session: Session) -> int:
                 item.error_message = task.error_message
                 item.finished_at = now
         else:
-            task.status = "paused" if batch and batch.status == "paused" else "queued"
+            task.status = "queued"
             task.cancel_requested = False
+            task.pause_requested = False
             task.finished_at = None
             task.compensation_count += 1
             task.last_recovered_at = now
@@ -108,6 +131,8 @@ def recover_interrupted_tasks(session: Session) -> int:
                 project.status = (
                     "cancelled"
                     if task.status == "cancelled"
+                    else "created"
+                    if task.status == "paused"
                     else "video_in_progress"
                     if _is_video_task(task)
                     else "narration_in_progress"
@@ -168,8 +193,13 @@ def recover_interrupted_tasks(session: Session) -> int:
 
 def process_next_task() -> bool:
     with Session(engine) as session:
+        # Serialize the capacity check and queue claim across threads and
+        # processes. SQLite otherwise allows two workers to select the same
+        # queued row before either one commits status="running".
+        session.exec(text("BEGIN IMMEDIATE"))
         task = task_service.get_next_runnable_task(session)
         if not task:
+            session.rollback()
             return False
 
         batch = session.get(BatchJob, task.batch_id) if task.batch_id else None
@@ -222,9 +252,15 @@ def process_next_task() -> bool:
             current = session.get(TaskRun, task.id)
             if not current:
                 raise RuntimeError("Task record disappeared while generation was running")
+            # Another request may have changed cancellation flags through a
+            # different Session while this stage was executing.
+            session.refresh(current)
             changed_at = utc_now_iso()
             completed_stage = current.current_stage
             current.current_stage = stage
+            current.resource_class = task_service.resource_class_for_stage(
+                current.workflow, stage, fallback=current.resource_class
+            )
             current.heartbeat_at = changed_at
             current.updated_at = changed_at
             _append_checkpoint_event(
@@ -255,6 +291,17 @@ def process_next_task() -> bool:
             session.refresh(current)
             if current.cancel_requested:
                 raise runtime_control.TaskCancelledError("Task was stopped by the user")
+            if stage != "completed":
+                # A resource lease belongs to one stage, not the entire
+                # workflow. Requeue at every boundary so the next resource
+                # class is admitted through the scheduler again.
+                current.attempt_count = 0
+                task_service.queue_paused_task(session, current)
+                if current_item:
+                    current_item.status = "pending"
+                    session.add(current_item)
+                session.commit()
+                raise _StageBoundaryReached(stage)
 
         try:
             project_snapshot, settings_snapshot = _load_config_snapshot(task)
@@ -269,6 +316,10 @@ def process_next_task() -> bool:
                     task.include_video,
                     update_stage,
                 )
+        except _StageBoundaryReached:
+            # The next stage is already durable and queued. Returning to the
+            # worker loop lets normal capacity and FIFO rules claim it.
+            pass
         except runtime_control.TaskCancelledError as exc:
             session.rollback()
             _cancel_task(session, task.id, str(exc))
@@ -287,7 +338,7 @@ def process_next_task() -> bool:
 
 def _worker_loop() -> None:
     while True:
-        _wake_event.wait(timeout=2)
+        _wake_event.wait(timeout=30)
         _wake_event.clear()
         try:
             while process_next_task():

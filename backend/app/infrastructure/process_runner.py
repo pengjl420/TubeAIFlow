@@ -14,6 +14,7 @@ class TaskCancelledError(RuntimeError):
 class _TaskState:
     stage: str
     cancelled: bool = False
+    implicit: bool = False
     process: subprocess.Popen | None = None
     cancel_callback: Callable[[], None] | None = None
     deferred_calls: list["DeferredCall"] | None = None
@@ -124,7 +125,10 @@ def _fail_deferred_and_finish(project_id: str, error: BaseException) -> None:
 
 def check_cancelled(project_id: str) -> None:
     with _lock:
-        cancelled = bool(_states.get(project_id) and _states[project_id].cancelled)
+        state = _states.get(project_id)
+        cancelled = bool(state and state.cancelled)
+        if cancelled and state and state.implicit and state.process is None:
+            _states.pop(project_id, None)
     if cancelled:
         raise TaskCancelledError("Task was stopped by the user")
 
@@ -133,7 +137,7 @@ def register_process(project_id: str, process: subprocess.Popen) -> None:
     with _lock:
         state = _states.get(project_id)
         if state is None:
-            state = _TaskState(stage="running")
+            state = _TaskState(stage="running", implicit=True)
             _states[project_id] = state
         state.process = process
         cancelled = state.cancelled
@@ -147,6 +151,8 @@ def unregister_process(project_id: str, process: subprocess.Popen) -> None:
         state = _states.get(project_id)
         if state and state.process is process:
             state.process = None
+            if state.implicit and not state.cancelled:
+                _states.pop(project_id, None)
 
 
 def register_cancel_callback(project_id: str, callback: Callable[[], None] | None) -> None:

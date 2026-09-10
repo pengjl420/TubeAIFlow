@@ -1,5 +1,6 @@
 import json
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -114,6 +115,34 @@ class TaskQueueTests(unittest.TestCase):
             self.assertNotEqual(second.id, first.id)
             self.assertGreater(second.queue_sequence, first.queue_sequence)
 
+    def test_project_status_ignores_completed_auxiliary_jobs(self) -> None:
+        with Session(self.engine) as session:
+            session.add(Project(id="project", name="Project"))
+            session.add_all(
+                [
+                    TaskRun(
+                        id="workflow",
+                        project_id="project",
+                        status="completed",
+                        job_type="project_workflow",
+                        queue_sequence=1,
+                    ),
+                    TaskRun(
+                        id="scene-job",
+                        project_id="project",
+                        status="completed",
+                        job_type="scene_preview_render",
+                        queue_sequence=2,
+                    ),
+                ]
+            )
+            session.commit()
+
+            self.assertEqual(
+                task_service.get_project_status_task(session, "project").id,
+                "workflow",
+            )
+
     def test_resource_scheduler_skips_a_saturated_class_without_blocking_fifo(self) -> None:
         with Session(self.engine) as session:
             session.add_all(
@@ -147,6 +176,91 @@ class TaskQueueTests(unittest.TestCase):
         self.assertEqual(selected.id, "cpu-queued")
         self.assertEqual(resources["gpu"], {"limit": 1, "running": 1, "queued": 1})
         self.assertEqual(resources["cpu"]["queued"], 1)
+
+    def test_stage_boundary_requeues_before_entering_next_resource_class(self) -> None:
+        with Session(self.engine) as session:
+            session.add_all(
+                [
+                    Project(id="video", name="Video", config_json='{"video_mode":"ai_images"}'),
+                    Project(id="blocker", name="GPU blocker"),
+                    TaskRun(
+                        id="video-task",
+                        project_id="video",
+                        workflow="video_synthesis",
+                        current_stage="storyboard",
+                        resource_class="api",
+                        queue_sequence=1,
+                        include_video=True,
+                    ),
+                    TaskRun(
+                        id="gpu-blocker",
+                        project_id="blocker",
+                        status="running",
+                        current_stage="tts",
+                        resource_class="gpu",
+                        queue_sequence=2,
+                    ),
+                ]
+            )
+            session.commit()
+
+        def finish_storyboard(_session, _project, stage, update_stage):
+            self.assertEqual(stage, "storyboard")
+            update_stage("image_generation")
+
+        with patch.object(
+            task_worker.video_synthesis,
+            "run_video_synthesis",
+            side_effect=finish_storyboard,
+        ):
+            self.assertTrue(task_worker.process_next_task())
+            self.assertFalse(task_worker.process_next_task())
+
+        with Session(self.engine) as session:
+            task = session.get(TaskRun, "video-task")
+            self.assertEqual(task.status, "queued")
+            self.assertEqual(task.current_stage, "image_generation")
+            self.assertEqual(task.resource_class, "gpu")
+            self.assertEqual(task.attempt_count, 0)
+
+    def test_workers_atomically_claim_distinct_tasks(self) -> None:
+        with Session(self.engine) as session:
+            session.add_all(
+                [
+                    Project(id="p1", name="Project 1"),
+                    Project(id="p2", name="Project 2"),
+                    TaskRun(id="t1", project_id="p1", queue_sequence=1),
+                    TaskRun(id="t2", project_id="p2", queue_sequence=2),
+                ]
+            )
+            session.commit()
+
+        barrier = threading.Barrier(2, timeout=5)
+        claimed: list[str] = []
+        results: list[bool] = []
+
+        def fake_generation(_session, project, _stage, _include_video, update_stage):
+            claimed.append(project.id)
+            barrier.wait()
+            update_stage("completed")
+
+        def process_one() -> None:
+            results.append(task_worker.process_next_task())
+
+        with patch.object(
+            task_worker.narration_generation,
+            "run_project_generation",
+            side_effect=fake_generation,
+        ):
+            workers = [threading.Thread(target=process_one) for _ in range(2)]
+            for worker in workers:
+                worker.start()
+            for worker in workers:
+                worker.join(timeout=10)
+
+        self.assertTrue(all(not worker.is_alive() for worker in workers))
+        self.assertEqual(sorted(claimed), ["p1", "p2"])
+        self.assertEqual(results, [True, True])
 
     def test_enqueue_at_ai_video_stage_sets_video_project_status(self) -> None:
         with Session(self.engine) as session:
@@ -220,6 +334,31 @@ class TaskQueueTests(unittest.TestCase):
             self.assertEqual(task.current_stage, "audio_merge")
             self.assertEqual(task.compensation_count, 1)
             self.assertIn('"event": "recovered"', task.checkpoint_json)
+
+    def test_restart_compensation_preserves_requested_pause(self) -> None:
+        with Session(self.engine) as session:
+            session.add(Project(id="project", name="Project", status="video_in_progress"))
+            session.add(
+                TaskRun(
+                    id="task",
+                    project_id="project",
+                    status="running",
+                    current_stage="scene_render",
+                    queue_sequence=1,
+                    cancel_requested=True,
+                    pause_requested=True,
+                )
+            )
+            session.commit()
+
+            self.assertEqual(task_worker.recover_interrupted_tasks(session), 0)
+
+        with Session(self.engine) as session:
+            task = session.get(TaskRun, "task")
+            self.assertEqual(task.status, "paused")
+            self.assertFalse(task.cancel_requested)
+            self.assertFalse(task.pause_requested)
+            self.assertEqual(session.get(Project, "project").status, "created")
 
     def test_restart_reconciles_batch_if_shutdown_happened_after_task_commit(self) -> None:
         with Session(self.engine) as session:
@@ -334,8 +473,32 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertIn("avatar_clips", table_names)
         self.assertEqual(
             versions,
-            [(1,), (2,), (3,), (4,), (5,), (6,), (7,), (8,), (9,), (10,), (11,), (12,), (13,), (14,), (15,), (16,), (17,), (18,), (19,), (20,)],
+            [
+                (1,), (2,), (3,), (4,), (5,), (6,), (7,), (8,), (9,), (10,),
+                (11,), (12,), (13,), (14,), (15,), (16,), (17,), (18,), (19,),
+                (20,), (21,),
+            ],
         )
+
+    def test_scene_revision_migration_installs_referential_integrity_triggers(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            engine = create_sqlalchemy_engine(f"sqlite:///{Path(directory) / 'revisions.db'}")
+            try:
+                with engine.begin() as connection:
+                    connection.exec_driver_sql(
+                        "CREATE TABLE projects (id VARCHAR PRIMARY KEY, name VARCHAR NOT NULL)"
+                    )
+                with patch.object(database, "engine", engine):
+                    database._apply_migrations()
+                with self.assertRaises(IntegrityError):
+                    with engine.begin() as connection:
+                        connection.exec_driver_sql(
+                            "INSERT INTO scene_revisions "
+                            "(id, project_id, scene_id, version, change_type, snapshot_json, created_at) "
+                            "VALUES ('revision', 'missing', 'scene', 1, 'test', '{}', 'now')"
+                        )
+            finally:
+                engine.dispose()
 
     def test_migration_rejects_new_orphaned_project_records(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

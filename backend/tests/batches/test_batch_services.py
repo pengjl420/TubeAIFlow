@@ -364,7 +364,6 @@ class BatchWorkerTests(unittest.TestCase):
 
         def fake_generation(_session, project, _stage, _include_video, update_stage):
             calls.append(project.id)
-            update_stage("tts")
             if project.id == "p1":
                 raise RuntimeError("first failed")
             update_stage("completed")

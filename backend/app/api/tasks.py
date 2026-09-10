@@ -142,7 +142,7 @@ def enqueue_final_render_job(
         project_id,
         workflow="final_render",
         job_type="final_render",
-        stage="visual_track",
+        stage="scene_render",
     )
 
 
@@ -251,7 +251,7 @@ def cancel_project_task(project_id: str, session: Session = Depends(get_session)
 def project_task_status(project_id: str, session: Session = Depends(get_session)) -> dict:
     if not project_service.get_project(session, project_id):
         raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
-    task = task_service.get_latest_project_task(session, project_id)
+    task = task_service.get_project_status_task(session, project_id)
     data = task_service.serialize_task(session, task)
     runtime = task_control.status(project_id)
     if runtime["running"] and (task is None or task.status in task_service.TERMINAL_STATUSES):
@@ -281,6 +281,11 @@ def start_project_workflow(project_id: str, session: Session = Depends(get_sessi
                 "success": False,
                 "error": "Project belongs to a paused task; resume its batch before starting it again",
             },
+        )
+    if active and active.workflow != "narration_generation":
+        raise HTTPException(
+            status_code=409,
+            detail={"success": False, "error": "Project currently has another active Job"},
         )
     latest = task_service.get_latest_project_workflow_task(
         session, project_id, "narration_generation"

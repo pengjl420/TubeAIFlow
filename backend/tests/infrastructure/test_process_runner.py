@@ -6,6 +6,14 @@ from app.infrastructure import process_runner
 
 
 class ProcessRunnerDeferredTests(unittest.TestCase):
+    def test_implicit_process_state_is_removed_after_unregister(self) -> None:
+        process = Mock()
+        process_runner.register_process("project-implicit", process)
+
+        process_runner.unregister_process("project-implicit", process)
+
+        self.assertFalse(process_runner.status("project-implicit")["running"])
+
     def test_deferred_call_runs_before_stage_lock_is_released(self) -> None:
         entered = threading.Event()
         release = threading.Event()

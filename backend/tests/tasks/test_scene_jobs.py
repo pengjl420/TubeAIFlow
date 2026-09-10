@@ -12,9 +12,50 @@ from app.database import get_session
 from app.models.project import Project
 from app.models.storyboard import VisualScene
 from app.models.task import TaskRun
+from app.workflows import render_jobs
 
 
 class SceneJobApiTests(unittest.TestCase):
+    def test_final_render_job_renders_dirty_scenes_before_composition(self) -> None:
+        engine = create_engine("sqlite://")
+        SQLModel.metadata.create_all(engine)
+        transitions: list[str] = []
+        try:
+            with Session(engine) as session:
+                project = Project(id="p1", name="Project")
+                session.add(project)
+                session.add(
+                    TaskRun(
+                        id="final-job",
+                        project_id=project.id,
+                        workflow="final_render",
+                        job_type="final_render",
+                        status="running",
+                        current_stage="scene_render",
+                        queue_sequence=1,
+                    )
+                )
+                session.commit()
+                with (
+                    patch.object(render_jobs.scene_renderer, "render_all_scenes") as render_scenes,
+                    patch.object(render_jobs.visual_track_composer, "compose_visual_track") as visual,
+                    patch.object(
+                        render_jobs.final_renderer,
+                        "compose_final_video",
+                        return_value={"path": "final.mp4"},
+                    ) as final,
+                ):
+                    render_jobs.run_final_render_job(
+                        session, project, "scene_render", True, transitions.append
+                    )
+
+                render_scenes.assert_called_once_with(session, project)
+                visual.assert_called_once_with(session, project)
+                final.assert_called_once_with(session, project)
+                self.assertEqual(transitions, ["visual_track", "final_render", "completed"])
+        finally:
+            engine.dispose()
+
     def test_scene_image_job_uses_persistent_unified_protocol(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             engine = create_engine(

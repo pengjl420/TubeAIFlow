@@ -3,7 +3,12 @@ from sqlmodel import Session, select
 from app.infrastructure.serialization import dump_json, load_json_object
 from app.models.project import Project
 from app.models.task import TaskRun
-from app.services.rendering import final_renderer, preview_renderer, visual_track_composer
+from app.services.rendering import (
+    final_renderer,
+    preview_renderer,
+    scene_renderer,
+    visual_track_composer,
+)
 from app.shared.time import utc_now_iso
 from app.workflows.engine import StageChanged
 
@@ -41,13 +46,19 @@ def run_final_render_job(
     _include_video: bool,
     on_stage_changed: StageChanged,
 ) -> None:
-    if current_stage not in {"visual_track", "final_render"}:
+    if current_stage not in {"scene_render", "visual_track", "final_render"}:
         raise ValueError(f"Unknown Final Render Job stage: {current_stage}")
     task = _running_task(session, project.id, FINAL_RENDER_WORKFLOW_ID)
+    if current_stage == "scene_render":
+        _set_progress(session, task, 10)
+        scene_renderer.render_all_scenes(session, project)
+        _set_progress(session, task, 40)
+        on_stage_changed("visual_track")
+        current_stage = "visual_track"
     if current_stage == "visual_track":
-        _set_progress(session, task, 15)
+        _set_progress(session, task, 45)
         visual_track_composer.compose_visual_track(session, project)
-        _set_progress(session, task, 55)
+        _set_progress(session, task, 70)
         on_stage_changed("final_render")
     result = final_renderer.compose_final_video(session, project)
     _finish(session, task, result)

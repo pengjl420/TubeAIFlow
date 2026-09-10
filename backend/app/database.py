@@ -12,7 +12,7 @@ from sqlmodel import Session, SQLModel, create_engine
 from app.config import DATABASE_PATH
 
 
-LATEST_SCHEMA_VERSION = 20
+LATEST_SCHEMA_VERSION = 21
 logger = logging.getLogger(__name__)
 
 
@@ -489,6 +489,9 @@ def _apply_migrations() -> None:
         20: [
             "ALTER TABLE task_runs ADD COLUMN request_json VARCHAR NOT NULL DEFAULT '{}'",
         ],
+        # Version 16 installed triggers before scene_revisions existed. Re-run
+        # trigger installation after all revision tables are present.
+        21: [],
     }
     with engine.begin() as connection:
         connection.exec_driver_sql(
@@ -508,7 +511,7 @@ def _apply_migrations() -> None:
                 connection.exec_driver_sql(statement)
             if version == 3:
                 _migrate_source_subtitles(connection)
-            if version == 16:
+            if version in {16, 21}:
                 _install_referential_integrity_triggers(connection)
             connection.exec_driver_sql(
                 "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
@@ -658,6 +661,8 @@ def _referential_integrity_violations(connection) -> list[str]:
         ("task_runs", "project_id", "projects"),
         ("subtitle_cues", "project_id", "projects"),
         ("visual_scenes", "project_id", "projects"),
+        ("scene_revisions", "project_id", "projects"),
+        ("scene_revisions", "scene_id", "visual_scenes"),
         ("media_shots", "media_file_id", "media_files"),
         ("scene_assignments", "scene_id", "visual_scenes"),
         ("scene_assignments", "media_shot_id", "media_shots"),

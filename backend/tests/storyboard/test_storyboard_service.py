@@ -7,13 +7,14 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from pydantic import ValidationError
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.models.project import Project
 from app.models.storyboard import SubtitleCue, VisualScene
 from app.schemas.storyboard import StoryboardContent
 from app.services.storyboard import storyboard_service
 from app.services.storyboard.scene_grouper import group_cues
+from app.workflows import narration_generation, video_synthesis
 
 
 class _FakeDeepSeek:
@@ -152,6 +153,71 @@ class _PercentScoreRepairDeepSeek(_FakeDeepSeek):
 
 
 class StoryboardServiceTests(unittest.TestCase):
+    def test_video_storyboard_regeneration_does_not_predelete_locked_scenes(self) -> None:
+        with self.project_session(cue_count=1) as (session, project, settings):
+            with patch.object(storyboard_service, "get_settings", return_value=settings):
+                result = storyboard_service.generate_storyboard(
+                    session, project, client=_FakeDeepSeek()
+                )
+            scene_id = result["scenes"][0]["id"]
+            scene = session.get(VisualScene, scene_id)
+            scene.locked_visual = True
+            session.add(scene)
+            session.commit()
+
+            def observe_existing_scene(observed_session, _project):
+                self.assertIsNotNone(observed_session.get(VisualScene, scene_id))
+                return {"scenes": []}
+
+            with patch.object(
+                storyboard_service,
+                "generate_storyboard",
+                side_effect=observe_existing_scene,
+            ):
+                video_synthesis.regenerate_storyboard(session, project)
+
+    def test_locked_scene_audio_blocks_audio_workflow_stages(self) -> None:
+        with self.project_session(cue_count=1) as (session, project, settings):
+            with patch.object(storyboard_service, "get_settings", return_value=settings):
+                result = storyboard_service.generate_storyboard(
+                    session, project, client=_FakeDeepSeek()
+                )
+            scene = session.get(VisualScene, result["scenes"][0]["id"])
+            scene.locked_audio = True
+            session.add(scene)
+            session.commit()
+
+            with (
+                patch.object(narration_generation, "ensure_ffmpeg_available"),
+                self.assertRaisesRegex(ValueError, "audio is locked"),
+            ):
+                narration_generation.run_project_generation(
+                    session, project, "tts", False, lambda _stage: None
+                )
+
+    def test_locked_scene_rejects_changed_subtitle_timing_during_regrouping(self) -> None:
+        with self.project_session(cue_count=1) as (session, project, settings):
+            with patch.object(storyboard_service, "get_settings", return_value=settings):
+                result = storyboard_service.generate_storyboard(
+                    session, project, client=_FakeDeepSeek()
+                )
+            scene = session.get(VisualScene, result["scenes"][0]["id"])
+            scene.locked_audio = True
+            cue = session.exec(
+                select(SubtitleCue).where(SubtitleCue.project_id == project.id)
+            ).first()
+            cue.end_ms += 500
+            session.add_all([scene, cue])
+            session.commit()
+
+            with (
+                patch.object(storyboard_service, "get_settings", return_value=settings),
+                self.assertRaisesRegex(ValueError, "subtitle grouping changed"),
+            ):
+                storyboard_service.generate_storyboard(
+                    session, project, client=_FakeDeepSeek()
+                )
+
     def test_segment_storyboard_mode_groups_cues_by_source_segment(self) -> None:
         cues = [
             {"id": "c1", "source_segment_id": "s1"},

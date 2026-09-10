@@ -6,6 +6,7 @@ from app.models.storyboard import VisualScene
 from app.models.task import TaskRun
 from app.services.image_generation import image_generation_service
 from app.services.rendering import scene_renderer
+from app.services.storyboard import scene_workspace_service
 from app.shared.time import utc_now_iso
 from app.workflows.engine import StageChanged
 
@@ -25,8 +26,14 @@ def run_scene_image_job(
     session.add(task)
     session.commit()
     result = image_generation_service.regenerate_scene_images(
-        session, project, _scene_id(task)
+        session,
+        project,
+        _scene_id(task),
+        regeneration_id=task.id,
     )
+    scene = session.get(VisualScene, _scene_id(task))
+    if scene:
+        scene_workspace_service.invalidate_scene_outputs(project, scene)
     task.result_json = dump_json(result)
     task.progress = 100
     task.updated_at = utc_now_iso()

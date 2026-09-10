@@ -34,6 +34,8 @@ class WorkflowArchitectureTests(unittest.TestCase):
         narration = workflow_registry.get(NARRATION_WORKFLOW_ID)
         self.assertIn("segmenting", narration.stages)
         self.assertIn("quality_check", narration.video_stages)
+        self.assertEqual(narration.resource_class("tts"), ResourceClass.GPU)
+        self.assertEqual(narration.resource_class("audio_merge"), ResourceClass.FFMPEG)
 
     def test_graph_executes_registered_steps_and_persists_each_transition(self) -> None:
         transitions: list[str] = []

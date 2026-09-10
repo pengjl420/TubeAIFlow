@@ -12,7 +12,7 @@ from app.models.batch import BatchItem, BatchJob
 from app.models.media import GeneratedImageVariant, MediaFile, MediaShot, SceneAssignment
 from app.models.task import TaskRun
 from app.providers import ProviderCategory, provider_registry
-from app.models.storyboard import SubtitleCue, VisualScene
+from app.models.storyboard import SceneRevision, SubtitleCue, VisualScene
 from app.infrastructure.file_storage import ensure_inside_any, project_dir
 from app.infrastructure.recycle_bin import move_existing_to_recycle_bin
 from app.infrastructure.project_layout import (
@@ -278,6 +278,10 @@ def delete_project(session: Session, project: Project) -> dict:
         media_file = session.get(MediaFile, media_id)
         if media_file and media_file.provider == "local_image_generation":
             session.delete(media_file)
+    for revision in session.exec(
+        select(SceneRevision).where(SceneRevision.project_id == project.id)
+    ).all():
+        session.delete(revision)
     for scene in session.exec(
         select(VisualScene).where(VisualScene.project_id == project.id)
     ).all():

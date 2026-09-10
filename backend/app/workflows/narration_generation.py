@@ -1,11 +1,12 @@
 from collections.abc import Callable
+import json
 from pathlib import Path
 
 from sqlmodel import Session, select
 
 from app.models.project import Project
 from app.models.narration import Segment
-from app.models.storyboard import SubtitleCue
+from app.models.storyboard import SubtitleCue, VisualScene
 from app.infrastructure import process_runner as task_control
 from app.infrastructure.ffmpeg import ensure_ffmpeg_available
 from app.config import get_settings
@@ -34,6 +35,11 @@ def regenerate_segment_and_refresh_outputs(
     segment: Segment,
 ) -> Segment:
     """Regenerate one segment and keep completed narration artifacts consistent."""
+    locked_indexes = _locked_audio_scene_indexes(session, project.id, segment.id)
+    if locked_indexes:
+        raise ValueError(
+            "Scene audio is locked: " + ", ".join(str(index) for index in locked_indexes)
+        )
     full_audio_path = get_final_audio_path(project, get_settings().workspace_dir)
     refresh_completed_outputs = full_audio_path.is_file()
 
@@ -57,6 +63,12 @@ def run_project_generation(
     supported_stages = {*_NARRATION_GRAPH.stages, "completed", *video_synthesis.STAGES}
     if stage not in supported_stages:
         raise ValueError(f"Unknown generation stage: {stage}")
+    if stage in {"segmenting", "tts", "audio_merge"}:
+        locked_indexes = _locked_audio_scene_indexes(session, project.id)
+        if locked_indexes:
+            raise ValueError(
+                "Scene audio is locked: " + ", ".join(str(index) for index in locked_indexes)
+            )
     stage = _NARRATION_GRAPH.execute(
         WorkflowContext(session=session, project=project, include_video=include_video),
         stage,
@@ -64,6 +76,41 @@ def run_project_generation(
     )
     if stage in video_synthesis.STAGES and stage != "completed":
         video_synthesis.run_video_synthesis(session, project, stage, on_stage_changed)
+
+
+def _locked_audio_scene_indexes(
+    session: Session,
+    project_id: str,
+    source_segment_id: str | None = None,
+) -> list[int]:
+    scenes = list(
+        session.exec(
+            select(VisualScene).where(
+                VisualScene.project_id == project_id,
+                VisualScene.locked_audio.is_(True),
+            )
+        ).all()
+    )
+    if source_segment_id is None:
+        return sorted(scene.scene_index for scene in scenes)
+    cue_ids = {
+        cue_id
+        for cue_id in session.exec(
+            select(SubtitleCue.id).where(
+                SubtitleCue.project_id == project_id,
+                SubtitleCue.source_segment_id == source_segment_id,
+            )
+        ).all()
+    }
+    matched = []
+    for scene in scenes:
+        try:
+            scene_cue_ids = set(json.loads(scene.subtitle_ids_json))
+        except (TypeError, json.JSONDecodeError):
+            scene_cue_ids = set()
+        if cue_ids.intersection(scene_cue_ids):
+            matched.append(scene.scene_index)
+    return sorted(matched)
 
 
 def _segmenting_step(context: WorkflowContext) -> str:
@@ -170,6 +217,14 @@ def _stage_after_narration(project: Project, include_video: bool) -> str:
     }:
         return "storyboard"
     return "completed"
+
+
+def resource_class(stage: str) -> ResourceClass:
+    if stage in _NARRATION_GRAPH.stages:
+        return _NARRATION_GRAPH.resource_class(stage)
+    if stage in video_synthesis.STAGES and stage != "completed":
+        return video_synthesis.resource_class(stage)
+    raise ValueError(f"Unknown generation stage: {stage}")
 
 
 def initial_stage(session: Session, project: Project, include_video: bool) -> str:

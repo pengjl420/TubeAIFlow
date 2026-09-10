@@ -62,14 +62,26 @@ def generate_project_images(session: Session, project: Project) -> dict:
 
 
 def regenerate_scene_images(
-    session: Session, project: Project, scene_id: str
+    session: Session,
+    project: Project,
+    scene_id: str,
+    *,
+    regeneration_id: str,
 ) -> dict:
     scene = session.get(VisualScene, scene_id)
     if not scene or scene.project_id != project.id:
         raise ValueError("Visual scene does not exist")
     if scene.locked_visual:
         raise ValueError("Scene visual is locked")
-    return _generate(session, project, [scene], force=True)
+    if not regeneration_id.strip():
+        raise ValueError("Image regeneration id is required")
+    return _generate(
+        session,
+        project,
+        [scene],
+        force=True,
+        regeneration_id=regeneration_id,
+    )
 
 
 def _generate(
@@ -77,6 +89,7 @@ def _generate(
     project: Project,
     scenes: list[VisualScene],
     force: bool = False,
+    regeneration_id: str | None = None,
 ) -> dict:
     settings = get_settings()
     model_path = settings.image_generation_model_path
@@ -98,17 +111,32 @@ def _generate(
     jobs = []
     variants = []
     for scene in scenes:
-        if force:
-            _clear_scene_generated_assets(session, scene.id)
         if not scene.storyboard_json:
             raise ValueError(f"场景 {scene.scene_index} 尚未生成 Storyboard")
         storyboard = StoryboardContent.model_validate_json(scene.storyboard_json)
         prompt, negative_prompt = _prompts(storyboard, settings.image_generation_negative_prompt)
         scene_dir = generated_dir / f"scene_{scene.scene_index:04d}"
+        attempt_key = (
+            hashlib.sha1(regeneration_id.encode()).hexdigest()[:16]
+            if force and regeneration_id
+            else None
+        )
         for variant_index in range(1, settings.image_generation_candidates_per_scene + 1):
-            variant_id = f"{scene.id}:image:{variant_index}"
-            output_path = scene_dir / f"candidate_{variant_index:02d}.png"
-            seed = _stable_seed(project.id, scene.id, variant_index)
+            variant_id = (
+                f"{scene.id}:image:regen:{attempt_key}:{variant_index}"
+                if attempt_key
+                else f"{scene.id}:image:{variant_index}"
+            )
+            output_path = (
+                scene_dir / "regenerations" / attempt_key / f"candidate_{variant_index:02d}.png"
+                if attempt_key
+                else scene_dir / f"candidate_{variant_index:02d}.png"
+            )
+            seed = (
+                _regeneration_seed(project.id, scene.id, variant_index, regeneration_id)
+                if force
+                else _stable_seed(project.id, scene.id, variant_index)
+            )
             signature = _signature(
                 prompt,
                 negative_prompt,
@@ -145,7 +173,7 @@ def _generate(
                     steps=settings.image_generation_steps,
                     guidance_scale=settings.image_generation_guidance_scale,
                 )
-            elif force or not reusable:
+            elif not reusable:
                 variant.path = str(output_path)
                 variant.prompt = prompt
                 variant.negative_prompt = negative_prompt
@@ -173,7 +201,7 @@ def _generate(
                 variant.updated_at = utc_now_iso()
             session.add(variant)
             variants.append(variant)
-            if force or not reusable:
+            if not reusable:
                 jobs.append(
                     {
                         "variant_id": variant.id,
@@ -210,16 +238,31 @@ def _generate(
             )
         _apply_results(session, result_path)
 
-    registered = 0
     for variant in variants:
         session.refresh(variant)
+    failures = [item for item in variants if item.status == "failed"]
+    if failures:
+        # Keep the previous successful generation and its assignment intact.
+        raise RuntimeError(f"{len(failures)} 个图片候选生成失败，请检查 image_generation_results.json")
+
+    registered = 0
+    for variant in variants:
         if variant.status == "completed" and Path(variant.path).is_file():
             _register_generated_image(session, project, variant)
             registered += 1
+    stale_paths: list[Path] = []
+    if force:
+        keep_ids = {variant.id for variant in variants}
+        for scene in scenes:
+            stale_paths.extend(
+                _clear_scene_generated_assets(session, scene.id, preserve_variant_ids=keep_ids)
+            )
     session.commit()
-    failures = [item for item in variants if item.status == "failed"]
-    if failures:
-        raise RuntimeError(f"{len(failures)} 个图片候选生成失败，请检查 image_generation_results.json")
+    for stale_path in stale_paths:
+        try:
+            stale_path.unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Could not remove superseded generated image: %s", stale_path)
     return {
         "project_id": project.id,
         "scene_count": len(scenes),
@@ -393,45 +436,88 @@ def _register_generated_image(session: Session, project: Project, variant: Gener
     session.add(variant)
 
 
-def _clear_scene_generated_assets(session: Session, scene_id: str) -> None:
+def _clear_scene_generated_assets(
+    session: Session,
+    scene_id: str,
+    *,
+    preserve_variant_ids: set[str] | None = None,
+) -> list[Path]:
+    preserved = preserve_variant_ids or set()
     variants = list(
         session.exec(
             select(GeneratedImageVariant).where(GeneratedImageVariant.scene_id == scene_id)
         ).all()
     )
+    variants = [item for item in variants if item.id not in preserved]
     media_ids = {item.media_file_id for item in variants if item.media_file_id}
+    shot_ids_by_media = {
+        media_id: {
+            shot.id
+            for shot in session.exec(
+                select(MediaShot).where(MediaShot.media_file_id == media_id)
+            ).all()
+        }
+        for media_id in media_ids
+    }
+    stale_shot_ids = {shot_id for ids in shot_ids_by_media.values() for shot_id in ids}
     for assignment in session.exec(
         select(SceneAssignment).where(SceneAssignment.scene_id == scene_id)
     ).all():
-        if assignment.media_shot_id in {
-            shot.id
-            for media_id in media_ids
-            for shot in session.exec(select(MediaShot).where(MediaShot.media_file_id == media_id)).all()
-        }:
+        if assignment.media_shot_id in stale_shot_ids:
             session.delete(assignment)
+    for variant in variants:
+        session.delete(variant)
+    session.flush()
+    deleted_media_ids: set[str] = set()
     for media_id in media_ids:
         still_referenced = session.exec(
-            select(GeneratedImageVariant).where(
-                GeneratedImageVariant.media_file_id == media_id,
-                GeneratedImageVariant.scene_id != scene_id,
-            )
+            select(GeneratedImageVariant).where(GeneratedImageVariant.media_file_id == media_id)
         ).first()
         if still_referenced:
             continue
-        for shot in session.exec(select(MediaShot).where(MediaShot.media_file_id == media_id)).all():
+        shots = list(
+            session.exec(select(MediaShot).where(MediaShot.media_file_id == media_id)).all()
+        )
+        referenced_assignment = session.exec(
+            select(SceneAssignment).where(
+                SceneAssignment.media_shot_id.in_([shot.id for shot in shots])
+            )
+        ).first() if shots else None
+        if referenced_assignment:
+            continue
+        for shot in shots:
             session.delete(shot)
         media_file = session.get(MediaFile, media_id)
         if media_file and media_file.provider == PROVIDER:
             session.delete(media_file)
-    for variant in variants:
-        variant.media_file_id = None
-        session.add(variant)
+            deleted_media_ids.add(media_id)
     session.flush()
+    # If a new variant deduplicated to an old MediaFile, that MediaFile still
+    # points at the old path. Keep it until the final reference is removed.
+    return [
+        Path(item.path)
+        for item in variants
+        if item.media_file_id is None or item.media_file_id in deleted_media_ids
+    ]
 
 
 def _stable_seed(project_id: str, scene_id: str, variant_index: int) -> int:
     value = hashlib.sha256(f"{project_id}:{scene_id}:{variant_index}".encode()).digest()
     return int.from_bytes(value[:4], "big") & 0x7FFFFFFF or random.randint(1, 2**31 - 1)
+
+
+def _regeneration_seed(
+    project_id: str,
+    scene_id: str,
+    variant_index: int,
+    regeneration_id: str | None,
+) -> int:
+    if not regeneration_id:
+        raise ValueError("Image regeneration id is required")
+    value = hashlib.sha256(
+        f"{project_id}:{scene_id}:{variant_index}:regenerate:{regeneration_id}".encode()
+    ).digest()
+    return int.from_bytes(value[:4], "big") & 0x7FFFFFFF or 1
 
 
 def _signature(prompt: str, negative: str, model: Path, seed: int, width: int, height: int, steps: int, guidance: float) -> str:

@@ -166,8 +166,13 @@ def initial_stage(session: Session, project_id: str) -> str:
     return "scene_render"
 
 
+def resource_class(stage: str) -> ResourceClass:
+    if stage not in _VIDEO_GRAPH.stages:
+        raise ValueError(f"Unknown video synthesis stage: {stage}")
+    return _VIDEO_GRAPH.resource_class(stage)
+
+
 def regenerate_storyboard(session: Session, project: Project) -> dict:
-    _clear_project_visual_data(session, project.id)
     return storyboard_service.generate_storyboard(session, project)
 
 
@@ -193,19 +198,3 @@ def _scene_has_assignment(session: Session, scene_id: str) -> bool:
     return session.exec(
         select(SceneAssignment.id).where(SceneAssignment.scene_id == scene_id).limit(1)
     ).first() is not None
-
-
-def _clear_project_visual_data(session: Session, project_id: str) -> None:
-    from app.models.media import GeneratedImageVariant, SceneAssignment
-
-    for assignment in session.exec(
-        select(SceneAssignment).where(SceneAssignment.project_id == project_id)
-    ).all():
-        session.delete(assignment)
-    for variant in session.exec(
-        select(GeneratedImageVariant).where(GeneratedImageVariant.project_id == project_id)
-    ).all():
-        session.delete(variant)
-    for scene in _scenes(session, project_id):
-        session.delete(scene)
-    session.commit()

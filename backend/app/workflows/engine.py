@@ -54,6 +54,9 @@ class WorkflowGraph:
         except KeyError as exc:
             raise ValueError(f"Unknown workflow stage: {stage}") from exc
 
+    def resource_class(self, stage: str) -> ResourceClass:
+        return self.step(stage).resource_class
+
     def execute(
         self,
         context: WorkflowContext,

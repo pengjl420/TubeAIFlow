@@ -1,8 +1,11 @@
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlmodel import Session
 
 from app.database import get_session
+from app.infrastructure import process_runner as task_control
 from app.services.narration import subtitle_service
 from app.services.projects import project_service
 from app.services.storyboard import storyboard_service
@@ -177,7 +180,13 @@ def clear_scene_asset(project_id: str, scene_id: str, session: Session = Depends
 def regenerate_scene_assets(project_id: str, scene_id: str, session: Session = Depends(get_session)) -> dict:
     project = _require_project(session, project_id)
     try:
-        image_generation_service.regenerate_scene_images(session, project, scene_id)
+        with task_control.controlled(project.id, "image_generation"):
+            image_generation_service.regenerate_scene_images(
+                session,
+                project,
+                scene_id,
+                regeneration_id=uuid.uuid4().hex,
+            )
         scene = session.get(VisualScene, scene_id)
         if scene:
             scene_workspace_service.invalidate_scene_outputs(project, scene)
@@ -185,6 +194,8 @@ def regenerate_scene_assets(project_id: str, scene_id: str, session: Session = D
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
     except RuntimeError as exc:
+        if "already has a running" in str(exc):
+            raise HTTPException(status_code=409, detail={"error": str(exc)}) from exc
         raise HTTPException(status_code=500, detail={"error": str(exc)}) from exc
     return {"success": True, "data": data}
 

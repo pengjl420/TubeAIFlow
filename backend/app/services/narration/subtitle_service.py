@@ -8,8 +8,9 @@ from app.config import get_settings
 from app.infrastructure.file_storage import project_dir
 from app.infrastructure.project_layout import ensure_project_dirs
 from app.models.narration import Segment
+from app.models.media import GeneratedImageVariant, SceneAssignment
 from app.models.project import Project
-from app.models.storyboard import SubtitleCue, VisualScene
+from app.models.storyboard import SceneRevision, SubtitleCue, VisualScene
 from app.shared.time import utc_now_iso
 
 
@@ -327,6 +328,20 @@ def replace_project_cues(session: Session, project_id: str, cue_values: list[dic
     if comparable_existing == cue_values:
         return False
 
+    scenes = list(
+        session.exec(select(VisualScene).where(VisualScene.project_id == project_id)).all()
+    )
+    locked_indexes = [
+        scene.scene_index
+        for scene in scenes
+        if scene.locked_text or scene.locked_audio or scene.locked_visual
+    ]
+    if locked_indexes:
+        indexes = ", ".join(str(index) for index in sorted(locked_indexes))
+        raise ValueError(f"Scene {indexes} is locked; unlock it before replacing subtitles")
+    session.exec(delete(SceneAssignment).where(SceneAssignment.project_id == project_id))
+    session.exec(delete(GeneratedImageVariant).where(GeneratedImageVariant.project_id == project_id))
+    session.exec(delete(SceneRevision).where(SceneRevision.project_id == project_id))
     session.exec(delete(VisualScene).where(VisualScene.project_id == project_id))
     session.exec(delete(SubtitleCue).where(SubtitleCue.project_id == project_id))
     now = utc_now_iso()

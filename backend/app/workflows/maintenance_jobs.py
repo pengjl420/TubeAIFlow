@@ -14,8 +14,11 @@ QUALITY_CHECK_WORKFLOW_ID = "quality_check"
 
 
 def run_asset_scan_job(
-    session: Session, project: Project, current_stage: str,
-    _include_video: bool, on_stage_changed: StageChanged,
+    session: Session,
+    project: Project,
+    current_stage: str,
+    _include_video: bool,
+    on_stage_changed: StageChanged,
 ) -> None:
     if current_stage != "scan":
         raise ValueError(f"Unknown asset scan Job stage: {current_stage}")
@@ -27,8 +30,11 @@ def run_asset_scan_job(
 
 
 def run_quality_check_job(
-    session: Session, project: Project, current_stage: str,
-    _include_video: bool, on_stage_changed: StageChanged,
+    session: Session,
+    project: Project,
+    current_stage: str,
+    _include_video: bool,
+    on_stage_changed: StageChanged,
 ) -> None:
     if current_stage != "analyze":
         raise ValueError(f"Unknown quality check Job stage: {current_stage}")

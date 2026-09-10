@@ -88,9 +88,7 @@ def enqueue_project_task(
             max_retries=max(0, max_retries),
             request_json=dump_json(request or {}),
             queue_sequence=int(last_sequence or 0) + 1,
-            checkpoint_json=dump_json(
-                {"current_stage": current_stage, "stage_history": []}
-            ),
+            checkpoint_json=dump_json({"current_stage": current_stage, "stage_history": []}),
             config_snapshot_json=build_config_snapshot(project),
             created_at=now,
             updated_at=now,
@@ -208,9 +206,7 @@ def get_latest_batch_item_task(session: Session, batch_item_id: str) -> TaskRun 
 def list_batch_tasks(session: Session, batch_id: str) -> list[TaskRun]:
     return list(
         session.exec(
-            select(TaskRun)
-            .where(TaskRun.batch_id == batch_id)
-            .order_by(TaskRun.queue_sequence)
+            select(TaskRun).where(TaskRun.batch_id == batch_id).order_by(TaskRun.queue_sequence)
         ).all()
     )
 

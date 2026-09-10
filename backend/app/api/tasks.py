@@ -98,9 +98,13 @@ def enqueue_scene_image_job(
     project_id: str, scene_id: str, session: Session = Depends(get_session)
 ) -> dict:
     return _enqueue_scene_job(
-        session, project_id, scene_id,
-        workflow="scene_image_regeneration", job_type="scene_image_regeneration",
-        stage="generate", resource_class="gpu",
+        session,
+        project_id,
+        scene_id,
+        workflow="scene_image_regeneration",
+        job_type="scene_image_regeneration",
+        stage="generate",
+        resource_class="gpu",
     )
 
 
@@ -109,10 +113,13 @@ def enqueue_scene_storyboard_job(
     project_id: str, scene_id: str, session: Session = Depends(get_session)
 ) -> dict:
     return _enqueue_scene_job(
-        session, project_id, scene_id,
+        session,
+        project_id,
+        scene_id,
         workflow="scene_storyboard_regeneration",
         job_type="scene_storyboard_regeneration",
-        stage="generate", resource_class="api",
+        stage="generate",
+        resource_class="api",
     )
 
 
@@ -121,9 +128,13 @@ def enqueue_scene_preview_job(
     project_id: str, scene_id: str, session: Session = Depends(get_session)
 ) -> dict:
     return _enqueue_scene_job(
-        session, project_id, scene_id,
-        workflow="scene_preview_render", job_type="scene_preview_render",
-        stage="render", resource_class="ffmpeg",
+        session,
+        project_id,
+        scene_id,
+        workflow="scene_preview_render",
+        job_type="scene_preview_render",
+        stage="render",
+        resource_class="ffmpeg",
     )
 
 
@@ -146,9 +157,7 @@ def enqueue_timeline_preview_job(
 
 
 @router.post("/projects/{project_id}/jobs/final-render")
-def enqueue_final_render_job(
-    project_id: str, session: Session = Depends(get_session)
-) -> dict:
+def enqueue_final_render_job(project_id: str, session: Session = Depends(get_session)) -> dict:
     return _enqueue_render_job(
         session,
         project_id,
@@ -159,9 +168,7 @@ def enqueue_final_render_job(
 
 
 @router.post("/projects/{project_id}/jobs/assets/scan")
-def enqueue_asset_scan_job(
-    project_id: str, session: Session = Depends(get_session)
-) -> dict:
+def enqueue_asset_scan_job(project_id: str, session: Session = Depends(get_session)) -> dict:
     return _enqueue_render_job(
         session,
         project_id,
@@ -172,9 +179,7 @@ def enqueue_asset_scan_job(
 
 
 @router.post("/projects/{project_id}/jobs/quality-check")
-def enqueue_quality_check_job(
-    project_id: str, session: Session = Depends(get_session)
-) -> dict:
+def enqueue_quality_check_job(project_id: str, session: Session = Depends(get_session)) -> dict:
     return _enqueue_render_job(
         session,
         project_id,
@@ -185,9 +190,7 @@ def enqueue_quality_check_job(
 
 
 @router.post("/projects/{project_id}/jobs/visual-track")
-def enqueue_visual_track_job(
-    project_id: str, session: Session = Depends(get_session)
-) -> dict:
+def enqueue_visual_track_job(project_id: str, session: Session = Depends(get_session)) -> dict:
     return _enqueue_render_job(
         session,
         project_id,
@@ -198,9 +201,7 @@ def enqueue_visual_track_job(
 
 
 @router.post("/projects/{project_id}/jobs/rough-cut")
-def enqueue_rough_cut_job(
-    project_id: str, session: Session = Depends(get_session)
-) -> dict:
+def enqueue_rough_cut_job(project_id: str, session: Session = Depends(get_session)) -> dict:
     return _enqueue_render_job(
         session,
         project_id,
@@ -216,9 +217,7 @@ def get_job_resources(session: Session = Depends(get_session)) -> dict:
 
 
 @router.get("/projects/{project_id}/jobs/{job_id}")
-def get_project_job(
-    project_id: str, job_id: str, session: Session = Depends(get_session)
-) -> dict:
+def get_project_job(project_id: str, job_id: str, session: Session = Depends(get_session)) -> dict:
     task = session.get(TaskRun, job_id)
     if not task or task.project_id != project_id:
         raise HTTPException(status_code=404, detail={"error": "Job not found"})
@@ -273,7 +272,9 @@ def cancel_project_job(
 def cancel_project_task(project_id: str, session: Session = Depends(get_session)) -> dict:
     project = project_service.get_project(session, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
+        raise HTTPException(
+            status_code=404, detail={"success": False, "error": "Project not found"}
+        )
     task = task_service.get_active_project_task(session, project_id)
     if task:
         was_running = task.status == "running"
@@ -314,7 +315,9 @@ def cancel_project_task(project_id: str, session: Session = Depends(get_session)
 @router.get("/projects/{project_id}/tasks/status")
 def project_task_status(project_id: str, session: Session = Depends(get_session)) -> dict:
     if not project_service.get_project(session, project_id):
-        raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
+        raise HTTPException(
+            status_code=404, detail={"success": False, "error": "Project not found"}
+        )
     task = task_service.get_project_status_task(session, project_id)
     data = task_service.serialize_task(session, task)
     runtime = task_control.status(project_id)
@@ -329,7 +332,9 @@ def project_task_status(project_id: str, session: Session = Depends(get_session)
 def start_project_workflow(project_id: str, session: Session = Depends(get_session)) -> dict:
     project = project_service.get_project(session, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
+        raise HTTPException(
+            status_code=404, detail={"success": False, "error": "Project not found"}
+        )
     if not project.script_clean_path:
         raise HTTPException(
             status_code=400,
@@ -390,7 +395,9 @@ def continue_project_workflow(project_id: str, session: Session = Depends(get_se
 def start_video_workflow(project_id: str, session: Session = Depends(get_session)) -> dict:
     project = project_service.get_project(session, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
+        raise HTTPException(
+            status_code=404, detail={"success": False, "error": "Project not found"}
+        )
     if project_service.get_project_video_mode(project) not in {
         project_service.VIDEO_MODE_AI_GENERATED_IMAGES,
         project_service.VIDEO_MODE_AI_LANDSCAPE_MIX,
@@ -418,7 +425,8 @@ def start_video_workflow(project_id: str, session: Session = Depends(get_session
         task_service.resume_failed_task(
             session,
             latest,
-            current_stage=latest.current_stage or video_synthesis.initial_stage(session, project_id),
+            current_stage=latest.current_stage
+            or video_synthesis.initial_stage(session, project_id),
         )
         task = latest
     else:
@@ -437,7 +445,9 @@ def start_video_workflow(project_id: str, session: Session = Depends(get_session
 def video_workflow_status(project_id: str, session: Session = Depends(get_session)) -> dict:
     project = project_service.get_project(session, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
+        raise HTTPException(
+            status_code=404, detail={"success": False, "error": "Project not found"}
+        )
     task = _latest_ai_video_task(session, project_id)
     return {"success": True, "data": task_service.serialize_task(session, task)}
 

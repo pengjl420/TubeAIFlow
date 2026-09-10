@@ -307,8 +307,7 @@ def _active_job_for(model_id: str) -> dict | None:
             (
                 dict(item)
                 for item in _jobs.values()
-                if item.get("model_id") == model_id
-                and item.get("status") in {"queued", "running"}
+                if item.get("model_id") == model_id and item.get("status") in {"queued", "running"}
             ),
             None,
         )

@@ -123,8 +123,6 @@ _VIDEO_GRAPH = WorkflowGraph(
             depends_on=("storyboard",),
             input_artifacts=("scene_plan",),
             output_artifacts=("scene_assets",),
-            cacheable=True,
-            cached_next_stage="scene_render",
         ),
         WorkflowStep(
             "scene_render",
@@ -133,8 +131,6 @@ _VIDEO_GRAPH = WorkflowGraph(
             depends_on=("image_generation",),
             input_artifacts=("scene_assets",),
             output_artifacts=("scene_renders",),
-            cacheable=True,
-            cached_next_stage="visual_track",
         ),
         WorkflowStep(
             "visual_track",
@@ -187,9 +183,12 @@ def regenerate_storyboard(session: Session, project: Project) -> dict:
 
 
 def has_subtitles(session: Session, project_id: str) -> bool:
-    return session.exec(
-        select(SubtitleCue.id).where(SubtitleCue.project_id == project_id).limit(1)
-    ).first() is not None
+    return (
+        session.exec(
+            select(SubtitleCue.id).where(SubtitleCue.project_id == project_id).limit(1)
+        ).first()
+        is not None
+    )
 
 
 def _scenes(session: Session, project_id: str) -> list[VisualScene]:
@@ -205,9 +204,12 @@ def _scenes(session: Session, project_id: str) -> list[VisualScene]:
 def _scene_has_assignment(session: Session, scene_id: str) -> bool:
     from app.models.media import SceneAssignment
 
-    return session.exec(
-        select(SceneAssignment.id).where(SceneAssignment.scene_id == scene_id).limit(1)
-    ).first() is not None
+    return (
+        session.exec(
+            select(SceneAssignment.id).where(SceneAssignment.scene_id == scene_id).limit(1)
+        ).first()
+        is not None
+    )
 
 
 def _artifact_exists(session: Session, project: Project, name: str) -> bool:
@@ -221,7 +223,9 @@ def _artifact_exists(session: Session, project: Project, name: str) -> bool:
     if name == "scene_assets":
         return bool(scenes) and all(_scene_has_assignment(session, scene.id) for scene in scenes)
     if name == "scene_renders":
-        return bool(scenes) and all(scene_renderer.scene_output_path(project, scene).is_file() for scene in scenes)
+        return bool(scenes) and all(
+            scene_renderer.scene_output_path(project, scene).is_file() for scene in scenes
+        )
     if name == "visual_track":
         return (work_dir / "renders" / "visual_track.mp4").is_file()
     if name == "final_video":

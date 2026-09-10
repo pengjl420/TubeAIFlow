@@ -64,11 +64,7 @@ def hardware_status() -> dict:
         "ffmpeg_available": ffmpeg_available,
         "hardware_encoders": encoders,
         "recommended_encoder": next(
-            (
-                value
-                for value in ("h264_nvenc", "h264_qsv", "h264_amf")
-                if value in encoders
-            ),
+            (value for value in ("h264_nvenc", "h264_qsv", "h264_amf") if value in encoders),
             "libx264",
         ),
     }

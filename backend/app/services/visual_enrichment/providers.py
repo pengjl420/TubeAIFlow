@@ -174,7 +174,9 @@ class LlamaCppLLMProvider:
         payload = response.json()
         content = payload["choices"][0]["message"]["content"]
         if isinstance(content, list):
-            content = "".join(str(item.get("text") or "") for item in content if isinstance(item, dict))
+            content = "".join(
+                str(item.get("text") or "") for item in content if isinstance(item, dict)
+            )
         try:
             result = json.loads(str(content).strip())
         except json.JSONDecodeError as exc:
@@ -253,9 +255,7 @@ class ComfyUIImageProvider:
     def generate(self, request: dict) -> list[dict]:
         workflow = json.loads(self.workflow_path.read_text(encoding="utf-8"))
         patched = self._patch(workflow, request)
-        response = httpx.post(
-            f"{self.base_url}/prompt", json={"prompt": patched}, timeout=30
-        )
+        response = httpx.post(f"{self.base_url}/prompt", json={"prompt": patched}, timeout=30)
         response.raise_for_status()
         prompt_id = response.json()["prompt_id"]
         history = self._wait(prompt_id)
@@ -353,7 +353,12 @@ class Qwen3VLVisionProvider:
             "unapproved_logo (boolean), and approved (boolean).\nCLAIM:\n"
             + str(request.get("claim") or "")
         )
-        messages = [{"role": "user", "content": [{"type": "image", "image": image}, {"type": "text", "text": prompt}]}]
+        messages = [
+            {
+                "role": "user",
+                "content": [{"type": "image", "image": image}, {"type": "text", "text": prompt}],
+            }
+        ]
         inputs = self._processor.apply_chat_template(
             messages,
             add_generation_prompt=True,
@@ -361,7 +366,9 @@ class Qwen3VLVisionProvider:
             return_dict=True,
             return_tensors="pt",
         ).to(self._model.device)
-        outputs = self._model.generate(**inputs, max_new_tokens=self.max_new_tokens, do_sample=False)
+        outputs = self._model.generate(
+            **inputs, max_new_tokens=self.max_new_tokens, do_sample=False
+        )
         generated = outputs[0][inputs["input_ids"].shape[-1] :]
         text = self._processor.decode(generated, skip_special_tokens=True).strip()
         if text.startswith("```"):
@@ -386,9 +393,7 @@ class Qwen3VLVisionProvider:
 
         if not (self.model_dir / "config.json").is_file():
             raise FileNotFoundError(f"Incomplete Qwen3-VL model at {self.model_dir}")
-        self._processor = AutoProcessor.from_pretrained(
-            self.model_dir, local_files_only=True
-        )
+        self._processor = AutoProcessor.from_pretrained(self.model_dir, local_files_only=True)
         self._model = Qwen3VLForConditionalGeneration.from_pretrained(
             self.model_dir,
             local_files_only=True,

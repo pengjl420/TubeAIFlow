@@ -187,11 +187,7 @@ def _export_audio_only_fcpxml(session: Session, project: Project) -> dict:
 
 def _write_fcpxml(project: Project, root: ET.Element) -> Path:
     xml_body = ET.tostring(root, encoding="unicode", short_empty_elements=True)
-    xml_text = (
-        '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<!DOCTYPE fcpxml>\n'
-        f"{xml_body}\n"
-    )
+    xml_text = f'<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE fcpxml>\n{xml_body}\n'
     ET.fromstring(xml_body)
     output_path = get_final_fcpxml_path(project, get_settings().workspace_dir)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -214,8 +210,12 @@ def _build_landscape_xml(
         resources,
         "format",
         {
-            "id": "r1", "name": "FFVideoFormat1080p30", "frameDuration": "1/30s",
-            "width": "1920", "height": "1080", "colorSpace": "1-1-1 (Rec. 709)",
+            "id": "r1",
+            "name": "FFVideoFormat1080p30",
+            "frameDuration": "1/30s",
+            "width": "1920",
+            "height": "1080",
+            "colorSpace": "1-1-1 (Rec. 709)",
         },
     )
     clip_resource_ids: list[str] = []
@@ -245,9 +245,14 @@ def _build_landscape_xml(
         resources,
         "asset",
         {
-            "id": audio_resource_id, "name": audio_path.name, "start": "0s",
-            "duration": _time(total_ms), "hasAudio": "1", "audioSources": "1",
-            "audioChannels": "2", "audioRate": "48000",
+            "id": audio_resource_id,
+            "name": audio_path.name,
+            "start": "0s",
+            "duration": _time(total_ms),
+            "hasAudio": "1",
+            "audioSources": "1",
+            "audioChannels": "2",
+            "audioRate": "48000",
         },
     )
     ET.SubElement(
@@ -299,7 +304,9 @@ def _build_landscape_xml(
         cursor_ms += duration_ms
     if not primary_nodes or cursor_ms < total_ms:
         raise ValueError("Selected landscape clips do not cover the narration duration")
-    _add_audio_and_titles(primary_nodes[0], audio_resource_id, title_resource_id, audio_path, total_ms, cues)
+    _add_audio_and_titles(
+        primary_nodes[0], audio_resource_id, title_resource_id, audio_path, total_ms, cues
+    )
     return root
 
 
@@ -315,17 +322,26 @@ def _build_audio_only_xml(
         resources,
         "format",
         {
-            "id": "r1", "name": "FFVideoFormat1080p30", "frameDuration": "1/30s",
-            "width": "1920", "height": "1080", "colorSpace": "1-1-1 (Rec. 709)",
+            "id": "r1",
+            "name": "FFVideoFormat1080p30",
+            "frameDuration": "1/30s",
+            "width": "1920",
+            "height": "1080",
+            "colorSpace": "1-1-1 (Rec. 709)",
         },
     )
     audio_asset = ET.SubElement(
         resources,
         "asset",
         {
-            "id": "r2", "name": audio_path.name, "start": "0s",
-            "duration": _time(total_ms), "hasAudio": "1", "audioSources": "1",
-            "audioChannels": "2", "audioRate": "48000",
+            "id": "r2",
+            "name": audio_path.name,
+            "start": "0s",
+            "duration": _time(total_ms),
+            "hasAudio": "1",
+            "audioSources": "1",
+            "audioChannels": "2",
+            "audioRate": "48000",
         },
     )
     ET.SubElement(
@@ -337,7 +353,8 @@ def _build_audio_only_xml(
         resources,
         "effect",
         {
-            "id": "r3", "name": "Basic Title",
+            "id": "r3",
+            "name": "Basic Title",
             "uid": ".../Titles.localized/Bumper:Opener.localized/Basic Title.localized/Basic Title.moti",
         },
     )
@@ -371,8 +388,13 @@ def _add_audio_and_titles(
         anchor,
         "asset-clip",
         {
-            "name": audio_path.name, "ref": audio_resource_id, "lane": "-1",
-            "offset": "0s", "start": "0s", "duration": _time(total_ms), "role": "dialogue",
+            "name": audio_path.name,
+            "ref": audio_resource_id,
+            "lane": "-1",
+            "offset": "0s",
+            "start": "0s",
+            "duration": _time(total_ms),
+            "role": "dialogue",
         },
     )
     for index, cue in enumerate(cues, start=1):
@@ -380,8 +402,11 @@ def _add_audio_and_titles(
             anchor,
             "title",
             {
-                "name": f"Subtitle {index}", "ref": title_resource_id, "lane": "2",
-                "offset": _time(cue.start_ms), "start": "0s",
+                "name": f"Subtitle {index}",
+                "ref": title_resource_id,
+                "lane": "2",
+                "offset": _time(cue.start_ms),
+                "start": "0s",
                 "duration": _time(cue.end_ms - cue.start_ms),
             },
         )
@@ -486,7 +511,9 @@ def _build_xml(
         if end_offset is None:
             raise ValueError(f"Assignment {assignment.id} has no timeline end")
         duration_ms = end_offset - assignment.scene_offset_start_ms
-        source_start_ms = 0 if media.media_type == "image" else shot.start_ms + assignment.trim_start_ms
+        source_start_ms = (
+            0 if media.media_type == "image" else shot.start_ms + assignment.trim_start_ms
+        )
         clip = ET.SubElement(
             spine,
             "asset-clip",
@@ -507,7 +534,9 @@ def _build_xml(
                 "timept",
                 {
                     "time": _time(duration_ms),
-                    "value": _time(source_start_ms + round(duration_ms * assignment.playback_speed)),
+                    "value": _time(
+                        source_start_ms + round(duration_ms * assignment.playback_speed)
+                    ),
                 },
             )
         primary_nodes.append(clip)

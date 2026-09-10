@@ -195,7 +195,9 @@ def _merge_chunks_for_minimum_duration(
         elif short_index == len(result) - 1:
             merge_at = short_index - 1
         else:
-            previous_width = display_units(_join_chunks(result[short_index - 1], result[short_index]))
+            previous_width = display_units(
+                _join_chunks(result[short_index - 1], result[short_index])
+            )
             next_width = display_units(_join_chunks(result[short_index], result[short_index + 1]))
             merge_at = short_index - 1 if previous_width <= next_width else short_index
         result[merge_at : merge_at + 2] = [_join_chunks(result[merge_at], result[merge_at + 1])]
@@ -228,9 +230,8 @@ def _allocate_cue_times(
     duration_ms = end_ms - start_ms
     boundaries = [start_ms]
     cumulative = 0.0
-    constraints_are_feasible = (
-        duration_ms >= len(chunks) * min_duration_ms
-        and (max_duration_ms is None or duration_ms <= len(chunks) * max_duration_ms)
+    constraints_are_feasible = duration_ms >= len(chunks) * min_duration_ms and (
+        max_duration_ms is None or duration_ms <= len(chunks) * max_duration_ms
     )
     for index, weight in enumerate(weights[:-1], start=1):
         cumulative += weight
@@ -340,7 +341,9 @@ def replace_project_cues(session: Session, project_id: str, cue_values: list[dic
         indexes = ", ".join(str(index) for index in sorted(locked_indexes))
         raise ValueError(f"Scene {indexes} is locked; unlock it before replacing subtitles")
     session.exec(delete(SceneAssignment).where(SceneAssignment.project_id == project_id))
-    session.exec(delete(GeneratedImageVariant).where(GeneratedImageVariant.project_id == project_id))
+    session.exec(
+        delete(GeneratedImageVariant).where(GeneratedImageVariant.project_id == project_id)
+    )
     session.exec(delete(SceneRevision).where(SceneRevision.project_id == project_id))
     session.exec(delete(VisualScene).where(VisualScene.project_id == project_id))
     session.exec(delete(SubtitleCue).where(SubtitleCue.project_id == project_id))

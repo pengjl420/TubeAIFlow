@@ -17,8 +17,11 @@ SCENE_STORYBOARD_WORKFLOW_ID = "scene_storyboard_regeneration"
 
 
 def run_scene_storyboard_job(
-    session: Session, project: Project, current_stage: str,
-    _include_video: bool, on_stage_changed: StageChanged,
+    session: Session,
+    project: Project,
+    current_stage: str,
+    _include_video: bool,
+    on_stage_changed: StageChanged,
 ) -> None:
     task = _running_task(session, project.id, SCENE_STORYBOARD_WORKFLOW_ID)
     if current_stage != "generate":
@@ -36,8 +39,11 @@ def run_scene_storyboard_job(
 
 
 def run_scene_image_job(
-    session: Session, project: Project, current_stage: str,
-    _include_video: bool, on_stage_changed: StageChanged,
+    session: Session,
+    project: Project,
+    current_stage: str,
+    _include_video: bool,
+    on_stage_changed: StageChanged,
 ) -> None:
     task = _running_task(session, project.id, SCENE_IMAGE_WORKFLOW_ID)
     if current_stage != "generate":
@@ -63,8 +69,11 @@ def run_scene_image_job(
 
 
 def run_scene_preview_job(
-    session: Session, project: Project, current_stage: str,
-    _include_video: bool, on_stage_changed: StageChanged,
+    session: Session,
+    project: Project,
+    current_stage: str,
+    _include_video: bool,
+    on_stage_changed: StageChanged,
 ) -> None:
     task = _running_task(session, project.id, SCENE_PREVIEW_WORKFLOW_ID)
     if current_stage != "render":

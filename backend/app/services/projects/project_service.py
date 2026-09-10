@@ -23,6 +23,7 @@ from app.models.task import TaskRun
 from app.providers import ProviderCategory, provider_registry
 from app.models.storyboard import SceneRevision, SubtitleCue, VisualScene
 from app.infrastructure.file_storage import ensure_inside_any, project_dir
+from app.infrastructure.atomic_files import write_text_atomic
 from app.infrastructure.recycle_bin import move_existing_to_recycle_bin
 from app.infrastructure.project_layout import (
     ensure_project_dirs,
@@ -91,9 +92,7 @@ def create_project(session: Session, name: str, config: dict | None = None) -> P
     settings = get_settings()
     project_id = uuid.uuid4().hex[:12]
     output_dir = settings.workspace_dir / "projects"
-    project_directory_name = _available_project_directory_name(
-        output_dir, name, project_id
-    )
+    project_directory_name = _available_project_directory_name(output_dir, name, project_id)
     project = Project(
         id=project_id,
         name=name,
@@ -147,12 +146,12 @@ def get_project_metrics(session: Session, project_ids: list[str]) -> dict[str, d
     segments = session.exec(select(Segment).where(Segment.project_id.in_(project_ids))).all()
     for segment in segments:
         if segment.duration is not None:
-            metrics[segment.project_id]["audio_duration_seconds"] += max(0.0, float(segment.duration))
+            metrics[segment.project_id]["audio_duration_seconds"] += max(
+                0.0, float(segment.duration)
+            )
 
     tasks = session.exec(
-        select(TaskRun)
-        .where(TaskRun.project_id.in_(project_ids))
-        .order_by(TaskRun.queue_sequence)
+        select(TaskRun).where(TaskRun.project_id.in_(project_ids)).order_by(TaskRun.queue_sequence)
     ).all()
     latest_tasks: dict[str, TaskRun] = {}
     for task in tasks:
@@ -265,9 +264,7 @@ def delete_project(session: Session, project: Project) -> dict:
         session.delete(task)
     for segment in session.exec(select(Segment).where(Segment.project_id == project.id)).all():
         session.delete(segment)
-    for cue in session.exec(
-        select(SubtitleCue).where(SubtitleCue.project_id == project.id)
-    ).all():
+    for cue in session.exec(select(SubtitleCue).where(SubtitleCue.project_id == project.id)).all():
         session.delete(cue)
     for assignment in session.exec(
         select(SceneAssignment).where(SceneAssignment.project_id == project.id)
@@ -282,7 +279,9 @@ def delete_project(session: Session, project: Project) -> dict:
     for variant in generated_variants:
         session.delete(variant)
     for media_id in generated_media_ids:
-        for shot in session.exec(select(MediaShot).where(MediaShot.media_file_id == media_id)).all():
+        for shot in session.exec(
+            select(MediaShot).where(MediaShot.media_file_id == media_id)
+        ).all():
             session.delete(shot)
         media_file = session.get(MediaFile, media_id)
         if media_file and media_file.provider == "local_image_generation":
@@ -374,8 +373,37 @@ def save_script(session: Session, project: Project, raw_text: str) -> Project:
     stem = get_output_stem(project)
     raw_path = input_dir / f"{stem}_raw.txt"
     clean_path = input_dir / f"{stem}_clean.txt"
-    raw_path.write_text(raw_text, encoding="utf-8")
-    clean_path.write_text(clean_text, encoding="utf-8")
+
+    previous_raw = raw_path.read_text(encoding="utf-8") if raw_path.is_file() else None
+    previous_clean = clean_path.read_text(encoding="utf-8") if clean_path.is_file() else None
+    script_changed = previous_raw != raw_text or previous_clean != clean_text
+    if not script_changed:
+        return project
+
+    locked_indexes = sorted(
+        scene.scene_index
+        for scene in session.exec(
+            select(VisualScene).where(
+                VisualScene.project_id == project.id,
+                (
+                    VisualScene.locked_text.is_(True)
+                    | VisualScene.locked_audio.is_(True)
+                    | VisualScene.locked_visual.is_(True)
+                ),
+            )
+        ).all()
+    )
+    if locked_indexes:
+        indexes = ", ".join(str(index) for index in locked_indexes)
+        raise ValueError(f"Scene {indexes} is locked; unlock it before replacing the script")
+
+    # A script is the root artifact for the complete production graph. Replacing
+    # it must make every derived database row and file ineligible for resume.
+    # Otherwise existence-only workflow checks can incorrectly reuse narration
+    # or a final video produced from the previous text.
+    _invalidate_script_outputs(session, project)
+    write_text_atomic(raw_path, raw_text)
+    write_text_atomic(clean_path, clean_text)
 
     project.script_raw_path = str(raw_path)
     project.script_clean_path = str(clean_path)
@@ -386,6 +414,67 @@ def save_script(session: Session, project: Project, raw_text: str) -> Project:
     session.refresh(project)
     write_project_descriptor(project)
     return project
+
+
+def _invalidate_script_outputs(session: Session, project: Project) -> None:
+    generated_variants = list(
+        session.exec(
+            select(GeneratedImageVariant).where(GeneratedImageVariant.project_id == project.id)
+        ).all()
+    )
+    generated_media_ids = {item.media_file_id for item in generated_variants if item.media_file_id}
+
+    session.exec(delete(SceneAssignment).where(SceneAssignment.project_id == project.id))
+    session.exec(delete(SceneCandidate).where(SceneCandidate.project_id == project.id))
+    session.exec(
+        delete(GeneratedImageVariant).where(GeneratedImageVariant.project_id == project.id)
+    )
+    session.exec(delete(SceneRevision).where(SceneRevision.project_id == project.id))
+    session.exec(delete(VisualScene).where(VisualScene.project_id == project.id))
+    session.exec(delete(SubtitleCue).where(SubtitleCue.project_id == project.id))
+    session.exec(delete(Segment).where(Segment.project_id == project.id))
+
+    for media_id in generated_media_ids:
+        session.exec(delete(MediaShot).where(MediaShot.media_file_id == media_id))
+        media = session.get(MediaFile, media_id)
+        if media and media.provider == "local_image_generation":
+            session.delete(media)
+
+    settings = get_settings()
+    work_dir = get_project_work_dir(project, settings.workspace_dir)
+    for path in (
+        get_final_audio_path(project, settings.workspace_dir),
+        get_final_srt_path(project, settings.workspace_dir),
+        get_final_video_path(project, settings.workspace_dir),
+        get_final_fcpxml_path(project, settings.workspace_dir),
+        get_final_premiere_xml_path(project, settings.workspace_dir),
+        get_final_prproj_path(project, settings.workspace_dir),
+    ):
+        path.unlink(missing_ok=True)
+
+    for relative in (
+        "segments",
+        "audio/segments",
+        "subtitles",
+        "timeline",
+        "storyboard",
+        "media/generated_images",
+        "renders/scenes",
+        "renders/preview",
+        "renders/final",
+        "reports",
+        "exports",
+        "video/temp",
+    ):
+        _unlink_files_under(work_dir / relative)
+
+
+def _unlink_files_under(directory: Path) -> None:
+    if not directory.is_dir():
+        return
+    for path in directory.rglob("*"):
+        if path.is_file():
+            path.unlink()
 
 
 def create_segments(session: Session, project: Project) -> list[Segment]:
@@ -507,7 +596,9 @@ def update_output_settings(
             project.name,
             project.id,
         )
-    config["output_filename"] = safe_filename_stem(output_filename or project.name or _timestamp_stem())
+    config["output_filename"] = safe_filename_stem(
+        output_filename or project.name or _timestamp_stem()
+    )
     project.output_dir = str(directory)
     project.config_json = json.dumps(config, ensure_ascii=False)
     ensure_project_dirs(get_project_work_dir(project, get_settings().workspace_dir))
@@ -553,7 +644,9 @@ def update_project_settings(
             raise ValueError("请选择有效的系统音色")
         profile_config = voice_profile_service.load_profile_config(selected_profile)
         normalized_tts_engine = str(profile_config.get("tts_engine") or DEFAULT_TTS_ENGINE)
-        normalized_reference_audio_text = str(profile_config.get("reference_audio_text") or "").strip()
+        normalized_reference_audio_text = str(
+            profile_config.get("reference_audio_text") or ""
+        ).strip()
         normalized_cosyvoice_speed = voice_profile_service.profile_cosyvoice_speed(profile_config)
         normalized_voice_language = voice_profile_service.profile_language(profile_config)
     if normalized_tts_engine not in SUPPORTED_TTS_ENGINES:
@@ -569,7 +662,10 @@ def update_project_settings(
     resolved_storyboard_mode = normalize_storyboard_mode(storyboard_mode)
     include_video = resolved_video_mode != VIDEO_MODE_NONE
     video_directory: Path | None = None
-    if resolved_video_mode in {VIDEO_MODE_LANDSCAPE, VIDEO_MODE_AI_LANDSCAPE_MIX} and not media_video_dir.strip():
+    if (
+        resolved_video_mode in {VIDEO_MODE_LANDSCAPE, VIDEO_MODE_AI_LANDSCAPE_MIX}
+        and not media_video_dir.strip()
+    ):
         raise ValueError("Video material directory is required for landscape video generation")
     if media_video_dir.strip():
         video_directory = Path(media_video_dir).expanduser().resolve()
@@ -591,7 +687,9 @@ def update_project_settings(
             project_name,
             project.id,
         )
-    config["output_filename"] = safe_filename_stem(output_filename or project_name or _timestamp_stem())
+    config["output_filename"] = safe_filename_stem(
+        output_filename or project_name or _timestamp_stem()
+    )
     config["tts_engine"] = normalized_tts_engine
     config["reference_audio_text"] = normalized_reference_audio_text
     config["cosyvoice_speed"] = normalized_cosyvoice_speed
@@ -634,9 +732,7 @@ def update_project_settings(
             project.status = "segmented"
 
     if previous_segmentation_mode != resolved_segmentation_mode:
-        for segment in session.exec(
-            select(Segment).where(Segment.project_id == project.id)
-        ).all():
+        for segment in session.exec(select(Segment).where(Segment.project_id == project.id)).all():
             session.delete(segment)
         if project.script_clean_path:
             project.status = "script_imported"
@@ -670,7 +766,10 @@ def update_video_workflow_settings(
         video_directory = Path(media_video_dir).expanduser().resolve()
         if not video_directory.is_dir():
             raise ValueError("Video material directory does not exist")
-    if resolved_video_mode in {VIDEO_MODE_LANDSCAPE, VIDEO_MODE_AI_LANDSCAPE_MIX} and video_directory is None:
+    if (
+        resolved_video_mode in {VIDEO_MODE_LANDSCAPE, VIDEO_MODE_AI_LANDSCAPE_MIX}
+        and video_directory is None
+    ):
         raise ValueError("Video material directory is required for the selected video mode")
 
     config = load_project_config(project)
@@ -678,9 +777,7 @@ def update_video_workflow_settings(
         "video_mode": get_project_video_mode(project),
         "media_video_dir": str(config.get("media_video_dir") or ""),
         "storyboard_mode": get_storyboard_mode(project),
-        "storyboard_transition_enabled": config.get(
-            "storyboard_transition_enabled", True
-        ),
+        "storyboard_transition_enabled": config.get("storyboard_transition_enabled", True),
     }
     next_values = {
         "video_mode": resolved_video_mode,
@@ -693,9 +790,7 @@ def update_video_workflow_settings(
         media_directory_changed = (
             previous_values["media_video_dir"] != next_values["media_video_dir"]
         )
-        storyboard_changed = (
-            previous_values["storyboard_mode"] != next_values["storyboard_mode"]
-        )
+        storyboard_changed = previous_values["storyboard_mode"] != next_values["storyboard_mode"]
         _invalidate_video_workflow(
             session,
             project,
@@ -741,9 +836,7 @@ def _invalidate_video_workflow(
         ).all()
     )
     if assignment_policy != "none" or storyboard_changed:
-        session.exec(
-            delete(SceneCandidate).where(SceneCandidate.project_id == project.id)
-        )
+        session.exec(delete(SceneCandidate).where(SceneCandidate.project_id == project.id))
     unlocked_scene_ids = [scene.id for scene in scenes if not scene.locked_visual]
     if unlocked_scene_ids and assignment_policy != "none":
         criteria = [

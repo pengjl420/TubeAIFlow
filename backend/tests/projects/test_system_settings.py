@@ -45,18 +45,25 @@ class SettingsModelTests(unittest.TestCase):
 
     def test_storyboard_transition_defaults_total_one_hundred(self) -> None:
         settings = Settings()
-        self.assertEqual(sum(item.percentage for item in settings.storyboard_transition_effects if item.enabled), 100)
+        self.assertEqual(
+            sum(item.percentage for item in settings.storyboard_transition_effects if item.enabled),
+            100,
+        )
 
     def test_public_settings_never_expose_secret_values(self) -> None:
         configured = Settings(deepseek_api_key="secret", workspace_dir=Path("workspace"))
-        with patch("app.services.settings.system_settings_service.get_settings", return_value=configured):
+        with patch(
+            "app.services.settings.system_settings_service.get_settings", return_value=configured
+        ):
             public = get_public_settings()
         self.assertEqual(SECRET_FIELDS, {"deepseek_api_key"})
         self.assertEqual(public["deepseek_api_key"], "")
         self.assertTrue(public["deepseek_api_key_configured"])
 
     def test_legacy_deepseek_model_is_migrated(self) -> None:
-        self.assertEqual(Settings(deepseek_model="deepseek-chat").deepseek_model, "deepseek-v4-flash")
+        self.assertEqual(
+            Settings(deepseek_model="deepseek-chat").deepseek_model, "deepseek-v4-flash"
+        )
 
     def test_saving_core_settings_preserves_optional_module_values(self) -> None:
         record = SimpleNamespace(

@@ -76,7 +76,9 @@ def build_visual_plan(
         renderer = renderer_for(visual_type)
         if risk == "high" and renderer == Renderer.FLUX:
             visual_type, renderer = VisualType.FACT_CARD, Renderer.PILLOW
-        priority = "high" if candidate.score >= 0.78 else "medium" if candidate.score >= 0.68 else "low"
+        priority = (
+            "high" if candidate.score >= 0.78 else "medium" if candidate.score >= 0.68 else "low"
+        )
         visual_id = f"vis_{index:04d}"
         seed = int(hashlib.sha256(f"{project_id}:{visual_id}".encode()).hexdigest()[:8], 16)
         brief = decision.brief
@@ -195,6 +197,10 @@ def _presentation_for(visual_type: VisualType) -> tuple[str, str]:
         return "full_bleed", "kenburns_slow_push"
     if visual_type in {VisualType.BAR_CHART, VisualType.LINE_CHART, VisualType.PIE_CHART}:
         return "chart_center", "fade_only"
-    if visual_type in {VisualType.FLOW_DIAGRAM, VisualType.ARCHITECTURE_DIAGRAM, VisualType.TIMELINE}:
+    if visual_type in {
+        VisualType.FLOW_DIAGRAM,
+        VisualType.ARCHITECTURE_DIAGRAM,
+        VisualType.TIMELINE,
+    }:
         return "diagram_center", "fade_only"
     return "center_card", "card_fade_scale"

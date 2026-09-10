@@ -28,8 +28,12 @@ class GeneratedImageVideoPipelineTests(unittest.TestCase):
 
     def test_generated_images_continue_directly_to_scene_render(self) -> None:
         with Session(self.engine) as session:
-            project = Project(id="p1", name="Project", config_json='{"video_mode":"ai_generated_images"}')
-            scene = VisualScene(id="scene1", project_id="p1", scene_index=1, start_ms=0, end_ms=1000, narration="n")
+            project = Project(
+                id="p1", name="Project", config_json='{"video_mode":"ai_generated_images"}'
+            )
+            scene = VisualScene(
+                id="scene1", project_id="p1", scene_index=1, start_ms=0, end_ms=1000, narration="n"
+            )
             session.add_all([project, scene])
             session.commit()
             changed = []
@@ -41,10 +45,17 @@ class GeneratedImageVideoPipelineTests(unittest.TestCase):
                 patch.object(video_synthesis.scene_renderer, "render_all_scenes"),
                 patch.object(video_synthesis.visual_track_composer, "compose_visual_track"),
                 patch.object(video_synthesis.final_renderer, "compose_final_video"),
-                patch.object(video_synthesis.qa_service, "run_quality_check", return_value={"passed": True}),
+                patch.object(
+                    video_synthesis.qa_service, "run_quality_check", return_value={"passed": True}
+                ),
             ):
-                video_synthesis.run_video_synthesis(session, project, "image_generation", changed.append)
-            self.assertEqual(changed, ["scene_render", "visual_track", "final_render", "quality_check", "completed"])
+                video_synthesis.run_video_synthesis(
+                    session, project, "image_generation", changed.append
+                )
+            self.assertEqual(
+                changed,
+                ["scene_render", "visual_track", "final_render", "quality_check", "completed"],
+            )
 
 
 if __name__ == "__main__":

@@ -21,8 +21,12 @@ class VoiceProfileTests(unittest.TestCase):
         self.engine = create_engine(f"sqlite:///{self.root / 'test.db'}")
         SQLModel.metadata.create_all(self.engine)
         settings = SimpleNamespace(workspace_dir=self.workspace)
-        self.voice_settings_patch = patch.object(voice_profile_service, "get_settings", return_value=settings)
-        self.project_settings_patch = patch.object(project_service, "get_settings", return_value=settings)
+        self.voice_settings_patch = patch.object(
+            voice_profile_service, "get_settings", return_value=settings
+        )
+        self.project_settings_patch = patch.object(
+            project_service, "get_settings", return_value=settings
+        )
         self.voice_settings_patch.start()
         self.project_settings_patch.start()
 
@@ -214,8 +218,12 @@ class VoiceProfileTests(unittest.TestCase):
 
             self.assertEqual(Path(duplicate.reference_audio_path).read_bytes(), b"reference-audio")
             self.assertNotEqual(duplicate.reference_audio_path, voice.reference_audio_path)
-            self.assertEqual(voice_profile_service.serialize_profile(duplicate)["tags"], ["旁白", "温和"])
-            self.assertEqual(voice_profile_service.serialize_profile(duplicate)["language"], "yue-HK")
+            self.assertEqual(
+                voice_profile_service.serialize_profile(duplicate)["tags"], ["旁白", "温和"]
+            )
+            self.assertEqual(
+                voice_profile_service.serialize_profile(duplicate)["language"], "yue-HK"
+            )
             self.assertEqual(profiles[voice.id]["usage_count"], 1)
             self.assertEqual(profiles[voice.id]["running_project_count"], 1)
             self.assertEqual(profiles[duplicate.id]["usage_count"], 0)

@@ -40,26 +40,47 @@ class BatchFileTests(unittest.TestCase):
             SQLModel.metadata.create_all(engine)
             with Session(engine) as session:
                 batch = BatchJob(
-                    id="batch", name="Batch", total=1, status="completed",
+                    id="batch",
+                    name="Batch",
+                    total=1,
+                    status="completed",
                     started_at="2026-07-17T03:00:00+00:00",
                     finished_at="2026-07-17T03:03:00+00:00",
                 )
                 session.add(batch)
                 session.add(Project(id="project", name="Project"))
-                session.add(BatchItem(
-                    id="item", batch_id="batch", project_id="project", order_index=1,
-                    original_filename="script.txt", status="completed",
-                ))
-                session.add(Segment(
-                    id="segment", segment_id="0001", project_id="project",
-                    segment_index=1, text="文案", duration=12.5,
-                ))
-                session.add(TaskRun(
-                    id="task", project_id="project", batch_id="batch", batch_item_id="item",
-                    queue_sequence=1, status="completed",
-                    started_at="2026-07-17T03:01:00+00:00",
-                    finished_at="2026-07-17T03:02:30+00:00",
-                ))
+                session.add(
+                    BatchItem(
+                        id="item",
+                        batch_id="batch",
+                        project_id="project",
+                        order_index=1,
+                        original_filename="script.txt",
+                        status="completed",
+                    )
+                )
+                session.add(
+                    Segment(
+                        id="segment",
+                        segment_id="0001",
+                        project_id="project",
+                        segment_index=1,
+                        text="文案",
+                        duration=12.5,
+                    )
+                )
+                session.add(
+                    TaskRun(
+                        id="task",
+                        project_id="project",
+                        batch_id="batch",
+                        batch_item_id="item",
+                        queue_sequence=1,
+                        status="completed",
+                        started_at="2026-07-17T03:01:00+00:00",
+                        finished_at="2026-07-17T03:02:30+00:00",
+                    )
+                )
                 session.commit()
 
                 response = batch_service.serialize_batch(session, batch)
@@ -95,7 +116,9 @@ class GenerationCheckpointTests(unittest.TestCase):
         stages: list[str] = []
 
         with (
-            patch.object(narration_generation.project_service, "create_segments") as create_segments,
+            patch.object(
+                narration_generation.project_service, "create_segments"
+            ) as create_segments,
             patch.object(narration_generation.tts_service, "generate_project_tts") as generate_tts,
             patch.object(narration_generation.audio_service, "merge_project_audio") as merge_audio,
             patch.object(narration_generation.timeline_service, "build_timeline") as build_timeline,
@@ -147,7 +170,9 @@ class GenerationCheckpointTests(unittest.TestCase):
             patch.object(narration_generation.timeline_service, "build_timeline"),
             patch.object(narration_generation.srt_service, "create_full_srt"),
             patch.object(narration_generation.rough_cut_service, "compose_video") as compose_video,
-            patch.object(narration_generation.video_synthesis, "run_video_synthesis") as smart_video,
+            patch.object(
+                narration_generation.video_synthesis, "run_video_synthesis"
+            ) as smart_video,
         ):
             narration_generation.run_project_generation(
                 session, project, "subtitles", True, stages.append
@@ -268,12 +293,17 @@ class BatchApiTests(unittest.TestCase):
             payload = response.json()["data"]
             self.assertEqual(payload["status"], "draft")
             self.assertEqual([item["order_index"] for item in payload["items"]], [1, 2])
-            self.assertEqual([item["project_name"] for item in payload["items"]], ["same", "same-2"])
+            self.assertEqual(
+                [item["project_name"] for item in payload["items"]], ["same", "same-2"]
+            )
             with Session(engine) as session:
                 tasks = list(session.exec(select(TaskRun).order_by(TaskRun.queue_sequence)).all())
                 projects = list(session.exec(select(Project).order_by(Project.created_at)).all())
                 self.assertEqual(len(tasks), 2)
-                self.assertEqual([project.id for project in projects], [item["project_id"] for item in payload["items"]])
+                self.assertEqual(
+                    [project.id for project in projects],
+                    [item["project_id"] for item in payload["items"]],
+                )
                 self.assertEqual([task.status for task in tasks], ["paused", "paused"])
                 self.assertEqual(
                     [task.batch_item_id for task in tasks],
@@ -289,10 +319,30 @@ class BatchApiTests(unittest.TestCase):
             )
             SQLModel.metadata.create_all(engine)
             with Session(engine) as session:
-                session.add(BatchJob(id="batch", name="Batch", status="completed", total=1, completed=1))
+                session.add(
+                    BatchJob(id="batch", name="Batch", status="completed", total=1, completed=1)
+                )
                 session.add(Project(id="p1", name="One", status="completed"))
-                session.add(BatchItem(id="i1", batch_id="batch", project_id="p1", order_index=1, original_filename="1.txt", status="completed"))
-                session.add(TaskRun(id="t1", project_id="p1", batch_id="batch", batch_item_id="i1", status="completed", queue_sequence=1))
+                session.add(
+                    BatchItem(
+                        id="i1",
+                        batch_id="batch",
+                        project_id="p1",
+                        order_index=1,
+                        original_filename="1.txt",
+                        status="completed",
+                    )
+                )
+                session.add(
+                    TaskRun(
+                        id="t1",
+                        project_id="p1",
+                        batch_id="batch",
+                        batch_item_id="i1",
+                        status="completed",
+                        queue_sequence=1,
+                    )
+                )
                 session.commit()
 
                 result = batch_service.delete_batch(session, session.get(BatchJob, "batch"))
@@ -318,8 +368,26 @@ class BatchApiTests(unittest.TestCase):
                 batch = BatchJob(id="batch", name="Batch", status="running", total=1)
                 session.add(batch)
                 session.add(Project(id="p1", name="One", status="narration_in_progress"))
-                session.add(BatchItem(id="i1", batch_id="batch", project_id="p1", order_index=1, original_filename="1.txt", status="running"))
-                session.add(TaskRun(id="t1", project_id="p1", batch_id="batch", batch_item_id="i1", status="running", queue_sequence=1))
+                session.add(
+                    BatchItem(
+                        id="i1",
+                        batch_id="batch",
+                        project_id="p1",
+                        order_index=1,
+                        original_filename="1.txt",
+                        status="running",
+                    )
+                )
+                session.add(
+                    TaskRun(
+                        id="t1",
+                        project_id="p1",
+                        batch_id="batch",
+                        batch_item_id="i1",
+                        status="running",
+                        queue_sequence=1,
+                    )
+                )
                 session.commit()
 
                 with self.assertRaisesRegex(ValueError, "先暂停"):
@@ -361,10 +429,36 @@ class BatchWorkerTests(unittest.TestCase):
             session.add(Project(id="p1", name="One", status="script_imported"))
             session.add(Project(id="p2", name="Two", status="script_imported"))
             # Insert in reverse to prove that order_index drives execution.
-            session.add(BatchItem(id="i2", batch_id="batch", project_id="p2", order_index=2, original_filename="2.txt", current_stage="segmenting"))
-            session.add(BatchItem(id="i1", batch_id="batch", project_id="p1", order_index=1, original_filename="1.txt", current_stage="segmenting"))
-            session.add(TaskRun(id="t2", project_id="p2", batch_id="batch", batch_item_id="i2", queue_sequence=2))
-            session.add(TaskRun(id="t1", project_id="p1", batch_id="batch", batch_item_id="i1", queue_sequence=1))
+            session.add(
+                BatchItem(
+                    id="i2",
+                    batch_id="batch",
+                    project_id="p2",
+                    order_index=2,
+                    original_filename="2.txt",
+                    current_stage="segmenting",
+                )
+            )
+            session.add(
+                BatchItem(
+                    id="i1",
+                    batch_id="batch",
+                    project_id="p1",
+                    order_index=1,
+                    original_filename="1.txt",
+                    current_stage="segmenting",
+                )
+            )
+            session.add(
+                TaskRun(
+                    id="t2", project_id="p2", batch_id="batch", batch_item_id="i2", queue_sequence=2
+                )
+            )
+            session.add(
+                TaskRun(
+                    id="t1", project_id="p1", batch_id="batch", batch_item_id="i1", queue_sequence=1
+                )
+            )
             session.commit()
 
         calls: list[str] = []
@@ -409,10 +503,36 @@ class BatchWorkerTests(unittest.TestCase):
             )
             session.add(Project(id="p1", name="One"))
             session.add(Project(id="p2", name="Two"))
-            session.add(BatchItem(id="i1", batch_id="batch", project_id="p1", order_index=1, original_filename="1.txt", current_stage="segmenting"))
-            session.add(BatchItem(id="i2", batch_id="batch", project_id="p2", order_index=2, original_filename="2.txt", current_stage="segmenting"))
-            session.add(TaskRun(id="t1", project_id="p1", batch_id="batch", batch_item_id="i1", queue_sequence=1))
-            session.add(TaskRun(id="t2", project_id="p2", batch_id="batch", batch_item_id="i2", queue_sequence=2))
+            session.add(
+                BatchItem(
+                    id="i1",
+                    batch_id="batch",
+                    project_id="p1",
+                    order_index=1,
+                    original_filename="1.txt",
+                    current_stage="segmenting",
+                )
+            )
+            session.add(
+                BatchItem(
+                    id="i2",
+                    batch_id="batch",
+                    project_id="p2",
+                    order_index=2,
+                    original_filename="2.txt",
+                    current_stage="segmenting",
+                )
+            )
+            session.add(
+                TaskRun(
+                    id="t1", project_id="p1", batch_id="batch", batch_item_id="i1", queue_sequence=1
+                )
+            )
+            session.add(
+                TaskRun(
+                    id="t2", project_id="p2", batch_id="batch", batch_item_id="i2", queue_sequence=2
+                )
+            )
             session.commit()
 
         with patch.object(

@@ -48,10 +48,18 @@ class LocalVideoMergeServiceTests(unittest.TestCase):
 
     @patch("app.services.rendering.local_video_merge_service.ensure_ffmpeg_available")
     @patch("app.services.rendering.local_video_merge_service.probe_duration")
-    @patch("app.services.rendering.local_video_merge_service.rough_cut_service.compose_normalized_clips")
-    @patch("app.services.rendering.local_video_merge_service.rough_cut_service.normalize_selected_clips")
-    @patch("app.services.rendering.local_video_merge_service.rough_cut_service.build_full_transition_plan")
-    @patch("app.services.rendering.local_video_merge_service.rough_cut_service.select_videos_for_duration")
+    @patch(
+        "app.services.rendering.local_video_merge_service.rough_cut_service.compose_normalized_clips"
+    )
+    @patch(
+        "app.services.rendering.local_video_merge_service.rough_cut_service.normalize_selected_clips"
+    )
+    @patch(
+        "app.services.rendering.local_video_merge_service.rough_cut_service.build_full_transition_plan"
+    )
+    @patch(
+        "app.services.rendering.local_video_merge_service.rough_cut_service.select_videos_for_duration"
+    )
     @patch("app.services.rendering.local_video_merge_service.rough_cut_service.scan_video_files")
     def test_compose_reuses_rough_cut_pipeline_and_limits_duration(
         self,

@@ -19,9 +19,7 @@ def normalize_storyboard(value: StoryboardContent) -> StoryboardContent:
     data["avoid"] = _deduplicate(value.avoid)
     if value.visual_brief is None:
         data["visual_brief"] = derive_visual_brief(value).model_dump()
-    image_prompt, negative_prompt = compile_image_prompt(
-        StoryboardContent.model_validate(data)
-    )
+    image_prompt, negative_prompt = compile_image_prompt(StoryboardContent.model_validate(data))
     data["image_prompt"] = image_prompt
     data["negative_prompt"] = negative_prompt
     return StoryboardContent.model_validate(data)

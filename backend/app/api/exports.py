@@ -19,7 +19,9 @@ router = APIRouter(tags=["exports"])
 def merge_audio(project_id: str, session: Session = Depends(get_session)) -> dict:
     project = project_service.get_project(session, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
+        raise HTTPException(
+            status_code=404, detail={"success": False, "error": "Project not found"}
+        )
     try:
         project = project_service.ensure_output_filename(session, project)
         with task_control.controlled(project_id, "audio_merge"):
@@ -36,7 +38,9 @@ def merge_audio(project_id: str, session: Session = Depends(get_session)) -> dic
 def update_durations(project_id: str, session: Session = Depends(get_session)) -> dict:
     project = project_service.get_project(session, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
+        raise HTTPException(
+            status_code=404, detail={"success": False, "error": "Project not found"}
+        )
     project = project_service.ensure_output_filename(session, project)
     return {"success": True, "data": audio_service.update_segment_durations(session, project)}
 
@@ -45,7 +49,9 @@ def update_durations(project_id: str, session: Session = Depends(get_session)) -
 def export_project(project_id: str, session: Session = Depends(get_session)) -> dict:
     project = project_service.get_project(session, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
+        raise HTTPException(
+            status_code=404, detail={"success": False, "error": "Project not found"}
+        )
     project = project_service.ensure_output_filename(session, project)
     try:
         output_format = project_service.get_video_output_format(project)
@@ -58,7 +64,10 @@ def export_project(project_id: str, session: Session = Depends(get_session)) -> 
         if output_format == project_service.VIDEO_OUTPUT_EDITABLE_BOTH:
             fcpxml = fcpxml_export_service.export_project_fcpxml(session, project)
             prproj = prproj_export_service.export_project_prproj(session, project)
-            return {"success": True, "data": {"format": "editable_both", "fcpxml": fcpxml, "prproj": prproj}}
+            return {
+                "success": True,
+                "data": {"format": "editable_both", "fcpxml": fcpxml, "prproj": prproj},
+            }
         path = manifest_service.create_manifest(project)
         return {"success": True, "data": {"path": str(path), "format": "manifest"}}
     except (OSError, RuntimeError, ValueError) as exc:
@@ -72,10 +81,15 @@ def export_project(project_id: str, session: Session = Depends(get_session)) -> 
 def export_fcpxml(project_id: str, session: Session = Depends(get_session)) -> dict:
     project = project_service.get_project(session, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
+        raise HTTPException(
+            status_code=404, detail={"success": False, "error": "Project not found"}
+        )
     try:
         project = project_service.ensure_output_filename(session, project)
-        return {"success": True, "data": fcpxml_export_service.export_project_fcpxml(session, project)}
+        return {
+            "success": True,
+            "data": fcpxml_export_service.export_project_fcpxml(session, project),
+        }
     except (OSError, ValueError) as exc:
         raise HTTPException(
             status_code=400,
@@ -87,10 +101,15 @@ def export_fcpxml(project_id: str, session: Session = Depends(get_session)) -> d
 def export_prproj(project_id: str, session: Session = Depends(get_session)) -> dict:
     project = project_service.get_project(session, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
+        raise HTTPException(
+            status_code=404, detail={"success": False, "error": "Project not found"}
+        )
     try:
         project = project_service.ensure_output_filename(session, project)
-        return {"success": True, "data": prproj_export_service.export_project_prproj(session, project)}
+        return {
+            "success": True,
+            "data": prproj_export_service.export_project_prproj(session, project),
+        }
     except (OSError, RuntimeError, ValueError) as exc:
         raise HTTPException(
             status_code=400,

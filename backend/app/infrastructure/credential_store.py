@@ -53,7 +53,9 @@ def delete_secret(credential_id: str) -> None:
 
 
 def _normalize_id(value: str) -> str:
-    normalized = "".join(character for character in value if character.isalnum() or character in "-_")
+    normalized = "".join(
+        character for character in value if character.isalnum() or character in "-_"
+    )
     if not normalized or len(normalized) > 100:
         raise ValueError("Invalid credential id")
     return normalized

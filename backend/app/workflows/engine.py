@@ -115,6 +115,5 @@ class WorkflowGraph:
         missing = [name for name in artifacts if not cls._artifact_exists(context, name)]
         if missing:
             raise RuntimeError(
-                f"Workflow step {step.id} is missing {kind} artifacts: "
-                + ", ".join(missing)
+                f"Workflow step {step.id} is missing {kind} artifacts: " + ", ".join(missing)
             )

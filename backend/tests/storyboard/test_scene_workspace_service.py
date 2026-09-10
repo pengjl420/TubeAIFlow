@@ -23,27 +23,46 @@ class SceneWorkspaceServiceTests(unittest.TestCase):
             with Session(engine) as session:
                 project = Project(id="p1", name="Project")
                 scene = VisualScene(
-                    id="s1", project_id="p1", scene_index=1,
-                    start_ms=0, end_ms=5000, narration="Narration", locked_visual=True,
+                    id="s1",
+                    project_id="p1",
+                    scene_index=1,
+                    start_ms=0,
+                    end_ms=5000,
+                    narration="Narration",
+                    locked_visual=True,
                 )
                 media = MediaFile(
-                    id="m1", path=str(image_path), filename=image_path.name,
-                    media_type="image", file_hash="hash", width=1920, height=1080,
+                    id="m1",
+                    path=str(image_path),
+                    filename=image_path.name,
+                    media_type="image",
+                    file_hash="hash",
+                    width=1920,
+                    height=1080,
                 )
                 shot = MediaShot(id="shot1", media_file_id="m1", shot_index=1)
                 variant = GeneratedImageVariant(
-                    id="v1", project_id="p1", scene_id="s1", variant_index=1,
-                    path=str(image_path), prompt="prompt", model_path="model",
-                    input_signature="signature", seed=1, width=1920, height=1080,
-                    steps=20, guidance_scale=5, status="completed", media_file_id="m1",
+                    id="v1",
+                    project_id="p1",
+                    scene_id="s1",
+                    variant_index=1,
+                    path=str(image_path),
+                    prompt="prompt",
+                    model_path="model",
+                    input_signature="signature",
+                    seed=1,
+                    width=1920,
+                    height=1080,
+                    steps=20,
+                    guidance_scale=5,
+                    status="completed",
+                    media_file_id="m1",
                 )
                 session.add_all([project, scene, media, shot, variant])
                 session.commit()
 
                 with self.assertRaisesRegex(ValueError, "visual is locked"):
-                    scene_workspace_service.assign_generated_variant(
-                        session, project, "s1", "v1"
-                    )
+                    scene_workspace_service.assign_generated_variant(session, project, "s1", "v1")
                 with self.assertRaisesRegex(ValueError, "visual is locked"):
                     scene_workspace_service.clear_scene_assignments(session, project, "s1")
             engine.dispose()
@@ -58,19 +77,39 @@ class SceneWorkspaceServiceTests(unittest.TestCase):
             with Session(engine) as session:
                 project = Project(id="p1", name="Project")
                 scene = VisualScene(
-                    id="s1", project_id="p1", scene_index=1,
-                    start_ms=0, end_ms=5000, narration="Narration",
+                    id="s1",
+                    project_id="p1",
+                    scene_index=1,
+                    start_ms=0,
+                    end_ms=5000,
+                    narration="Narration",
                 )
                 media = MediaFile(
-                    id="m1", path=str(image_path), filename=image_path.name,
-                    media_type="image", file_hash="hash", width=1920, height=1080,
+                    id="m1",
+                    path=str(image_path),
+                    filename=image_path.name,
+                    media_type="image",
+                    file_hash="hash",
+                    width=1920,
+                    height=1080,
                 )
                 shot = MediaShot(id="shot1", media_file_id="m1", shot_index=1)
                 variant = GeneratedImageVariant(
-                    id="v1", project_id="p1", scene_id="s1", variant_index=1,
-                    path=str(image_path), prompt="prompt", model_path="model",
-                    input_signature="signature", seed=1, width=1920, height=1080,
-                    steps=20, guidance_scale=5, status="completed", media_file_id="m1",
+                    id="v1",
+                    project_id="p1",
+                    scene_id="s1",
+                    variant_index=1,
+                    path=str(image_path),
+                    prompt="prompt",
+                    model_path="model",
+                    input_signature="signature",
+                    seed=1,
+                    width=1920,
+                    height=1080,
+                    steps=20,
+                    guidance_scale=5,
+                    status="completed",
+                    media_file_id="m1",
                 )
                 session.add(project)
                 session.add(scene)

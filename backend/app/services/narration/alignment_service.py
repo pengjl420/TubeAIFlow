@@ -28,8 +28,22 @@ _STRONG_END = "。！？.!?"
 _MEDIUM_END = "；;：:"
 _WEAK_END = "，,、"
 _EN_ORPHANS = {
-    "a", "an", "and", "as", "at", "but", "by", "for", "from", "in", "of", "on",
-    "or", "the", "to", "with",
+    "a",
+    "an",
+    "and",
+    "as",
+    "at",
+    "but",
+    "by",
+    "for",
+    "from",
+    "in",
+    "of",
+    "on",
+    "or",
+    "the",
+    "to",
+    "with",
 }
 _ZH_ORPHANS = set("的了和与及或在把被从向于而但因为所以")
 
@@ -37,7 +51,9 @@ _ZH_ORPHANS = set("的了和与及或在把被从向于而但因为所以")
 class AsrBackend(Protocol):
     name: str
 
-    def transcribe(self, audio_path: Path, language: Language, *, vad_filter: bool = False) -> list[AsrWord]: ...
+    def transcribe(
+        self, audio_path: Path, language: Language, *, vad_filter: bool = False
+    ) -> list[AsrWord]: ...
 
 
 @dataclass(frozen=True)
@@ -186,11 +202,16 @@ def align_segment(
 def _build_mapping(
     source: list[SourceUnit], anchors: list[AnchorUnit], duration_ms: int
 ) -> tuple[list[TimedUnit], float, float]:
-    pairs = _sequence_align([item.normalized for item in source], [item.normalized for item in anchors])
-    anchor_by_source = {left: right for left, right in pairs if left is not None and right is not None}
+    pairs = _sequence_align(
+        [item.normalized for item in source], [item.normalized for item in anchors]
+    )
+    anchor_by_source = {
+        left: right for left, right in pairs if left is not None and right is not None
+    }
     direct = len(anchor_by_source)
     exact = sum(
-        1 for left, right in anchor_by_source.items()
+        1
+        for left, right in anchor_by_source.items()
         if _equivalent(source[left].normalized, anchors[right].normalized)
     )
     similarity = exact / max(len(source), len(anchors), 1)
@@ -333,7 +354,9 @@ def optimize_cues(
             if length > hard_limit and start < end - 1:
                 break
             cue_duration = units[end - 1].end_ms - units[start].start_ms
-            penalty = _cue_cost(text, language, length, cue_duration, min_duration_ms, max_duration_ms)
+            penalty = _cue_cost(
+                text, language, length, cue_duration, min_duration_ms, max_duration_ms
+            )
             candidate = costs[start] + penalty
             if candidate < costs[end]:
                 costs[end], previous[end] = candidate, start
@@ -381,7 +404,9 @@ def optimize_cues(
     return cues
 
 
-def _cue_cost(text: str, language: Language, length: int, duration: int, minimum: int, maximum: int) -> float:
+def _cue_cost(
+    text: str, language: Language, length: int, duration: int, minimum: int, maximum: int
+) -> float:
     target_length = 14 if language == "zh" else 8
     target_duration = 2800 if language == "zh" else 3000
     cost = ((length - target_length) / max(1, target_length)) ** 2
@@ -412,8 +437,14 @@ def _is_orphan(text: str, language: Language) -> bool:
 
 
 def _cue_length(text: str, language: Language) -> int:
-    return len(source_units(text, language)) if language == "en" else sum(
-        1 for char in text if not char.isspace() and char not in _STRONG_END + _MEDIUM_END + _WEAK_END
+    return (
+        len(source_units(text, language))
+        if language == "en"
+        else sum(
+            1
+            for char in text
+            if not char.isspace() and char not in _STRONG_END + _MEDIUM_END + _WEAK_END
+        )
     )
 
 

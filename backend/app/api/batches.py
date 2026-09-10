@@ -22,7 +22,10 @@ def fail(message: str, status_code: int = 400) -> None:
 def list_batches(session: Session = Depends(get_session)) -> dict:
     return {
         "success": True,
-        "data": [batch_service.serialize_batch(session, batch, False) for batch in batch_service.list_batches(session)],
+        "data": [
+            batch_service.serialize_batch(session, batch, False)
+            for batch in batch_service.list_batches(session)
+        ],
     }
 
 
@@ -60,7 +63,9 @@ def create_batch(
             name=name,
             scripts=decoded_scripts,
             reference_audio=reference_audio.file if reference_audio else None,
-            reference_audio_filename=(reference_audio.filename or "reference.wav") if reference_audio else "",
+            reference_audio_filename=(reference_audio.filename or "reference.wav")
+            if reference_audio
+            else "",
             output_dir=output_dir,
             media_video_dir=media_video_dir,
             include_video=include_video,

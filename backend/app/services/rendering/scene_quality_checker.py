@@ -42,13 +42,11 @@ def check_scene_video(
         frame_difference = abs(actual_frame_count - expected_frame_count)
         if frame_difference > config.policy.duration_tolerance_frames:
             issues.append(
-                f"帧数误差 {frame_difference} 帧超过 "
-                f"{config.policy.duration_tolerance_frames} 帧"
+                f"帧数误差 {frame_difference} 帧超过 {config.policy.duration_tolerance_frames} 帧"
             )
     elif abs(actual_duration - expected_duration) > tolerance + 0.002:
         issues.append(
-            f"时长误差 {abs(actual_duration - expected_duration):.3f}s "
-            f"超过 {tolerance:.3f}s"
+            f"时长误差 {abs(actual_duration - expected_duration):.3f}s 超过 {tolerance:.3f}s"
         )
 
     result = {

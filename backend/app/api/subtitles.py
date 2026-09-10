@@ -17,7 +17,9 @@ router = APIRouter(tags=["subtitles"])
 def create_timeline(project_id: str, session: Session = Depends(get_session)) -> dict:
     project = project_service.get_project(session, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
+        raise HTTPException(
+            status_code=404, detail={"success": False, "error": "Project not found"}
+        )
     return {"success": True, "data": timeline_service.build_timeline(session, project)}
 
 
@@ -28,7 +30,9 @@ def create_srt(
 ) -> dict:
     project = project_service.get_project(session, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
+        raise HTTPException(
+            status_code=404, detail={"success": False, "error": "Project not found"}
+        )
     try:
         with task_control.controlled(project_id, "subtitles"):
             project = project_service.ensure_output_filename(session, project)
@@ -61,7 +65,9 @@ def get_subtitle_alignment(
 ) -> dict:
     project = project_service.get_project(session, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
+        raise HTTPException(
+            status_code=404, detail={"success": False, "error": "Project not found"}
+        )
     try:
         data = srt_service.read_alignment_outputs(project)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
@@ -75,7 +81,5 @@ def _load_segments_for_srt(session: Session, project_id: str):
     from app.models.narration import Segment
 
     return session.exec(
-        select(Segment)
-        .where(Segment.project_id == project_id)
-        .order_by(Segment.segment_index)
+        select(Segment).where(Segment.project_id == project_id).order_by(Segment.segment_index)
     ).all()

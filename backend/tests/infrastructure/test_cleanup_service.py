@@ -19,8 +19,9 @@ class CleanupTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.engine = create_engine(f"sqlite:///{self.root / 'test.db'}")
         SQLModel.metadata.create_all(self.engine)
-        self.settings = Settings(workspace_dir=self.root, cleanup_enabled=True,
-                                 cleanup_completed_voice_tasks=True)
+        self.settings = Settings(
+            workspace_dir=self.root, cleanup_enabled=True, cleanup_completed_voice_tasks=True
+        )
         self.now = datetime(2026, 9, 7, 12, tzinfo=timezone.utc)
         self.old = self.now - timedelta(days=31)
 
@@ -29,9 +30,16 @@ class CleanupTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def task(self, session, identifier, status="completed", finished=None):
-        task = VoiceGenerationTask(id=identifier, voice_profile_id="v",
-            voice_profile_name="Voice", text="text", output_filename="a.wav",
-            queue_sequence=1, status=status, finished_at=(finished or self.old).isoformat())
+        task = VoiceGenerationTask(
+            id=identifier,
+            voice_profile_id="v",
+            voice_profile_name="Voice",
+            text="text",
+            output_filename="a.wav",
+            queue_sequence=1,
+            status=status,
+            finished_at=(finished or self.old).isoformat(),
+        )
         session.add(task)
         session.commit()
         directory = self.root / "voice_generations" / identifier
@@ -45,8 +53,10 @@ class CleanupTests(unittest.TestCase):
     def test_only_expired_completed_tasks_are_removed(self):
         with Session(self.engine) as session:
             old = self.task(session, "old")
-            keep = [self.task(session, state, state) for state in
-                    ["running", "paused", "queued", "failed"]]
+            keep = [
+                self.task(session, state, state)
+                for state in ["running", "paused", "queued", "failed"]
+            ]
             keep.append(self.task(session, "recent", finished=self.now))
             report = cleanup.run_cleanup(session, self.settings, self.now)
             self.assertEqual(report["deleted_tasks"], 1)
@@ -79,9 +89,11 @@ class CleanupTests(unittest.TestCase):
             self.assertTrue((directory / "logs/tts.log").exists())
 
     def test_disabled_and_daily_catchup_persist_across_calls(self):
-        with patch.object(cleanup, "get_settings", return_value=self.settings), patch.object(
-            cleanup, "engine", self.engine
-        ), patch.object(cleanup, "run_cleanup", return_value={"errors": 0}) as run:
+        with (
+            patch.object(cleanup, "get_settings", return_value=self.settings),
+            patch.object(cleanup, "engine", self.engine),
+            patch.object(cleanup, "run_cleanup", return_value={"errors": 0}) as run,
+        ):
             self.settings.cleanup_enabled = False
             cleanup.run_if_due(self.now)
             run.assert_not_called()
@@ -96,8 +108,10 @@ class CleanupTests(unittest.TestCase):
     def test_failed_deletion_keeps_database_record_for_retry(self):
         with Session(self.engine) as session:
             self.task(session, "locked")
-            with patch.object(cleanup, "remove_tree", side_effect=PermissionError("locked")), \
-                    self.assertLogs(cleanup.logger, level="ERROR"):
+            with (
+                patch.object(cleanup, "remove_tree", side_effect=PermissionError("locked")),
+                self.assertLogs(cleanup.logger, level="ERROR"),
+            ):
                 report = cleanup.run_cleanup(session, self.settings, self.now)
             self.assertEqual(report["errors"], 1)
             self.assertIsNotNone(session.get(VoiceGenerationTask, "locked"))
@@ -127,8 +141,9 @@ class CleanupTests(unittest.TestCase):
         self.assertFalse(cleanup.expired("invalid", self.old))
 
     def test_status_reflects_saved_settings_and_last_run(self):
-        with patch.object(cleanup, "get_settings", return_value=self.settings), patch.object(
-            cleanup, "engine", self.engine
+        with (
+            patch.object(cleanup, "get_settings", return_value=self.settings),
+            patch.object(cleanup, "engine", self.engine),
         ):
             status = cleanup.get_status(self.now)
             self.assertTrue(status["enabled"])

@@ -28,12 +28,22 @@ class StorageTests(unittest.TestCase):
             history = GenerationHistory(Path(temporary) / "pipeline.db")
             try:
                 first = history.append(
-                    project_id="p", generation_type="plan", provider="mock", model="m",
-                    prompt="one", input_data={}, output_data={"v": 1}
+                    project_id="p",
+                    generation_type="plan",
+                    provider="mock",
+                    model="m",
+                    prompt="one",
+                    input_data={},
+                    output_data={"v": 1},
                 )
                 second = history.append(
-                    project_id="p", generation_type="plan", provider="mock", model="m",
-                    prompt="two", input_data={}, output_data={"v": 2}
+                    project_id="p",
+                    generation_type="plan",
+                    provider="mock",
+                    model="m",
+                    prompt="two",
+                    input_data={},
+                    output_data={"v": 2},
                 )
                 rows = history.versions("p", "plan")
             finally:

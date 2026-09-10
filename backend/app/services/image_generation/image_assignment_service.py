@@ -41,7 +41,9 @@ def assign_scene_image(session: Session, project: Project, scene_id: str) -> dic
     ).first()
     if not variant or not variant.media_file_id:
         raise RuntimeError(f"Scene {scene.scene_index} has no generated image")
-    shot = session.exec(select(MediaShot).where(MediaShot.media_file_id == variant.media_file_id)).first()
+    shot = session.exec(
+        select(MediaShot).where(MediaShot.media_file_id == variant.media_file_id)
+    ).first()
     if not shot:
         raise RuntimeError(f"Scene {scene.scene_index} generated image is not registered")
 

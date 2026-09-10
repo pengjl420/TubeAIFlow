@@ -51,4 +51,3 @@ class SegmentAlignment(BaseModel):
     units: list[TimedUnit]
     cues: list[AlignedCue]
     error: str | None = None
-

@@ -76,7 +76,9 @@ def save_video_settings(session: Session, project: Project, media_video_dir: str
 def compose_video(session: Session, project: Project) -> Path:
     with _composing_projects_lock:
         if project.id in _composing_project_ids:
-            raise VideoCompositionRunningError("Video composition is already running for this project")
+            raise VideoCompositionRunningError(
+                "Video composition is already running for this project"
+            )
         _composing_project_ids.add(project.id)
 
     try:
@@ -94,14 +96,18 @@ def _compose_video(session: Session, project: Project) -> Path:
     temp_dir = video_dir / "temp"
     temp_dir.mkdir(parents=True, exist_ok=True)
     progress_path = video_dir / "progress.json"
-    write_video_progress(progress_path, "running", "scanning", 5, message="Scanning video materials")
+    write_video_progress(
+        progress_path, "running", "scanning", 5, message="Scanning video materials"
+    )
 
     project.status = "video_composing"
     project.updated_at = datetime.utcnow().isoformat()
     session.add(project)
     session.commit()
 
-    write_video_progress(progress_path, "running", "selecting", 12, message="Selecting video materials")
+    write_video_progress(
+        progress_path, "running", "selecting", 12, message="Selecting video materials"
+    )
     selected, transition_plan, target_duration = prepare_rough_cut_selection(project)
 
     write_video_progress(
@@ -151,11 +157,7 @@ def _compose_video(session: Session, project: Project) -> Path:
         # encoded result slightly shorter than the probed source durations.
         # Retry with the measured deficit plus one frame instead of failing a
         # long-running batch at the final validation step.
-        retry_padding = (
-            VIDEO_TAIL_PADDING
-            + (target_duration - video_duration)
-            + (1 / TARGET_FPS)
-        )
+        retry_padding = VIDEO_TAIL_PADDING + (target_duration - video_duration) + (1 / TARGET_FPS)
         logger.warning(
             "Generated video is %.3fs shorter than audio; retrying with %.3fs tail padding",
             target_duration - video_duration,
@@ -365,9 +367,7 @@ def build_transition_filter(
                 current_duration += clip_durations[clip_index] - duration
                 current_label = output_label
                 continue
-        filters.append(
-            f"[{current_label}][v{clip_index}]concat=n=2:v=1:a=0[{output_label}]"
-        )
+        filters.append(f"[{current_label}][v{clip_index}]concat=n=2:v=1:a=0[{output_label}]")
         current_duration += clip_durations[clip_index]
         current_label = output_label
 
@@ -624,27 +624,30 @@ def normalize_selected_clips(
             f"crop={TARGET_WIDTH}:{TARGET_HEIGHT},"
             f"fps={TARGET_FPS},setsar=1,format=yuv420p,setparams=range=tv"
         )
-        run_ffmpeg([
-            "-y",
-            "-i",
-            str(item.source_path),
-            "-ss",
-            f"{CLIP_START_OFFSET:.3f}",
-            "-t",
-            f"{item.clip_duration:.3f}",
-            "-vf",
-            vf,
-            "-an",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "veryfast",
-            "-crf",
-            "20",
-            "-movflags",
-            "+faststart",
-            str(output_path),
-        ], project_id)
+        run_ffmpeg(
+            [
+                "-y",
+                "-i",
+                str(item.source_path),
+                "-ss",
+                f"{CLIP_START_OFFSET:.3f}",
+                "-t",
+                f"{item.clip_duration:.3f}",
+                "-vf",
+                vf,
+                "-an",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-crf",
+                "20",
+                "-movflags",
+                "+faststart",
+                str(output_path),
+            ],
+            project_id,
+        )
         _validate_normalized_clip(output_path, item.source_path)
         temp_paths.append(output_path)
         if progress_path:

@@ -64,9 +64,7 @@ class FfmpegUtilsTests(unittest.TestCase):
 
     @patch("app.infrastructure.ffmpeg._resolve_tool", return_value="ffmpeg")
     @patch("app.infrastructure.ffmpeg.subprocess.run")
-    def test_detect_silence_intervals_parses_complete_pairs(
-        self, run_mock, _resolve_mock
-    ) -> None:
+    def test_detect_silence_intervals_parses_complete_pairs(self, run_mock, _resolve_mock) -> None:
         run_mock.return_value = subprocess.CompletedProcess(
             [],
             0,

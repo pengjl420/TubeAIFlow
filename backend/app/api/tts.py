@@ -21,7 +21,9 @@ router = APIRouter(tags=["tts"])
 def start_tts(project_id: str, session: Session = Depends(get_session)) -> dict:
     project = project_service.get_project(session, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
+        raise HTTPException(
+            status_code=404, detail={"success": False, "error": "Project not found"}
+        )
     try:
         with task_control.controlled(project_id, "tts"):
             data = tts_service.generate_project_tts(session, project)
@@ -39,10 +41,14 @@ def retry_failed(project_id: str, session: Session = Depends(get_session)) -> di
 
 
 @router.post("/projects/{project_id}/tts/regenerate/{segment_id}")
-def regenerate_segment(project_id: str, segment_id: str, session: Session = Depends(get_session)) -> dict:
+def regenerate_segment(
+    project_id: str, segment_id: str, session: Session = Depends(get_session)
+) -> dict:
     project = project_service.get_project(session, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
+        raise HTTPException(
+            status_code=404, detail={"success": False, "error": "Project not found"}
+        )
     segment = session.exec(
         select(Segment).where(
             Segment.project_id == project_id,
@@ -50,7 +56,9 @@ def regenerate_segment(project_id: str, segment_id: str, session: Session = Depe
         )
     ).first()
     if not segment:
-        raise HTTPException(status_code=404, detail={"success": False, "error": "Segment not found"})
+        raise HTTPException(
+            status_code=404, detail={"success": False, "error": "Segment not found"}
+        )
     try:
         project = project_service.ensure_output_filename(session, project)
         deferred = task_control.defer_if_running(
@@ -123,11 +131,11 @@ def _resume_failed_workflow_after_tts_repair(session: Session, project_id: str) 
 def tts_status(project_id: str, session: Session = Depends(get_session)) -> dict:
     project = project_service.get_project(session, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
+        raise HTTPException(
+            status_code=404, detail={"success": False, "error": "Project not found"}
+        )
     segments = session.exec(
-        select(Segment)
-        .where(Segment.project_id == project_id)
-        .order_by(Segment.segment_index)
+        select(Segment).where(Segment.project_id == project_id).order_by(Segment.segment_index)
     ).all()
     progress = _read_progress(project)
     live_segments = _build_live_segments(project, segments, progress)
@@ -144,7 +152,9 @@ def tts_status(project_id: str, session: Session = Depends(get_session)) -> dict
 
 
 def _read_progress(project) -> dict | None:
-    progress_path = get_project_work_dir(project, get_settings().workspace_dir) / "logs" / "tts_progress.json"
+    progress_path = (
+        get_project_work_dir(project, get_settings().workspace_dir) / "logs" / "tts_progress.json"
+    )
     if not progress_path.is_file():
         return None
     try:
@@ -181,13 +191,17 @@ def _build_live_segments(project, segments: list[Segment], progress: dict | None
         if result:
             if result.get("success"):
                 item["status"] = "completed"
-                item["audio_path"] = str(output_path) if output_path.exists() else segment.audio_path
+                item["audio_path"] = (
+                    str(output_path) if output_path.exists() else segment.audio_path
+                )
                 if output_path.exists():
                     item["updated_at"] = str(output_path.stat().st_mtime_ns)
                 item["error_message"] = None
             else:
                 item["status"] = "failed"
-                item["error_message"] = result.get("error") or "TTS engine did not create an audio file"
+                item["error_message"] = (
+                    result.get("error") or "TTS engine did not create an audio file"
+                )
         elif segment.segment_id == current_segment_id:
             item["status"] = "tts_running"
             item["error_message"] = None

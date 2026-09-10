@@ -16,7 +16,12 @@ from app.models.media import SceneAssignment
 from app.models.storyboard import VisualScene
 from app.services.projects import project_service
 from app.services.quality import qa_service
-from app.services.rendering import rough_cut_service, scene_renderer, timeline_composer, timeline_editor_service
+from app.services.rendering import (
+    rough_cut_service,
+    scene_renderer,
+    timeline_composer,
+    timeline_editor_service,
+)
 
 
 router = APIRouter(tags=["videos"])

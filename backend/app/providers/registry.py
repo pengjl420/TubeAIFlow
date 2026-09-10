@@ -26,9 +26,7 @@ class ProviderRegistry:
     def __init__(self) -> None:
         self._providers: dict[str, ProviderRegistration] = {}
 
-    def register(
-        self, metadata: ProviderMetadata, runtime: ProviderRuntime | None = None
-    ) -> None:
+    def register(self, metadata: ProviderMetadata, runtime: ProviderRuntime | None = None) -> None:
         if metadata.id in self._providers:
             raise ValueError(f"Provider is already registered: {metadata.id}")
         self._providers[metadata.id] = ProviderRegistration(metadata, runtime)
@@ -58,9 +56,7 @@ class ProviderRegistry:
         if runtime is None:
             raise ValueError(f"Provider has no executable runtime: {provider_id}")
         if not isinstance(runtime, runtime_type):
-            raise TypeError(
-                f"Provider {provider_id} runtime is not {runtime_type.__name__}"
-            )
+            raise TypeError(f"Provider {provider_id} runtime is not {runtime_type.__name__}")
         return cast(RuntimeT, runtime)
 
     def is_executable(self, provider_id: str) -> bool:
@@ -69,9 +65,7 @@ class ProviderRegistry:
         return bool(registration and registration.runtime is not None)
 
     def list(self, category: ProviderCategory | None = None) -> list[ProviderMetadata]:
-        values: Iterable[ProviderMetadata] = (
-            item.metadata for item in self._providers.values()
-        )
+        values: Iterable[ProviderMetadata] = (item.metadata for item in self._providers.values())
         if category is not None:
             values = (item for item in values if item.category == category)
         return sorted(values, key=lambda item: item.id)
@@ -128,8 +122,7 @@ def _register_builtin_providers() -> None:
             category=ProviderCategory.TTS,
             display_name="CosyVoice",
             model_id="fun-cosyvoice",
-            capabilities=shared
-            | {ProviderCapability.REFERENCE_TEXT, ProviderCapability.SPEED},
+            capabilities=shared | {ProviderCapability.REFERENCE_TEXT, ProviderCapability.SPEED},
             configuration_fields=("cosyvoice_root", "cosyvoice_model_dir"),
         ),
     )

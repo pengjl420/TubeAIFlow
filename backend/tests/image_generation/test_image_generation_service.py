@@ -82,8 +82,14 @@ class ImageGenerationServiceTests(unittest.TestCase):
 
             with (
                 patch.object(image_generation_service, "get_settings", return_value=self.settings),
-                patch.object(image_generation_service.gpu_resource, "exclusive_gpu", return_value=nullcontext()),
-                patch.object(image_generation_service, "_run_batch", side_effect=fake_batch) as runner,
+                patch.object(
+                    image_generation_service.gpu_resource,
+                    "exclusive_gpu",
+                    return_value=nullcontext(),
+                ),
+                patch.object(
+                    image_generation_service, "_run_batch", side_effect=fake_batch
+                ) as runner,
             ):
                 first = image_generation_service.generate_project_images(session, project)
                 second = image_generation_service.generate_project_images(session, project)
@@ -97,8 +103,12 @@ class ImageGenerationServiceTests(unittest.TestCase):
             self.assertEqual(len(variants), 2)
             self.assertEqual(len(media_files), 1)  # identical fake images deduplicate by hash
             self.assertTrue(all(item.status == "completed" for item in variants))
-            self.assertTrue(all(item.library_role == LIBRARY_ROLE_PROJECT_GENERATED for item in media_files))
-            self.assertTrue(all(item.library_role == LIBRARY_ROLE_PROJECT_GENERATED for item in shots))
+            self.assertTrue(
+                all(item.library_role == LIBRARY_ROLE_PROJECT_GENERATED for item in media_files)
+            )
+            self.assertTrue(
+                all(item.library_role == LIBRARY_ROLE_PROJECT_GENERATED for item in shots)
+            )
 
     def test_recovers_completed_child_results_after_parent_interruption(self) -> None:
         with Session(self.engine) as session:
@@ -110,17 +120,25 @@ class ImageGenerationServiceTests(unittest.TestCase):
                     output = Path(job["output_path"])
                     output.parent.mkdir(parents=True, exist_ok=True)
                     Image.new("RGB", (job["width"], job["height"]), (40, 50, 60)).save(output)
-                    results.append({
-                        "variant_id": job["variant_id"],
-                        "status": "completed",
-                        "generation_seconds": 1.5,
-                    })
+                    results.append(
+                        {
+                            "variant_id": job["variant_id"],
+                            "status": "completed",
+                            "generation_seconds": 1.5,
+                        }
+                    )
                 result_path.write_text(json.dumps(results), encoding="utf-8")
 
             with (
                 patch.object(image_generation_service, "get_settings", return_value=self.settings),
-                patch.object(image_generation_service.gpu_resource, "exclusive_gpu", return_value=nullcontext()),
-                patch.object(image_generation_service, "_run_batch", side_effect=fake_batch) as runner,
+                patch.object(
+                    image_generation_service.gpu_resource,
+                    "exclusive_gpu",
+                    return_value=nullcontext(),
+                ),
+                patch.object(
+                    image_generation_service, "_run_batch", side_effect=fake_batch
+                ) as runner,
             ):
                 image_generation_service.generate_project_images(session, project)
                 for variant in session.exec(select(GeneratedImageVariant)).all():
@@ -141,7 +159,9 @@ class ImageGenerationServiceTests(unittest.TestCase):
         with Session(self.engine) as session:
             project, scene = self._project_scene(session)
 
-            def successful_batch(_project, _python, _model, _config, batch_path, result_path, *_args):
+            def successful_batch(
+                _project, _python, _model, _config, batch_path, result_path, *_args
+            ):
                 results = []
                 for job in json.loads(batch_path.read_text(encoding="utf-8")):
                     output = Path(job["output_path"])

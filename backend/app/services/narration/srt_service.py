@@ -43,7 +43,9 @@ def create_full_srt(
     return final_path
 
 
-def _build_aligned_cues(project: Project, segments: list[Segment], settings) -> tuple[list[dict], dict]:
+def _build_aligned_cues(
+    project: Project, segments: list[Segment], settings
+) -> tuple[list[dict], dict]:
     backend = None
     if settings.subtitle_alignment_enabled and settings.subtitle_whisper_model_path:
         from app.integrations.subtitle_alignment.faster_whisper import FasterWhisperAligner
@@ -127,7 +129,8 @@ def _write_alignment_outputs(base_dir: Path, alignment: dict) -> None:
                 "segment_id": item["segment_id"],
                 "confidence": item["confidence"],
                 "backend": item["backend"],
-                "message": item.get("error") or "该段未获得足够的本地 ASR 时间锚点，请人工复核字幕边界",
+                "message": item.get("error")
+                or "该段未获得足够的本地 ASR 时间锚点，请人工复核字幕边界",
             }
             for item in review
         ],
@@ -144,9 +147,7 @@ def read_alignment_outputs(project: Project) -> dict:
     return {
         "alignment": json.loads(alignment_path.read_text(encoding="utf-8")),
         "qa": (
-            json.loads(report_path.read_text(encoding="utf-8"))
-            if report_path.is_file()
-            else None
+            json.loads(report_path.read_text(encoding="utf-8")) if report_path.is_file() else None
         ),
         "alignment_path": str(alignment_path),
         "qa_path": str(report_path),
@@ -158,9 +159,7 @@ def _write_srt(path: Path, cues: list[tuple[float, float, str]]) -> None:
     for index, (start, end, text) in enumerate(cues, start=1):
         clean_text = _clean_srt_text(text)
         blocks.append(
-            f"{index}\n"
-            f"{seconds_to_srt_time(start)} --> {seconds_to_srt_time(end)}\n"
-            f"{clean_text}"
+            f"{index}\n{seconds_to_srt_time(start)} --> {seconds_to_srt_time(end)}\n{clean_text}"
         )
     write_text_atomic(path, "\n\n".join(blocks) + "\n")
 

@@ -74,9 +74,7 @@ def get_premiere_status() -> dict:
         "installed": executable is not None,
         "path": str(executable) if executable else None,
         "configured_path": (
-            str(get_settings().premiere_pro_path)
-            if get_settings().premiere_pro_path
-            else None
+            str(get_settings().premiere_pro_path) if get_settings().premiere_pro_path else None
         ),
     }
 
@@ -109,7 +107,7 @@ def export_project_prproj(
             raise ValueError(
                 f"PRPROJ output path is an existing non-empty directory: {output_path}"
             ) from exc
-    executable = (premiere_executable or find_premiere_executable())
+    executable = premiere_executable or find_premiere_executable()
     if not executable:
         raise ValueError(
             "未检测到 Adobe Premiere Pro，无法生成真实 PRPROJ。"
@@ -159,7 +157,7 @@ def _conversion_script(
 
     import_path = f"{import_dir}{os.sep}"
 
-    return f'''#target premierepro
+    return f"""#target premierepro
 (function () {{
     var marker = new File({js(marker_path)});
     var result = {{ success: false, error: "Premiere conversion did not complete" }};
@@ -218,7 +216,7 @@ def _conversion_script(
     marker.write(payload);
     marker.close();
 }}());
-'''
+"""
 
 
 def _run_premiere_conversion(
@@ -255,12 +253,16 @@ def _run_premiere_conversion(
                 time.sleep(0.25)
                 continue
             if not result.get("success"):
-                raise RuntimeError(f"Premiere PRPROJ conversion failed: {result.get('error') or 'unknown error'}")
+                raise RuntimeError(
+                    f"Premiere PRPROJ conversion failed: {result.get('error') or 'unknown error'}"
+                )
             if not output_path.is_file() or output_path.stat().st_size == 0:
                 raise RuntimeError("Premiere reported success but the PRPROJ file was not created")
             return
         if process.poll() not in (None, 0):
-            raise RuntimeError(f"Premiere exited before creating PRPROJ (exit code {process.returncode})")
+            raise RuntimeError(
+                f"Premiere exited before creating PRPROJ (exit code {process.returncode})"
+            )
         time.sleep(0.25)
     raise RuntimeError(f"Premiere PRPROJ conversion timed out after {timeout_seconds} seconds")
 

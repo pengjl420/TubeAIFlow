@@ -1,4 +1,5 @@
 """Local daily retention of archived logs and completed standalone voice tasks."""
+
 import json
 import logging
 import re
@@ -28,7 +29,9 @@ def get_status(now: datetime | None = None) -> dict:
     state = None
     state_error = None
     try:
-        path = checked_path(settings.workspace_dir / ".runtime" / "cleanup-state.json", settings.workspace_dir)
+        path = checked_path(
+            settings.workspace_dir / ".runtime" / "cleanup-state.json", settings.workspace_dir
+        )
         state = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(state, dict):
             raise ValueError("Invalid cleanup state")
@@ -40,7 +43,10 @@ def get_status(now: datetime | None = None) -> dict:
     hour, minute = map(int, settings.cleanup_daily_time.split(":"))
     due = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
     latest = due if now >= due else due - timedelta(days=1)
-    pending = settings.cleanup_enabled and (state or {}).get("last_due_date", "") < latest.date().isoformat()
+    pending = (
+        settings.cleanup_enabled
+        and (state or {}).get("last_due_date", "") < latest.date().isoformat()
+    )
     next_run = now if pending else due if now < due else due + timedelta(days=1)
     return {
         "enabled": settings.cleanup_enabled,
@@ -62,7 +68,10 @@ def checked_path(path: Path, root: Path) -> Path:
     if path == root or not path.is_relative_to(root):
         raise ValueError("Cleanup path is outside its managed directory")
     for part in (path, *path.parents):
-        reparse = part.exists() and getattr(part.lstat(), "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+        reparse = (
+            part.exists()
+            and getattr(part.lstat(), "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+        )
         if part.is_symlink() or reparse:
             raise ValueError("Cleanup does not follow links or junctions")
     if not path.resolve().is_relative_to(root.resolve()):
@@ -119,17 +128,18 @@ def run_cleanup(session: Session, settings, now: datetime) -> dict:
     except (OSError, ValueError):
         report["errors"] += 1
         logger.exception("CLEANUP_LOG_FAILED")
-    tasks = session.exec(select(VoiceGenerationTask).where(
-        VoiceGenerationTask.status == "completed"
-    )).all()
+    tasks = session.exec(
+        select(VoiceGenerationTask).where(VoiceGenerationTask.status == "completed")
+    ).all()
     for task in tasks:
         try:
             # Use the same lock as pause/resume/delete and queue dispatch.
             with voice_generation_queue._queue_state_lock:
                 session.refresh(task)
-                if task.status != "completed" or process_runner.status(
-                    voice_generation_queue._runtime_id(task.id)
-                )["running"]:
+                if (
+                    task.status != "completed"
+                    or process_runner.status(voice_generation_queue._runtime_id(task.id))["running"]
+                ):
                     continue
                 if not re.fullmatch(r"[A-Za-z0-9_-]+", task.id):
                     raise ValueError("Invalid voice task directory name")
@@ -173,9 +183,16 @@ def run_if_due(now: datetime | None = None) -> dict | None:
     state_path.parent.mkdir(parents=True, exist_ok=True)
     temporary = state_path.with_suffix(".tmp")
     checked_path(temporary, settings.workspace_dir)
-    temporary.write_text(json.dumps({
-        "last_due_date": due.date().isoformat(), "finished_at": now.isoformat(), **report,
-    }), encoding="utf-8")
+    temporary.write_text(
+        json.dumps(
+            {
+                "last_due_date": due.date().isoformat(),
+                "finished_at": now.isoformat(),
+                **report,
+            }
+        ),
+        encoding="utf-8",
+    )
     temporary.replace(state_path)
     logger.info("Daily cleanup finished: %s", report)
     return report

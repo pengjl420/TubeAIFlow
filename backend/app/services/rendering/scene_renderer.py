@@ -5,6 +5,8 @@ from pathlib import Path
 from sqlmodel import Session, select
 
 from app.config import get_settings
+from app.infrastructure.atomic_files import atomic_output_path
+from app.infrastructure.artifacts import sha256_file
 from app.infrastructure.ffmpeg import run_ffmpeg
 from app.infrastructure.project_layout import ensure_project_dirs, get_project_work_dir
 from app.models.media import (
@@ -23,6 +25,7 @@ from app.models.storyboard import VisualScene
 from app.services.rendering import timeline_composer
 from app.services.rendering.motion_presets import select_motion_preset
 from app.services.rendering.render_config import get_project_render_config
+from app.services.rendering.ffmpeg_runner import run_with_encoder_fallback
 from app.services.rendering.scene_quality_checker import check_scene_video
 
 
@@ -41,8 +44,8 @@ def render_all_scenes(session: Session, project: Project) -> dict:
         raise ValueError("项目尚未生成视觉场景")
     assignments: dict[str, list[SceneAssignment]] = {}
     for item in session.exec(
-            select(SceneAssignment).where(SceneAssignment.project_id == project.id)
-        ).all():
+        select(SceneAssignment).where(SceneAssignment.project_id == project.id)
+    ).all():
         assignments.setdefault(item.scene_id, []).append(item)
     for scene_items in assignments.values():
         scene_items.sort(key=lambda item: (item.sequence_index, item.created_at))
@@ -124,7 +127,12 @@ def render_scene(
     )
     manifest = _read_json(manifest_path)
     previous = manifest.get(scene.id)
-    if previous and previous.get("signature") == signature and output_path.is_file():
+    if (
+        previous
+        and previous.get("signature") == signature
+        and output_path.is_file()
+        and previous.get("artifact_hash") == sha256_file(output_path)
+    ):
         try:
             quality = check_scene_video(
                 output_path,
@@ -148,26 +156,29 @@ def render_scene(
             pass
 
     attempts = 1
-    args = _scene_ffmpeg_args(
-        output_path,
-        frame_count,
-        scene.start_ms,
-        clips,
-        presets,
-        config.video,
-    )
-    run_ffmpeg(args, project.id)
-    quality = check_scene_video(
-        output_path,
-        duration,
-        config,
-        expected_frame_count=frame_count,
-    )
+    with atomic_output_path(output_path) as temporary_output:
+        args = _scene_ffmpeg_args(
+            temporary_output,
+            frame_count,
+            scene.start_ms,
+            clips,
+            presets,
+            config.video,
+        )
+        run_with_encoder_fallback(args, project.id, run_ffmpeg)
+        quality = check_scene_video(
+            temporary_output,
+            duration,
+            config,
+            expected_frame_count=frame_count,
+        )
     actual_duration = quality["metadata"]["duration_ms"] / 1000
+    artifact_hash = sha256_file(output_path)
     manifest[scene.id] = {
         "scene_index": scene.scene_index,
         "render_timing_version": RENDER_TIMING_VERSION,
         "signature": signature,
+        "artifact_hash": artifact_hash,
         "path": str(output_path),
         "duration_seconds": actual_duration,
         "timeline_duration_seconds": (scene.end_ms - scene.start_ms) / 1000,
@@ -288,7 +299,14 @@ def _scene_ffmpeg_args(
                 / 1000
             )
             args.extend(
-                ["-ss", f"{source_start:.3f}", "-t", f"{source_duration:.3f}", "-i", str(source_path)]
+                [
+                    "-ss",
+                    f"{source_start:.3f}",
+                    "-t",
+                    f"{source_duration:.3f}",
+                    "-i",
+                    str(source_path),
+                ]
             )
         placement_duration = (
             assignment.scene_offset_end_ms - assignment.scene_offset_start_ms
@@ -303,9 +321,7 @@ def _scene_ffmpeg_args(
         )
         clip_frame_count = clip_end_frame - clip_start_frame
         if clip_frame_count <= 0:
-            raise ValueError(
-                f"镜头 {assignment.sequence_index} 的显示时长不足一帧"
-            )
+            raise ValueError(f"镜头 {assignment.sequence_index} 的显示时长不足一帧")
         allocated_frame_count += clip_frame_count
         label = f"v{index}"
         filters.append(
@@ -413,9 +429,14 @@ def _visual_filter(
             x = "iw-iw/zoom"
         else:
             x = "iw/2-(iw/zoom/2)"
-        if preset in {"pan_top_to_bottom", "diagonal_top_right"} or assignment.pan_direction == "down":
+        if (
+            preset in {"pan_top_to_bottom", "diagonal_top_right"}
+            or assignment.pan_direction == "down"
+        ):
             y = f"(ih-ih/zoom)*on/{frames}"
-        elif preset in {"pan_bottom_to_top", "diagonal_top_left"} or assignment.pan_direction == "up":
+        elif (
+            preset in {"pan_bottom_to_top", "diagonal_top_left"} or assignment.pan_direction == "up"
+        ):
             y = f"(ih-ih/zoom)*(1-on/{frames})"
         elif assignment.crop_anchor == "top":
             y = "0"
@@ -528,9 +549,7 @@ def _resolved_presets(
         if media_file.media_type != "image":
             presets.append("source_video")
             continue
-        presets.append(
-            select_motion_preset(project.id, scene, assignment, presets)
-        )
+        presets.append(select_motion_preset(project.id, scene, assignment, presets))
     return presets
 
 

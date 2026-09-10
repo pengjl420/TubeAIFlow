@@ -26,7 +26,11 @@ class DuixClient:
             )
             response.raise_for_status()
             payload = response.json()
-            return {"available": True, "service_code": payload.get("code"), "message": payload.get("msg", "")}
+            return {
+                "available": True,
+                "service_code": payload.get("code"),
+                "message": payload.get("msg", ""),
+            }
         except (httpx.HTTPError, ValueError) as exc:
             return {"available": False, "error": str(exc)}
 
@@ -104,9 +108,7 @@ class DuixClient:
                 result = str(data.get("result") or "").strip()
                 if not result:
                     raise RuntimeError("Duix 报告成功但未返回视频路径")
-                data["host_result_path"] = str(
-                    self.to_host_path(result, expected_code=code)
-                )
+                data["host_result_path"] = str(self.to_host_path(result, expected_code=code))
                 return data
             if status == 3:
                 raise RuntimeError(str(data.get("msg") or "Duix 生成失败"))

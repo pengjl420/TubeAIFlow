@@ -39,9 +39,7 @@ def select_motion_preset(
         return requested
     previous = previous_presets or []
     choices = _scene_choices(scene)
-    digest = hashlib.sha256(
-        f"{project_id}:{scene.id}:{assignment.id}".encode("utf-8")
-    ).digest()
+    digest = hashlib.sha256(f"{project_id}:{scene.id}:{assignment.id}".encode("utf-8")).digest()
     start = int.from_bytes(digest[:4], "big") % len(choices)
     for offset in range(len(choices)):
         candidate = choices[(start + offset) % len(choices)]
@@ -52,7 +50,10 @@ def select_motion_preset(
 
 def _scene_choices(scene: VisualScene) -> tuple[str, ...]:
     storyboard = (scene.storyboard_json or "").casefold()
-    if any(word in storyboard for word in ('"visual_type":"document', 'map', 'chart', 'logo', 'screenshot')):
+    if any(
+        word in storyboard
+        for word in ('"visual_type":"document', "map", "chart", "logo", "screenshot")
+    ):
         return ("static", "slow_zoom_in", "subtle_breathing")
     if any(word in storyboard for word in ("portrait", "person", "人物", "close_up")):
         return ("portrait_push_in", "slow_zoom_in", "subtle_breathing")
@@ -70,4 +71,3 @@ def _scene_choices(scene: VisualScene) -> tuple[str, ...]:
         "pan_right_to_left",
         "subtle_breathing",
     )
-

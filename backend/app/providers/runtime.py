@@ -14,4 +14,3 @@ class ProviderRuntime(Protocol):
 
 
 ProviderRuntimeT = TypeVar("ProviderRuntimeT", bound=ProviderRuntime)
-

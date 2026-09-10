@@ -29,7 +29,9 @@ class FasterWhisperAligner:
         self.beam_size = beam_size
         self._model = None
 
-    def transcribe(self, audio_path: Path, language: Language, *, vad_filter: bool = False) -> list[AsrWord]:
+    def transcribe(
+        self, audio_path: Path, language: Language, *, vad_filter: bool = False
+    ) -> list[AsrWord]:
         if not audio_path.is_file():
             raise ValueError(f"字幕对齐音频不存在：{audio_path}")
         model = self._get_model()
@@ -73,4 +75,3 @@ class FasterWhisperAligner:
                 local_files_only=True,
             )
         return self._model
-

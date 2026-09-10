@@ -504,7 +504,9 @@ def _apply_migrations() -> None:
         )
         applied = {
             row[0]
-            for row in connection.exec_driver_sql("SELECT version FROM schema_migrations").fetchall()
+            for row in connection.exec_driver_sql(
+                "SELECT version FROM schema_migrations"
+            ).fetchall()
         }
         from app.shared.time import utc_now_iso
 
@@ -722,7 +724,11 @@ def _backup_database_before_migration() -> Path | None:
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
         ).fetchone()
         current_version = (
-            int(connection.execute("SELECT COALESCE(MAX(version), 0) FROM schema_migrations").fetchone()[0])
+            int(
+                connection.execute(
+                    "SELECT COALESCE(MAX(version), 0) FROM schema_migrations"
+                ).fetchone()[0]
+            )
             if table
             else 0
         )

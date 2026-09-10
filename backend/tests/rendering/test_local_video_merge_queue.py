@@ -67,9 +67,7 @@ class LocalVideoMergeQueueTests(unittest.TestCase):
             with Session(self.engine) as session:
                 stored = list(
                     session.exec(
-                        select(LocalVideoMergeTask).order_by(
-                            LocalVideoMergeTask.queue_sequence
-                        )
+                        select(LocalVideoMergeTask).order_by(LocalVideoMergeTask.queue_sequence)
                     ).all()
                 )
                 self.assertEqual([task.status for task in stored], ["completed", "completed"])
@@ -100,9 +98,7 @@ class LocalVideoMergeQueueTests(unittest.TestCase):
             with Session(self.engine) as session:
                 stored = list(
                     session.exec(
-                        select(LocalVideoMergeTask).order_by(
-                            LocalVideoMergeTask.queue_sequence
-                        )
+                        select(LocalVideoMergeTask).order_by(LocalVideoMergeTask.queue_sequence)
                     ).all()
                 )
                 self.assertEqual([task.status for task in stored], ["failed", "completed"])

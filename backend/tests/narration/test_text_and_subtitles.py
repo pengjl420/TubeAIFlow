@@ -44,13 +44,25 @@ class TextServiceTests(unittest.TestCase):
         self.assertEqual([item["segment_id"] for item in segments], ["0001", "0002", "0003"])
         self.assertEqual([item["index"] for item in segments], [1, 2, 3])
 
-    def test_split_script_does_not_split_long_lines(self) -> None:
+    def test_split_script_safely_splits_long_lines_without_rewriting(self) -> None:
         long_line = "很长的内容，" * 30 + "结束。"
 
         segments = split_script(long_line)
 
-        self.assertEqual(len(segments), 1)
-        self.assertEqual(segments[0]["text"], long_line)
+        self.assertGreater(len(segments), 1)
+        self.assertTrue(all(len(item["text"]) <= 180 for item in segments))
+        self.assertEqual("".join(item["text"] for item in segments), long_line)
+
+    def test_split_script_bounds_a_sixty_minute_single_paragraph(self) -> None:
+        sentence = "这是用于验证长视频稳定性的完整测试句子，包含自然停顿。"
+        script = (sentence * 600)[:15_600]
+
+        segments = split_script(script)
+
+        self.assertGreater(len(segments), 60)
+        self.assertTrue(all(1 <= len(item["text"]) <= 180 for item in segments))
+        self.assertEqual("".join(item["text"] for item in segments), script)
+
 
 class TimeFormatTests(unittest.TestCase):
     def test_time_format_rounding(self) -> None:

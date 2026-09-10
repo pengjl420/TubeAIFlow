@@ -157,17 +157,33 @@ class StoryboardServiceTests(unittest.TestCase):
     def test_visual_invalidation_marks_old_candidates_stale(self) -> None:
         with self.project_session(cue_count=1) as (session, project, _settings):
             scene = VisualScene(
-                id="scene-old", project_id=project.id, scene_index=1,
-                start_ms=0, end_ms=3000, narration="Narration",
+                id="scene-old",
+                project_id=project.id,
+                scene_index=1,
+                start_ms=0,
+                end_ms=3000,
+                narration="Narration",
             )
             variant = GeneratedImageVariant(
-                id="variant-old", project_id=project.id, scene_id=scene.id,
-                variant_index=1, path="old.png", prompt="old", model_path="model",
-                input_signature="old-signature", seed=1, width=1920, height=1080,
-                steps=20, guidance_scale=5, status="completed",
+                id="variant-old",
+                project_id=project.id,
+                scene_id=scene.id,
+                variant_index=1,
+                path="old.png",
+                prompt="old",
+                model_path="model",
+                input_signature="old-signature",
+                seed=1,
+                width=1920,
+                height=1080,
+                steps=20,
+                guidance_scale=5,
+                status="completed",
             )
             assignment = SceneAssignment(
-                id="assignment-old", project_id=project.id, scene_id=scene.id,
+                id="assignment-old",
+                project_id=project.id,
+                scene_id=scene.id,
                 media_shot_id="shot-old",
             )
             session.add_all([scene, variant, assignment])
@@ -242,9 +258,7 @@ class StoryboardServiceTests(unittest.TestCase):
                 patch.object(storyboard_service, "get_settings", return_value=settings),
                 self.assertRaisesRegex(ValueError, "subtitle grouping changed"),
             ):
-                storyboard_service.generate_storyboard(
-                    session, project, client=_FakeDeepSeek()
-                )
+                storyboard_service.generate_storyboard(session, project, client=_FakeDeepSeek())
 
     def test_segment_storyboard_mode_groups_cues_by_source_segment(self) -> None:
         cues = [
@@ -327,7 +341,12 @@ class StoryboardServiceTests(unittest.TestCase):
 
     def test_invalid_ai_grouping_falls_back_to_complete_rule_based_coverage(self) -> None:
         cues = [
-            {"id": f"s{index}", "start_ms": (index - 1) * 3000, "end_ms": index * 3000, "text": str(index)}
+            {
+                "id": f"s{index}",
+                "start_ms": (index - 1) * 3000,
+                "end_ms": index * 3000,
+                "text": str(index),
+            }
             for index in range(1, 5)
         ]
 
@@ -338,16 +357,24 @@ class StoryboardServiceTests(unittest.TestCase):
 
     def test_ai_grouping_is_split_at_fifteen_seconds(self) -> None:
         cues = [
-            {"id": f"s{index}", "start_ms": (index - 1) * 3000, "end_ms": index * 3000, "text": str(index)}
+            {
+                "id": f"s{index}",
+                "start_ms": (index - 1) * 3000,
+                "end_ms": index * 3000,
+                "text": str(index),
+            }
             for index in range(1, 8)
         ]
 
         groups, warnings = group_cues(cues, _SingleGroupingDeepSeek())
 
-        self.assertEqual([[cue["id"] for cue in group] for group in groups], [
-            ["s1", "s2", "s3", "s4", "s5"],
-            ["s6", "s7"],
-        ])
+        self.assertEqual(
+            [[cue["id"] for cue in group] for group in groups],
+            [
+                ["s1", "s2", "s3", "s4", "s5"],
+                ["s6", "s7"],
+            ],
+        )
         self.assertEqual(warnings, [])
 
     def test_generate_storyboard_persists_validated_scenes_and_artifact(self) -> None:
@@ -388,7 +415,9 @@ class StoryboardServiceTests(unittest.TestCase):
                     )
 
                 self.assertEqual(len(result["scenes"]), 2)
-                self.assertEqual(result["scenes"][0]["subtitle_ids"], ["p1:sub_0001", "p1:sub_0002"])
+                self.assertEqual(
+                    result["scenes"][0]["subtitle_ids"], ["p1:sub_0001", "p1:sub_0002"]
+                )
                 self.assertEqual(result["scenes"][1]["end_ms"], 9000)
                 self.assertEqual(result["scenes"][0]["storyboard"]["fallback_category"], "business")
                 self.assertTrue(Path(result["path"]).is_file())
@@ -451,9 +480,7 @@ class StoryboardServiceTests(unittest.TestCase):
                 self.assertEqual(result["confidence"], 0.9)
                 self.assertEqual(result["status"], "reviewed")
                 self.assertEqual(result["version"], 2)
-                revisions = storyboard_service.list_scene_revisions(
-                    session, "p1", "p1:scene_0001"
-                )
+                revisions = storyboard_service.list_scene_revisions(session, "p1", "p1:scene_0001")
                 self.assertEqual([item["version"] for item in revisions], [1])
                 artifact = Path(directory) / "projects" / "p1" / "storyboard" / "scenes.json"
                 self.assertEqual(
@@ -519,9 +546,9 @@ class StoryboardServiceTests(unittest.TestCase):
             self.assertEqual(result["version"], 2)
             self.assertEqual(result["status"], "generated")
             self.assertEqual(
-                storyboard_service.list_scene_revisions(
-                    session, "p1", "p1:scene_0001"
-                )[0]["change_type"],
+                storyboard_service.list_scene_revisions(session, "p1", "p1:scene_0001")[0][
+                    "change_type"
+                ],
                 "before_regenerate",
             )
 

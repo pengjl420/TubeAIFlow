@@ -133,8 +133,15 @@ def analyze_audio_quality(audio_path: Path, project_id: str | None = None) -> di
     """Measure loudness peaks and long silence without loading audio into memory."""
     stderr = _run_ffmpeg_analysis(
         [
-            "-hide_banner", "-nostats", "-i", str(audio_path),
-            "-af", "volumedetect,silencedetect=noise=-35dB:d=2", "-f", "null", "-",
+            "-hide_banner",
+            "-nostats",
+            "-i",
+            str(audio_path),
+            "-af",
+            "volumedetect,silencedetect=noise=-35dB:d=2",
+            "-f",
+            "null",
+            "-",
         ],
         project_id,
     )
@@ -157,9 +164,16 @@ def detect_video_anomalies(video_path: Path, project_id: str | None = None) -> d
     """Detect sustained black and frozen ranges using streaming FFmpeg filters."""
     stderr = _run_ffmpeg_analysis(
         [
-            "-hide_banner", "-nostats", "-i", str(video_path), "-an",
-            "-vf", "blackdetect=d=1:pix_th=0.10,freezedetect=n=-50dB:d=3",
-            "-f", "null", "-",
+            "-hide_banner",
+            "-nostats",
+            "-i",
+            str(video_path),
+            "-an",
+            "-vf",
+            "blackdetect=d=1:pix_th=0.10,freezedetect=n=-50dB:d=3",
+            "-f",
+            "null",
+            "-",
         ],
         project_id,
     )
@@ -330,8 +344,7 @@ def ensure_ffmpeg_available() -> None:
             missing.append(f"{label}: {resolved}")
     if missing:
         raise RuntimeError(
-            "Video/audio generation requires installed FFmpeg tools; missing "
-            + ", ".join(missing)
+            "Video/audio generation requires installed FFmpeg tools; missing " + ", ".join(missing)
         )
 
 

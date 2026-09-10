@@ -14,7 +14,9 @@ from app.models.narration import VoiceProfile
 from app.models.voice_generation import VoiceGenerationTask
 from app.services.narration import tts_service, voice_generation_queue
 from app.infrastructure.logging_config import (
-    TaskLogFormatter, current_task_id, task_log_context,
+    TaskLogFormatter,
+    current_task_id,
+    task_log_context,
 )
 
 
@@ -38,9 +40,11 @@ class VoiceGenerationQueueTests(unittest.TestCase):
 
     def test_enqueue_keeps_transcript_and_exposes_newline_segments(self) -> None:
         with Session(self.engine) as session:
-            session.add(VoiceProfile(
-                id="voice", name="Narrator", reference_audio_path=str(self.reference_audio)
-            ))
+            session.add(
+                VoiceProfile(
+                    id="voice", name="Narrator", reference_audio_path=str(self.reference_audio)
+                )
+            )
             session.commit()
             task = voice_generation_queue.enqueue(
                 session,
@@ -68,13 +72,21 @@ class VoiceGenerationQueueTests(unittest.TestCase):
 
     def test_uuid_is_unique_and_persisted_through_resume_and_restart(self) -> None:
         with Session(self.engine) as session:
-            session.add(VoiceProfile(
-                id="voice", name="Narrator", reference_audio_path=str(self.reference_audio)
-            ))
+            session.add(
+                VoiceProfile(
+                    id="voice", name="Narrator", reference_audio_path=str(self.reference_audio)
+                )
+            )
             session.commit()
-            tasks = [voice_generation_queue.enqueue(
-                session, voice_profile_id="voice", text="same text", output_filename="same.wav",
-            ) for _ in range(2)]
+            tasks = [
+                voice_generation_queue.enqueue(
+                    session,
+                    voice_profile_id="voice",
+                    text="same text",
+                    output_filename="same.wav",
+                )
+                for _ in range(2)
+            ]
             ids = [task.id for task in tasks]
             self.assertNotEqual(*ids)
             self.assertTrue(all(uuid.UUID(identifier).version == 4 for identifier in ids))
@@ -91,14 +103,22 @@ class VoiceGenerationQueueTests(unittest.TestCase):
 
     def test_failure_and_success_logs_keep_task_id_without_leaking_to_next_task(self) -> None:
         with Session(self.engine) as session:
-            session.add(VoiceProfile(
-                id="voice", name="Narrator", reference_audio_path=str(self.reference_audio)
-            ))
+            session.add(
+                VoiceProfile(
+                    id="voice", name="Narrator", reference_audio_path=str(self.reference_audio)
+                )
+            )
             for index, task_id in enumerate(["failing", "succeeding"]):
-                session.add(VoiceGenerationTask(
-                    id=task_id, voice_profile_id="voice", voice_profile_name="Narrator",
-                    text="text", output_filename="voice.wav", queue_sequence=index,
-                ))
+                session.add(
+                    VoiceGenerationTask(
+                        id=task_id,
+                        voice_profile_id="voice",
+                        voice_profile_name="Narrator",
+                        text="text",
+                        output_filename="voice.wav",
+                        queue_sequence=index,
+                    )
+                )
             session.commit()
 
         def generate(task_id, *_args):
@@ -129,7 +149,9 @@ class VoiceGenerationQueueTests(unittest.TestCase):
         self.assertIn("[task_id=failing] nested provider log", log)
         self.assertIn("[task_id=succeeding] nested provider log", log)
         self.assertIn("[task_id=failing] RuntimeError: synthesis failed", log)
-        self.assertIn("[task_id=succeeding] Voice generation attempt finished: status=completed", log)
+        self.assertIn(
+            "[task_id=succeeding] Voice generation attempt finished: status=completed", log
+        )
         self.assertTrue(all(line.startswith("[task_id=") for line in log.splitlines()))
         with Session(self.engine) as session:
             self.assertEqual(session.get(VoiceGenerationTask, "failing").status, "failed")
@@ -137,16 +159,26 @@ class VoiceGenerationQueueTests(unittest.TestCase):
 
     def test_runner_logs_tag_and_redact_every_line_before_cancellation(self) -> None:
         logs_dir = Path(self.temp_dir.name)
-        result = subprocess.CompletedProcess([], 1, "line one\nline two\n", "password=hidden\nfailed\n")
+        result = subprocess.CompletedProcess(
+            [], 1, "line one\nline two\n", "password=hidden\nfailed\n"
+        )
         with (
             task_log_context("runner-task"),
             patch.object(tts_service, "_run_controlled_process", return_value=result) as run,
-            patch.object(tts_service.task_control, "check_cancelled", side_effect=tts_service.task_control.TaskCancelledError("paused")),
+            patch.object(
+                tts_service.task_control,
+                "check_cancelled",
+                side_effect=tts_service.task_control.TaskCancelledError("paused"),
+            ),
         ):
             with self.assertRaises(tts_service.task_control.TaskCancelledError):
                 tts_service._execute_batch_runner(
-                    "voice-generation-runner-task", ["python"], logs_dir,
-                    logs_dir, logs_dir / "result.json", "test-provider",
+                    "voice-generation-runner-task",
+                    ["python"],
+                    logs_dir,
+                    logs_dir,
+                    logs_dir / "result.json",
+                    "test-provider",
                 )
         self.assertEqual(run.call_args.kwargs["env"]["TUBEAIFOLW_TASK_ID"], "runner-task")
         files = list(logs_dir.glob("*.log"))
@@ -154,37 +186,58 @@ class VoiceGenerationQueueTests(unittest.TestCase):
         for path in files:
             content = path.read_text(encoding="utf-8")
             self.assertNotIn("hidden", content)
-            self.assertTrue(all(line.startswith("[task_id=runner-task] ") for line in content.splitlines()))
+            self.assertTrue(
+                all(line.startswith("[task_id=runner-task] ") for line in content.splitlines())
+            )
 
     def test_pause_and_resume_queued_task(self) -> None:
         with Session(self.engine) as session:
             task = VoiceGenerationTask(
-                id="task", voice_profile_id="voice", voice_profile_name="Narrator",
-                text="text", output_filename="voice.wav", queue_sequence=1,
+                id="task",
+                voice_profile_id="voice",
+                voice_profile_name="Narrator",
+                text="text",
+                output_filename="voice.wav",
+                queue_sequence=1,
             )
             session.add(task)
             session.commit()
 
             voice_generation_queue.pause_task(session, task)
             self.assertEqual(task.status, "paused")
-            self.assertIsNone(voice_generation_queue.serialize_task(session, task)["queue_position"])
+            self.assertIsNone(
+                voice_generation_queue.serialize_task(session, task)["queue_position"]
+            )
 
             voice_generation_queue.resume_task(session, task)
             self.assertEqual(task.status, "queued")
-            self.assertEqual(voice_generation_queue.serialize_task(session, task)["queue_position"], 1)
+            self.assertEqual(
+                voice_generation_queue.serialize_task(session, task)["queue_position"], 1
+            )
 
     def test_delete_non_running_task_removes_record(self) -> None:
         with Session(self.engine) as session:
             task = VoiceGenerationTask(
-                id="task", voice_profile_id="voice", voice_profile_name="Narrator",
-                text="text", output_filename="voice.wav", queue_sequence=1, status="paused",
+                id="task",
+                voice_profile_id="voice",
+                voice_profile_name="Narrator",
+                text="text",
+                output_filename="voice.wav",
+                queue_sequence=1,
+                status="paused",
             )
             session.add(task)
             session.commit()
 
             with (
-                patch.object(voice_generation_queue, "get_settings", return_value=SimpleNamespace(workspace_dir=Path(self.temp_dir.name))),
-                patch.object(voice_generation_queue, "move_existing_to_recycle_bin", return_value=[]) as recycle,
+                patch.object(
+                    voice_generation_queue,
+                    "get_settings",
+                    return_value=SimpleNamespace(workspace_dir=Path(self.temp_dir.name)),
+                ),
+                patch.object(
+                    voice_generation_queue, "move_existing_to_recycle_bin", return_value=[]
+                ) as recycle,
             ):
                 self.assertEqual(voice_generation_queue.delete_task(session, task), [])
 
@@ -194,8 +247,13 @@ class VoiceGenerationQueueTests(unittest.TestCase):
     def test_delete_rejects_running_task(self) -> None:
         with Session(self.engine) as session:
             task = VoiceGenerationTask(
-                id="task", voice_profile_id="voice", voice_profile_name="Narrator",
-                text="text", output_filename="voice.wav", queue_sequence=1, status="running",
+                id="task",
+                voice_profile_id="voice",
+                voice_profile_name="Narrator",
+                text="text",
+                output_filename="voice.wav",
+                queue_sequence=1,
+                status="running",
             )
             session.add(task)
             session.commit()
@@ -204,17 +262,31 @@ class VoiceGenerationQueueTests(unittest.TestCase):
 
     def test_worker_processes_fifo_and_persists_audio_result(self) -> None:
         with Session(self.engine) as session:
-            session.add(VoiceProfile(
-                id="voice", name="Narrator", reference_audio_path=str(self.reference_audio)
-            ))
-            session.add(VoiceGenerationTask(
-                id="first", voice_profile_id="voice", voice_profile_name="Narrator",
-                text="first", output_filename="first.wav", queue_sequence=1,
-            ))
-            session.add(VoiceGenerationTask(
-                id="second", voice_profile_id="voice", voice_profile_name="Narrator",
-                text="second", output_filename="second.wav", queue_sequence=2,
-            ))
+            session.add(
+                VoiceProfile(
+                    id="voice", name="Narrator", reference_audio_path=str(self.reference_audio)
+                )
+            )
+            session.add(
+                VoiceGenerationTask(
+                    id="first",
+                    voice_profile_id="voice",
+                    voice_profile_name="Narrator",
+                    text="first",
+                    output_filename="first.wav",
+                    queue_sequence=1,
+                )
+            )
+            session.add(
+                VoiceGenerationTask(
+                    id="second",
+                    voice_profile_id="voice",
+                    voice_profile_name="Narrator",
+                    text="second",
+                    output_filename="second.wav",
+                    queue_sequence=2,
+                )
+            )
             session.commit()
 
         calls: list[str] = []
@@ -222,9 +294,17 @@ class VoiceGenerationQueueTests(unittest.TestCase):
         def fake_generate(task_id, _profile, texts, filename):
             calls.append(task_id)
             self.assertEqual(texts, [task_id])
-            return {"output_path": str(Path(self.temp_dir.name) / filename), "duration": 2.5, "segments": []}
+            return {
+                "output_path": str(Path(self.temp_dir.name) / filename),
+                "duration": 2.5,
+                "segments": [],
+            }
 
-        with patch.object(voice_generation_queue.tts_service, "generate_segmented_audio", side_effect=fake_generate):
+        with patch.object(
+            voice_generation_queue.tts_service,
+            "generate_segmented_audio",
+            side_effect=fake_generate,
+        ):
             self.assertTrue(voice_generation_queue.process_next_task())
             self.assertTrue(voice_generation_queue.process_next_task())
             self.assertFalse(voice_generation_queue.process_next_task())
@@ -236,13 +316,21 @@ class VoiceGenerationQueueTests(unittest.TestCase):
 
     def test_pausing_running_task_keeps_paused_status(self) -> None:
         with Session(self.engine) as session:
-            session.add(VoiceProfile(
-                id="voice", name="Narrator", reference_audio_path=str(self.reference_audio)
-            ))
-            session.add(VoiceGenerationTask(
-                id="task", voice_profile_id="voice", voice_profile_name="Narrator",
-                text="text", output_filename="voice.wav", queue_sequence=1,
-            ))
+            session.add(
+                VoiceProfile(
+                    id="voice", name="Narrator", reference_audio_path=str(self.reference_audio)
+                )
+            )
+            session.add(
+                VoiceGenerationTask(
+                    id="task",
+                    voice_profile_id="voice",
+                    voice_profile_name="Narrator",
+                    text="text",
+                    output_filename="voice.wav",
+                    queue_sequence=1,
+                )
+            )
             session.commit()
 
         def fake_generate(*_args):
@@ -252,7 +340,11 @@ class VoiceGenerationQueueTests(unittest.TestCase):
                 voice_generation_queue.pause_task(pause_session, running)
             return {"output_path": "ignored.wav", "duration": 1.0, "segments": []}
 
-        with patch.object(voice_generation_queue.tts_service, "generate_segmented_audio", side_effect=fake_generate):
+        with patch.object(
+            voice_generation_queue.tts_service,
+            "generate_segmented_audio",
+            side_effect=fake_generate,
+        ):
             self.assertTrue(voice_generation_queue.process_next_task())
 
         with Session(self.engine) as session:
@@ -262,9 +354,11 @@ class VoiceGenerationQueueTests(unittest.TestCase):
 
     def test_rejects_text_longer_than_fifty_thousand_characters(self) -> None:
         with Session(self.engine) as session:
-            session.add(VoiceProfile(
-                id="voice", name="Narrator", reference_audio_path=str(self.reference_audio)
-            ))
+            session.add(
+                VoiceProfile(
+                    id="voice", name="Narrator", reference_audio_path=str(self.reference_audio)
+                )
+            )
             session.commit()
 
             with self.assertRaisesRegex(ValueError, "50000"):
@@ -288,11 +382,23 @@ class VoiceGenerationQueueTests(unittest.TestCase):
             Path(args[-1]).write_bytes(b"merged")
 
         with (
-            patch.object(tts_service, "get_settings", return_value=SimpleNamespace(workspace_dir=Path(self.temp_dir.name))),
+            patch.object(
+                tts_service,
+                "get_settings",
+                return_value=SimpleNamespace(workspace_dir=Path(self.temp_dir.name)),
+            ),
             patch.object(tts_service.voice_profile_service, "load_profile_config", return_value={}),
-            patch.object(tts_service.voice_profile_service, "profile_language", return_value="zh-CN"),
-            patch.object(tts_service.voice_profile_service, "profile_cosyvoice_speed", return_value=1.0),
-            patch.object(tts_service, "_validate_configuration", return_value=("qwen3_tts", self.reference_audio)),
+            patch.object(
+                tts_service.voice_profile_service, "profile_language", return_value="zh-CN"
+            ),
+            patch.object(
+                tts_service.voice_profile_service, "profile_cosyvoice_speed", return_value=1.0
+            ),
+            patch.object(
+                tts_service,
+                "_validate_configuration",
+                return_value=("qwen3_tts", self.reference_audio),
+            ),
             patch.object(tts_service, "_run_tts_batch", side_effect=fake_batch),
             patch.object(tts_service, "run_ffmpeg", side_effect=fake_ffmpeg),
             patch.object(tts_service, "probe_duration", return_value=1.25),

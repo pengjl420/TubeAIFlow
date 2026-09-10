@@ -24,9 +24,7 @@ class SegmentUpdateRequest(BaseModel):
 @router.get("/projects/{project_id}/segments")
 def list_segments(project_id: str, session: Session = Depends(get_session)) -> dict:
     segments = session.exec(
-        select(Segment)
-        .where(Segment.project_id == project_id)
-        .order_by(Segment.segment_index)
+        select(Segment).where(Segment.project_id == project_id).order_by(Segment.segment_index)
     ).all()
     return {"success": True, "data": segments}
 
@@ -45,7 +43,9 @@ def update_segment(
         )
     ).first()
     if not segment:
-        raise HTTPException(status_code=404, detail={"success": False, "error": "Segment not found"})
+        raise HTTPException(
+            status_code=404, detail={"success": False, "error": "Segment not found"}
+        )
     if payload.text is not None:
         segment.text = payload.text
         segment.status = "pending"
@@ -58,10 +58,14 @@ def update_segment(
 
 
 @router.get("/projects/{project_id}/segments/{segment_id}/audio")
-def get_segment_audio(project_id: str, segment_id: str, session: Session = Depends(get_session)) -> FileResponse:
+def get_segment_audio(
+    project_id: str, segment_id: str, session: Session = Depends(get_session)
+) -> FileResponse:
     project = project_service.get_project(session, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
+        raise HTTPException(
+            status_code=404, detail={"success": False, "error": "Project not found"}
+        )
     segment = session.exec(
         select(Segment).where(
             Segment.project_id == project_id,
@@ -69,12 +73,17 @@ def get_segment_audio(project_id: str, segment_id: str, session: Session = Depen
         )
     ).first()
     if not segment:
-        raise HTTPException(status_code=404, detail={"success": False, "error": "Segment audio not found"})
+        raise HTTPException(
+            status_code=404, detail={"success": False, "error": "Segment audio not found"}
+        )
 
     audio_path = (
         Path(segment.audio_path)
         if segment.audio_path
-        else get_project_work_dir(project, get_settings().workspace_dir) / "audio" / "segments" / f"{segment_id}.wav"
+        else get_project_work_dir(project, get_settings().workspace_dir)
+        / "audio"
+        / "segments"
+        / f"{segment_id}.wav"
     )
     try:
         audio_path = ensure_inside_any(
@@ -88,5 +97,7 @@ def get_segment_audio(project_id: str, segment_id: str, session: Session = Depen
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"success": False, "error": str(exc)}) from exc
     if not audio_path.is_file():
-        raise HTTPException(status_code=404, detail={"success": False, "error": "Segment audio file does not exist"})
+        raise HTTPException(
+            status_code=404, detail={"success": False, "error": "Segment audio file does not exist"}
+        )
     return FileResponse(audio_path)

@@ -42,9 +42,7 @@ def save_settings(session: Session, values: dict) -> dict:
     try:
         for field_name, value in pending_secrets.items():
             previous_id = credential_refs.get(field_name)
-            credential_id = store_secret(
-                f"settings-{field_name}-{uuid.uuid4().hex}", value
-            )
+            credential_id = store_secret(f"settings-{field_name}-{uuid.uuid4().hex}", value)
             credential_refs[field_name] = credential_id
             created_ids.append(credential_id)
             if previous_id:
@@ -146,7 +144,10 @@ def _validate_paths(settings: Settings) -> None:
         and not settings.image_generation_model_path.is_file()
     ):
         raise ValueError("image_generation_model_path must be an existing file")
-    if settings.image_generation_python is not None and not settings.image_generation_python.is_file():
+    if (
+        settings.image_generation_python is not None
+        and not settings.image_generation_python.is_file()
+    ):
         raise ValueError("image_generation_python must be an existing file")
 
 
@@ -216,11 +217,15 @@ def _credential_refs(record: SystemSetting | None) -> dict[str, str]:
     except (TypeError, json.JSONDecodeError):
         return {}
     refs = data.get("credential_refs", {}) if isinstance(data, dict) else {}
-    return {
-        str(field_name): str(credential_id)
-        for field_name, credential_id in refs.items()
-        if isinstance(field_name, str) and isinstance(credential_id, str)
-    } if isinstance(refs, dict) else {}
+    return (
+        {
+            str(field_name): str(credential_id)
+            for field_name, credential_id in refs.items()
+            if isinstance(field_name, str) and isinstance(credential_id, str)
+        }
+        if isinstance(refs, dict)
+        else {}
+    )
 
 
 def _looks_secret(field_name: str) -> bool:

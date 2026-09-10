@@ -35,8 +35,12 @@ class PipelineTests(unittest.TestCase):
             )
             outputs = VisualEnrichmentPipeline(project, dry_run=True, resume=True).run()
             required = {
-                "canonical_timeline.jsonl", "chapters.json", "scenes.json",
-                "visual_candidates.json", "visual_plan.json", "overlay_timeline.json",
+                "canonical_timeline.jsonl",
+                "chapters.json",
+                "scenes.json",
+                "visual_candidates.json",
+                "visual_plan.json",
+                "overlay_timeline.json",
             }
             self.assertTrue(required.issubset(outputs))
 
@@ -51,7 +55,9 @@ class PipelineTests(unittest.TestCase):
             for name, model in validators.items():
                 for item in json.loads(Path(outputs[name]).read_text(encoding="utf-8")):
                     model.model_validate(item)
-            VisualPlan.model_validate_json(Path(outputs["visual_plan.json"]).read_text(encoding="utf-8"))
+            VisualPlan.model_validate_json(
+                Path(outputs["visual_plan.json"]).read_text(encoding="utf-8")
+            )
             OverlayTimeline.model_validate_json(
                 Path(outputs["overlay_timeline.json"]).read_text(encoding="utf-8")
             )

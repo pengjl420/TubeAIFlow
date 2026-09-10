@@ -40,9 +40,7 @@ class ImageMotionRenderingTests(unittest.TestCase):
         )
         first = motion_presets.select_motion_preset("project-1", scene, assignment)
         second = motion_presets.select_motion_preset("project-1", scene, assignment)
-        alternative = motion_presets.select_motion_preset(
-            "project-1", scene, assignment, [first]
-        )
+        alternative = motion_presets.select_motion_preset("project-1", scene, assignment, [first])
 
         self.assertEqual(first, second)
         self.assertNotEqual(first, alternative)
@@ -63,9 +61,7 @@ class ImageMotionRenderingTests(unittest.TestCase):
             }
             with patch.object(scene_quality_checker, "probe_media", return_value=metadata):
                 with self.assertRaisesRegex(RuntimeError, "意外音频流"):
-                    scene_quality_checker.check_scene_video(
-                        path, 5.0, ProjectRenderConfig()
-                    )
+                    scene_quality_checker.check_scene_video(path, 5.0, ProjectRenderConfig())
 
     def test_scene_quality_uses_frame_count_when_available(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -93,8 +89,21 @@ class ImageMotionRenderingTests(unittest.TestCase):
 
     def test_absolute_frame_windows_do_not_accumulate_rounding_error(self) -> None:
         boundaries = [
-            0, 6000, 16720, 26640, 34560, 44560, 49920, 59680,
-            69680, 80720, 93840, 102800, 110240, 120240, 134480,
+            0,
+            6000,
+            16720,
+            26640,
+            34560,
+            44560,
+            49920,
+            59680,
+            69680,
+            80720,
+            93840,
+            102800,
+            110240,
+            120240,
+            134480,
         ]
         scenes = [
             VisualScene(
@@ -105,9 +114,7 @@ class ImageMotionRenderingTests(unittest.TestCase):
                 end_ms=end,
                 narration="test",
             )
-            for index, (start, end) in enumerate(
-                zip(boundaries, boundaries[1:]), start=1
-            )
+            for index, (start, end) in enumerate(zip(boundaries, boundaries[1:]), start=1)
         ]
 
         windows = [timeline_composer.scene_frame_window(scene, 30) for scene in scenes]
@@ -297,7 +304,9 @@ class ImageMotionRenderingTests(unittest.TestCase):
 
                 with (
                     patch.object(visual_track_composer, "get_settings", return_value=settings),
-                    patch.object(visual_track_composer, "run_ffmpeg", side_effect=fake_ffmpeg) as run,
+                    patch.object(
+                        visual_track_composer, "run_ffmpeg", side_effect=fake_ffmpeg
+                    ) as run,
                     patch.object(scene_renderer, "render_all_scenes") as rerender,
                     patch.object(
                         visual_track_composer,
@@ -310,9 +319,7 @@ class ImageMotionRenderingTests(unittest.TestCase):
                 args = run.call_args.args[0]
                 self.assertEqual(args[args.index("-c:v") + 1], "copy")
                 self.assertIn("-an", args)
-                self.assertEqual(
-                    check.call_args.kwargs["expected_frame_count"], 150
-                )
+                self.assertEqual(check.call_args.kwargs["expected_frame_count"], 150)
                 rerender.assert_called_once_with(session, project)
                 self.assertTrue(Path(result["path"]).is_file())
             engine.dispose()
@@ -333,8 +340,7 @@ class ImageMotionRenderingTests(unittest.TestCase):
 
         graph = args[args.index("-filter_complex") + 1]
         self.assertIn(
-            "[0:v]settb=AVTB,setpts=PTS-STARTPTS,setsar=1,"
-            "tpad=stop_mode=clone:stop_duration=0.450",
+            "[0:v]settb=AVTB,setpts=PTS-STARTPTS,setsar=1,tpad=stop_mode=clone:stop_duration=0.450",
             graph,
         )
         self.assertIn("[1:v]settb=AVTB,setpts=PTS-STARTPTS,setsar=1", graph)

@@ -28,5 +28,7 @@ def get_quality_report(project_id: str, session: Session = Depends(get_session))
 def _require_project(session: Session, project_id: str):
     project = project_service.get_project(session, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
+        raise HTTPException(
+            status_code=404, detail={"success": False, "error": "Project not found"}
+        )
     return project

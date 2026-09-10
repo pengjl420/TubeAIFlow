@@ -48,4 +48,3 @@ class SceneRenderPolicy(BaseModel):
 class ProjectRenderConfig(BaseModel):
     video: VideoRenderConfig = Field(default_factory=VideoRenderConfig)
     policy: SceneRenderPolicy = Field(default_factory=SceneRenderPolicy)
-

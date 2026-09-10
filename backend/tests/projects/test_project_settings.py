@@ -9,8 +9,14 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.models.project import Project
 from app.models.narration import Segment
-from app.models.media import SceneAssignment, SceneCandidate
-from app.models.storyboard import VisualScene
+from app.models.media import (
+    GeneratedImageVariant,
+    MediaFile,
+    MediaShot,
+    SceneAssignment,
+    SceneCandidate,
+)
+from app.models.storyboard import SceneRevision, SubtitleCue, VisualScene
 from app.models.task import TaskRun
 from app.infrastructure.project_layout import (
     get_final_audio_path,
@@ -40,6 +46,220 @@ class FakeSession:
 
 
 class ProjectSettingsTests(unittest.TestCase):
+    def test_script_change_invalidates_every_downstream_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            settings = SimpleNamespace(workspace_dir=root / "workspace")
+            project = Project(
+                id="project-id",
+                name="Project",
+                output_dir=str(root / "output"),
+                status="completed",
+                config_json=json.dumps(
+                    {"output_filename": "project", "project_directory_name": "project-work"}
+                ),
+            )
+            engine = create_engine("sqlite://")
+            SQLModel.metadata.create_all(engine)
+            with (
+                Session(engine) as session,
+                patch.object(project_service, "get_settings", return_value=settings),
+            ):
+                session.add(project)
+                project_service.save_script(session, project, "old script")
+                session.add(
+                    Segment(
+                        id="segment",
+                        segment_id="0001",
+                        project_id=project.id,
+                        segment_index=1,
+                        text="old script",
+                        status="completed",
+                    )
+                )
+                session.add(
+                    SubtitleCue(
+                        id="cue",
+                        project_id=project.id,
+                        source_segment_id="segment",
+                        cue_index=1,
+                        start_ms=0,
+                        end_ms=1_000,
+                        text="old script",
+                    )
+                )
+                session.add(
+                    VisualScene(
+                        id="scene",
+                        project_id=project.id,
+                        scene_index=1,
+                        start_ms=0,
+                        end_ms=1_000,
+                        narration="old script",
+                    )
+                )
+                session.add(
+                    SceneRevision(
+                        id="revision",
+                        project_id=project.id,
+                        scene_id="scene",
+                        version=1,
+                        snapshot_json="{}",
+                    )
+                )
+                session.add(
+                    MediaFile(
+                        id="media",
+                        provider="local_image_generation",
+                        path="old.png",
+                        filename="old.png",
+                        media_type="image",
+                        file_hash="hash",
+                    )
+                )
+                session.add(MediaShot(id="shot", media_file_id="media", shot_index=1))
+                session.add(
+                    GeneratedImageVariant(
+                        id="variant",
+                        project_id=project.id,
+                        scene_id="scene",
+                        variant_index=1,
+                        path="old.png",
+                        prompt="old",
+                        model_path="model",
+                        input_signature="sig",
+                        seed=1,
+                        width=16,
+                        height=9,
+                        steps=1,
+                        guidance_scale=1,
+                        media_file_id="media",
+                    )
+                )
+                session.add(
+                    SceneAssignment(
+                        id="assignment",
+                        project_id=project.id,
+                        scene_id="scene",
+                        media_shot_id="shot",
+                    )
+                )
+                session.add(
+                    SceneCandidate(
+                        id="candidate",
+                        project_id=project.id,
+                        scene_id="scene",
+                        media_shot_id="shot",
+                    )
+                )
+                session.commit()
+
+                final_paths = (
+                    get_final_audio_path(project, settings.workspace_dir),
+                    get_final_srt_path(project, settings.workspace_dir),
+                    get_final_video_path(project, settings.workspace_dir),
+                )
+                work_file = (
+                    get_project_work_dir(project, settings.workspace_dir)
+                    / "timeline"
+                    / "timeline.json"
+                )
+                for path in (*final_paths, work_file):
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text("stale", encoding="utf-8")
+
+                project_service.save_script(session, project, "new script")
+
+                self.assertEqual(project.status, "script_imported")
+                self.assertEqual(session.exec(select(Segment)).all(), [])
+                self.assertEqual(session.exec(select(SubtitleCue)).all(), [])
+                self.assertEqual(session.exec(select(VisualScene)).all(), [])
+                self.assertEqual(session.exec(select(SceneRevision)).all(), [])
+                self.assertEqual(session.exec(select(SceneAssignment)).all(), [])
+                self.assertEqual(session.exec(select(SceneCandidate)).all(), [])
+                self.assertEqual(session.exec(select(GeneratedImageVariant)).all(), [])
+                self.assertIsNone(session.get(MediaFile, "media"))
+                self.assertTrue(all(not path.exists() for path in (*final_paths, work_file)))
+
+            engine.dispose()
+
+    def test_saving_identical_script_preserves_completed_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            settings = SimpleNamespace(workspace_dir=root / "workspace")
+            project = Project(
+                id="project-id",
+                name="Project",
+                output_dir=str(root / "output"),
+                config_json=json.dumps(
+                    {"output_filename": "project", "project_directory_name": "project-work"}
+                ),
+            )
+            engine = create_engine("sqlite://")
+            SQLModel.metadata.create_all(engine)
+            with (
+                Session(engine) as session,
+                patch.object(project_service, "get_settings", return_value=settings),
+            ):
+                session.add(project)
+                project_service.save_script(session, project, "same script")
+                project.status = "completed"
+                session.add(
+                    Segment(
+                        id="segment",
+                        segment_id="0001",
+                        project_id=project.id,
+                        segment_index=1,
+                        text="same script",
+                        status="completed",
+                    )
+                )
+                session.commit()
+
+                project_service.save_script(session, project, "same script")
+
+                self.assertEqual(project.status, "completed")
+                self.assertIsNotNone(session.get(Segment, "segment"))
+
+            engine.dispose()
+
+    def test_script_change_rejects_locked_scenes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            settings = SimpleNamespace(workspace_dir=root / "workspace")
+            project = Project(id="project-id", name="Project", config_json="{}")
+            engine = create_engine("sqlite://")
+            SQLModel.metadata.create_all(engine)
+            with (
+                Session(engine) as session,
+                patch.object(project_service, "get_settings", return_value=settings),
+            ):
+                session.add(project)
+                project_service.save_script(session, project, "old script")
+                session.add(
+                    VisualScene(
+                        id="scene",
+                        project_id=project.id,
+                        scene_index=1,
+                        start_ms=0,
+                        end_ms=1_000,
+                        narration="old script",
+                        locked_text=True,
+                    )
+                )
+                session.commit()
+
+                with self.assertRaisesRegex(ValueError, "Scene 1 is locked"):
+                    project_service.save_script(session, project, "new script")
+
+                self.assertEqual(
+                    Path(project.script_raw_path or "").read_text(encoding="utf-8"),
+                    "old script",
+                )
+                self.assertIsNotNone(session.get(VisualScene, "scene"))
+
+            engine.dispose()
+
     def test_project_response_exposes_typed_config(self) -> None:
         project = Project(
             id="project-id",
@@ -57,26 +277,44 @@ class ProjectSettingsTests(unittest.TestCase):
             engine = create_engine(f"sqlite:///{Path(directory) / 'metrics.db'}")
             SQLModel.metadata.create_all(engine)
             with Session(engine) as session:
-                session.add(Project(
-                    id="project-id",
-                    name="Name",
-                    created_at="2026-07-17T01:00:00+00:00",
-                ))
-                session.add(Segment(
-                    id="segment-1", segment_id="0001", project_id="project-id",
-                    segment_index=1, text="第一段", duration=61.25,
-                ))
-                session.add(Segment(
-                    id="segment-2", segment_id="0002", project_id="project-id",
-                    segment_index=2, text="第二段", duration=2.5,
-                ))
-                session.add(TaskRun(
-                    id="task-id", project_id="project-id", queue_sequence=1,
-                    status="completed",
-                    created_at="2026-07-17T02:00:00+00:00",
-                    started_at="2026-07-17T03:00:00+00:00",
-                    finished_at="2026-07-17T03:01:30+00:00",
-                ))
+                session.add(
+                    Project(
+                        id="project-id",
+                        name="Name",
+                        created_at="2026-07-17T01:00:00+00:00",
+                    )
+                )
+                session.add(
+                    Segment(
+                        id="segment-1",
+                        segment_id="0001",
+                        project_id="project-id",
+                        segment_index=1,
+                        text="第一段",
+                        duration=61.25,
+                    )
+                )
+                session.add(
+                    Segment(
+                        id="segment-2",
+                        segment_id="0002",
+                        project_id="project-id",
+                        segment_index=2,
+                        text="第二段",
+                        duration=2.5,
+                    )
+                )
+                session.add(
+                    TaskRun(
+                        id="task-id",
+                        project_id="project-id",
+                        queue_sequence=1,
+                        status="completed",
+                        created_at="2026-07-17T02:00:00+00:00",
+                        started_at="2026-07-17T03:00:00+00:00",
+                        finished_at="2026-07-17T03:01:30+00:00",
+                    )
+                )
                 session.commit()
 
                 response = project_service.list_projects(session)[0]

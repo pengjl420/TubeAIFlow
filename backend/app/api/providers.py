@@ -82,9 +82,7 @@ def list_providers(category: ProviderCategory | None = Query(default=None)) -> d
             {
                 **item.model_dump(mode="json"),
                 "available": (
-                    bool(settings.deepseek_api_key.strip())
-                    if item.id == "llm.deepseek"
-                    else True
+                    bool(settings.deepseek_api_key.strip()) if item.id == "llm.deepseek" else True
                 ),
                 "legacy_id": item.legacy_id,
             }

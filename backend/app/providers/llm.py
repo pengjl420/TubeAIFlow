@@ -147,9 +147,7 @@ class HybridLLMClient:
     ) -> dict:
         if task == "storyboard-repair" and self.cloud is not None:
             self.routes.append("cloud:schema-repair")
-            return invoke_json(
-                self.cloud, system_prompt, user_prompt, schema=schema, task=task
-            )
+            return invoke_json(self.cloud, system_prompt, user_prompt, schema=schema, task=task)
         try:
             local_payload = invoke_json(
                 self.local, system_prompt, user_prompt, schema=schema, task=task
@@ -240,9 +238,7 @@ class CachedLLMClient:
             if isinstance(payload, dict):
                 self._cache_routes.append(f"cache:{task}")
                 return payload
-        payload = invoke_json(
-            self.provider, system_prompt, user_prompt, schema=schema, task=task
-        )
+        payload = invoke_json(self.provider, system_prompt, user_prompt, schema=schema, task=task)
         path.parent.mkdir(parents=True, exist_ok=True)
         write_json_atomic(path, payload)
         return payload

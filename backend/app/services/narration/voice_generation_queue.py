@@ -46,7 +46,9 @@ def normalize_output_filename(value: str) -> str:
     return filename
 
 
-def enqueue(session: Session, *, voice_profile_id: str, text: str, output_filename: str) -> VoiceGenerationTask:
+def enqueue(
+    session: Session, *, voice_profile_id: str, text: str, output_filename: str
+) -> VoiceGenerationTask:
     profile = voice_profile_service.get_profile(session, voice_profile_id.strip())
     if not profile:
         raise ValueError("请选择有效的参考音色")
@@ -78,13 +80,17 @@ def serialize_task(session: Session, task: VoiceGenerationTask) -> dict:
     with task_log_context(task.id):
         queue_position = None
         if task.status == "queued":
-            ahead = session.exec(select(func.count(VoiceGenerationTask.id)).where(
-                VoiceGenerationTask.status == "queued",
-                VoiceGenerationTask.queue_sequence < task.queue_sequence,
-            )).one()
-            running = session.exec(select(func.count(VoiceGenerationTask.id)).where(
-                VoiceGenerationTask.status == "running"
-            )).one()
+            ahead = session.exec(
+                select(func.count(VoiceGenerationTask.id)).where(
+                    VoiceGenerationTask.status == "queued",
+                    VoiceGenerationTask.queue_sequence < task.queue_sequence,
+                )
+            ).one()
+            running = session.exec(
+                select(func.count(VoiceGenerationTask.id)).where(
+                    VoiceGenerationTask.status == "running"
+                )
+            ).one()
             queue_position = int(ahead or 0) + int(running or 0) + 1
         data = task.model_dump()
         profile = voice_profile_service.get_profile(session, task.voice_profile_id)
@@ -93,7 +99,9 @@ def serialize_task(session: Session, task: VoiceGenerationTask) -> dict:
         data["language"] = voice_profile_service.profile_language(profile_config)
         data["queue_position"] = queue_position
         data["duration_seconds"] = elapsed_seconds(task.started_at, task.finished_at)
-        data["audio_url"] = f"/api/tools/voice-generation/tasks/{task.id}/audio" if task.output_path else None
+        data["audio_url"] = (
+            f"/api/tools/voice-generation/tasks/{task.id}/audio" if task.output_path else None
+        )
         lines = split_transcript_lines(task.text)
         output_dir = get_settings().workspace_dir / "voice_generations" / task.id
         manifest_path = output_dir / "segments.json"
@@ -105,7 +113,9 @@ def serialize_task(session: Session, task: VoiceGenerationTask) -> dict:
                     segment_results = loaded
             except (OSError, json.JSONDecodeError):
                 logger.warning("Cannot read voice generation segment manifest: %s", manifest_path)
-        result_by_index = {int(item.get("index", 0)): item for item in segment_results if isinstance(item, dict)}
+        result_by_index = {
+            int(item.get("index", 0)): item for item in segment_results if isinstance(item, dict)
+        }
         stem = Path(task.output_filename).stem
         data["segments"] = [
             {
@@ -115,7 +125,8 @@ def serialize_task(session: Session, task: VoiceGenerationTask) -> dict:
                 "duration": result_by_index.get(index, {}).get("duration"),
                 "audio_url": (
                     f"/api/tools/voice-generation/tasks/{task.id}/segments/{index}/audio"
-                    if index in result_by_index else None
+                    if index in result_by_index
+                    else None
                 ),
             }
             for index, line in enumerate(lines, start=1)
@@ -125,9 +136,9 @@ def serialize_task(session: Session, task: VoiceGenerationTask) -> dict:
 
 
 def list_tasks(session: Session, limit: int = 100) -> list[dict]:
-    tasks = session.exec(select(VoiceGenerationTask).order_by(
-        VoiceGenerationTask.queue_sequence.desc()
-    ).limit(limit)).all()
+    tasks = session.exec(
+        select(VoiceGenerationTask).order_by(VoiceGenerationTask.queue_sequence.desc()).limit(limit)
+    ).all()
     return [serialize_task(session, task) for task in tasks]
 
 
@@ -184,9 +195,11 @@ def delete_task(session: Session, task: VoiceGenerationTask) -> list[str]:
 
 
 def recover_interrupted_tasks(session: Session) -> int:
-    tasks = list(session.exec(select(VoiceGenerationTask).where(
-        VoiceGenerationTask.status == "running"
-    )).all())
+    tasks = list(
+        session.exec(
+            select(VoiceGenerationTask).where(VoiceGenerationTask.status == "running")
+        ).all()
+    )
     now = utc_now_iso()
     for task in tasks:
         task.status = "queued"
@@ -204,9 +217,11 @@ def recover_interrupted_tasks(session: Session) -> int:
 def process_next_task() -> bool:
     with Session(engine) as session:
         with _queue_state_lock:
-            task = session.exec(select(VoiceGenerationTask).where(
-                VoiceGenerationTask.status == "queued"
-            ).order_by(VoiceGenerationTask.queue_sequence, VoiceGenerationTask.created_at)).first()
+            task = session.exec(
+                select(VoiceGenerationTask)
+                .where(VoiceGenerationTask.status == "queued")
+                .order_by(VoiceGenerationTask.queue_sequence, VoiceGenerationTask.created_at)
+            ).first()
             if not task:
                 return False
             now = utc_now_iso()
@@ -259,7 +274,10 @@ def process_next_task() -> bool:
                     current.updated_at = finished
                     session.add(current)
                     session.commit()
-            logger.info("Voice generation attempt finished: status=%s", current.status if current else "deleted")
+            logger.info(
+                "Voice generation attempt finished: status=%s",
+                current.status if current else "deleted",
+            )
             return True
 
 

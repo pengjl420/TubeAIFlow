@@ -6,6 +6,10 @@ from app.providers.llm import JSONLLMProvider, build_storyboard_llm, invoke_json
 
 
 AI_SEGMENTATION_PROMPT_VERSION = "narration-segmentation-v1"
+MAX_TTS_SEGMENT_CHARACTERS = 180
+MIN_PREFERRED_SPLIT_CHARACTERS = 45
+_STRONG_BOUNDARIES = frozenset("。！？!?；;\n")
+_SOFT_BOUNDARIES = frozenset("，,、：: ")
 
 
 class _AISegment(BaseModel):
@@ -18,8 +22,9 @@ class _AISegmentationResult(BaseModel):
 
 
 def split_script(text: str) -> list[dict]:
-    """Split on non-empty lines. This remains the default, local-only mode."""
-    segments = [line.strip() for line in text.splitlines() if line.strip()]
+    """Split locally while enforcing a safe upper bound for long-form TTS."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    segments = [part for line in lines for part in _split_long_segment(line)]
 
     return _serialize_segments(segments)
 
@@ -45,13 +50,52 @@ def split_script_with_ai(
     except ValidationError as exc:
         raise ValueError(f"AI 自动切段结果格式无效：{exc}") from exc
 
-    segment_texts = [item.text.strip() for item in parsed.segments]
+    segment_texts: list[str] = []
+    visual_descriptions: list[str] = []
+    for item in parsed.segments:
+        parts = _split_long_segment(item.text.strip())
+        segment_texts.extend(parts)
+        visual_descriptions.extend([item.visual_description.strip()] * len(parts))
     if _without_whitespace("".join(segment_texts)) != _without_whitespace(source):
         raise ValueError("AI 自动切段修改、遗漏或重排了逐字稿内容")
-    return _serialize_segments(
-        segment_texts,
-        [item.visual_description.strip() for item in parsed.segments],
-    )
+    return _serialize_segments(segment_texts, visual_descriptions)
+
+
+def _split_long_segment(
+    text: str,
+    max_characters: int = MAX_TTS_SEGMENT_CHARACTERS,
+) -> list[str]:
+    """Choose deterministic punctuation-aware boundaries without rewriting text."""
+    remaining = text.strip()
+    if not remaining:
+        return []
+    if max_characters < 2:
+        raise ValueError("TTS segment character limit must be at least 2")
+    parts: list[str] = []
+    while len(remaining) > max_characters:
+        window = remaining[:max_characters]
+        minimum = min(MIN_PREFERRED_SPLIT_CHARACTERS, max_characters // 2)
+        split_at = _last_boundary(window, _STRONG_BOUNDARIES, minimum)
+        if split_at is None:
+            split_at = _last_boundary(window, _SOFT_BOUNDARIES, minimum)
+        if split_at is None:
+            split_at = max_characters
+        part = remaining[:split_at].strip()
+        if not part:
+            split_at = max_characters
+            part = remaining[:split_at]
+        parts.append(part)
+        remaining = remaining[split_at:].strip()
+    if remaining:
+        parts.append(remaining)
+    return parts
+
+
+def _last_boundary(window: str, boundaries: frozenset[str], minimum: int) -> int | None:
+    for index in range(len(window) - 1, minimum - 1, -1):
+        if window[index] in boundaries:
+            return index + 1
+    return None
 
 
 def _serialize_segments(

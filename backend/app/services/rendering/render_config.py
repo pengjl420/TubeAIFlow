@@ -12,4 +12,3 @@ def get_project_render_config(project: Project) -> ProjectRenderConfig:
     video = raw.get("video") if isinstance(raw.get("video"), dict) else {}
     policy = raw.get("policy") if isinstance(raw.get("policy"), dict) else {}
     return ProjectRenderConfig.model_validate({"video": video, "policy": policy})
-

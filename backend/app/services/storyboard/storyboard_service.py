@@ -74,7 +74,9 @@ def generate_storyboard(
         scene_values,
         llm_client,
         full_script=full_script if storyboard_mode == project_service.STORYBOARD_MODE_AI else "",
-        scenes_per_request=1 if storyboard_mode == project_service.STORYBOARD_MODE_SEGMENTS else SCENES_PER_REQUEST,
+        scenes_per_request=1
+        if storyboard_mode == project_service.STORYBOARD_MODE_SEGMENTS
+        else SCENES_PER_REQUEST,
     )
 
     existing_scenes = {
@@ -127,14 +129,16 @@ def generate_storyboard(
             existing.updated_at = now
             session.add(existing)
         else:
-            session.add(VisualScene(
-                **value,
-                storyboard_json=content_json,
-                confidence=content.confidence,
-                status="generated",
-                created_at=now,
-                updated_at=now,
-            ))
+            session.add(
+                VisualScene(
+                    **value,
+                    storyboard_json=content_json,
+                    confidence=content.confidence,
+                    status="generated",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
     for scene_id, existing in existing_scenes.items():
         if scene_id not in generated_ids:
             session.exec(delete(SceneAssignment).where(SceneAssignment.scene_id == scene_id))
@@ -374,8 +378,7 @@ def _save_revision(
             scene_id=scene.id,
             version=scene.version,
             change_type=change_type,
-            snapshot_json=snapshot_json
-            or json.dumps(_serialize_scene(scene), ensure_ascii=False),
+            snapshot_json=snapshot_json or json.dumps(_serialize_scene(scene), ensure_ascii=False),
         )
     )
 
@@ -387,9 +390,7 @@ def _load_narration_units(session: Session, project_id: str) -> list[dict]:
     artifact is created.
     """
     segments = session.exec(
-        select(Segment)
-        .where(Segment.project_id == project_id)
-        .order_by(Segment.segment_index)
+        select(Segment).where(Segment.project_id == project_id).order_by(Segment.segment_index)
     ).all()
     if not segments:
         # Read-only compatibility for projects created before subtitle/timeline
@@ -450,9 +451,7 @@ def _build_scene_values(project_id: str, cue_groups: list[list[dict]]) -> list[d
                 "start_ms": cues[0]["start_ms"],
                 "end_ms": cues[-1]["end_ms"],
                 "narration": " ".join(cue["text"].replace("\n", " ").strip() for cue in cues),
-                "subtitle_ids_json": json.dumps(
-                    [cue["id"] for cue in cues], ensure_ascii=False
-                ),
+                "subtitle_ids_json": json.dumps([cue["id"] for cue in cues], ensure_ascii=False),
             }
         )
     return values
@@ -508,9 +507,7 @@ def _generate_storyboard_content(
         if actual_ids != expected_ids or len(parsed.scenes) != len(batch):
             raise ValueError("LLM 返回的 Storyboard 场景 ID 不完整")
         for scene in parsed.scenes:
-            content = StoryboardContent.model_validate(
-                scene.model_dump(exclude={"scene_id"})
-            )
+            content = StoryboardContent.model_validate(scene.model_dump(exclude={"scene_id"}))
             result[scene.scene_id] = normalize_storyboard(content)
     return result
 
@@ -528,9 +525,7 @@ def _request_storyboard_batch(
         task="storyboard",
     )
     try:
-        return StoryboardBatchResult.model_validate(
-            _normalize_llm_storyboard_payload(raw_payload)
-        )
+        return StoryboardBatchResult.model_validate(_normalize_llm_storyboard_payload(raw_payload))
     except ValidationError as exc:
         logger.warning("Storyboard response validation failed; requesting one repair: %s", exc)
         repaired_payload = invoke_json(
@@ -628,7 +623,11 @@ def _storyboard_user_prompt(scene_values: list[dict], full_script: str = "") -> 
             "start_ms": scene["start_ms"],
             "end_ms": scene["end_ms"],
             "narration": scene["narration"],
-            **({"suggested_visual_description": scene["visual_hint"]} if scene.get("visual_hint") else {}),
+            **(
+                {"suggested_visual_description": scene["visual_hint"]}
+                if scene.get("visual_hint")
+                else {}
+            ),
         }
         for scene in scene_values
     ]
@@ -666,7 +665,9 @@ def _storyboard_repair_prompt(
                 "an integer from 0 to 10, never a percentage from 0 to 100. subject_count must "
                 "be an integer from 0 to 20, and confidence must be a number from 0 to 1."
             ),
-            "required_scenes": json.loads(_storyboard_user_prompt(scene_values, full_script))["scenes"],
+            "required_scenes": json.loads(_storyboard_user_prompt(scene_values, full_script))[
+                "scenes"
+            ],
             "validation_errors": validation_error.errors(
                 include_url=False, include_context=False, include_input=False
             ),

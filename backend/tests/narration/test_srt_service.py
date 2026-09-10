@@ -16,7 +16,6 @@ class SrtServiceTests(unittest.TestCase):
 
         self.assertEqual(_clean_srt_text(text), "第 1 集\nAI 2026")
 
-
     def test_long_segment_is_split_into_continuous_readable_cues(self) -> None:
         text = "这是第一句用于测试字幕拆分。这里是第二句，内容同样需要保持完整。最后一句用于确认时间轴连续。"
         segment = Segment(

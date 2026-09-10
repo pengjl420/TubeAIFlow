@@ -105,7 +105,9 @@ class Settings(BaseModel):
         DEFAULT_IMAGE_MODEL_PATH if DEFAULT_IMAGE_MODEL_PATH.is_file() else None
     )
     image_generation_config_dir: Path | None = (
-        DEFAULT_IMAGE_CONFIG_DIR if (DEFAULT_IMAGE_CONFIG_DIR / "model_index.json").is_file() else None
+        DEFAULT_IMAGE_CONFIG_DIR
+        if (DEFAULT_IMAGE_CONFIG_DIR / "model_index.json").is_file()
+        else None
     )
     image_generation_python: Path | None = None
     image_generation_device: str = "cuda:0"
@@ -233,7 +235,10 @@ class Settings(BaseModel):
     def migrate_landscape_transition_settings(cls, value):
         if isinstance(value, dict):
             data = dict(value)
-            if "storyboard_transition_effects" not in data and "landscape_transition_effects" in data:
+            if (
+                "storyboard_transition_effects" not in data
+                and "landscape_transition_effects" in data
+            ):
                 data["storyboard_transition_effects"] = data["landscape_transition_effects"]
             return data
         return value
@@ -243,7 +248,9 @@ class Settings(BaseModel):
     def validate_storyboard_transition_effects(cls, value):
         names = [item.name for item in value]
         if len(names) != len(set(names)) or set(names) != set(STORYBOARD_TRANSITION_NAMES):
-            raise ValueError("Storyboard transition settings must contain each supported effect once")
+            raise ValueError(
+                "Storyboard transition settings must contain each supported effect once"
+            )
         enabled = [item for item in value if item.enabled]
         if enabled and any(item.percentage <= 0 for item in enabled):
             raise ValueError("Enabled storyboard transitions must have a positive percentage")
@@ -293,7 +300,9 @@ class Settings(BaseModel):
 
 def _normalize_paths(settings: Settings) -> Settings:
     workspace = settings.workspace_dir.expanduser()
-    settings.workspace_dir = (BASE_DIR / workspace).resolve() if not workspace.is_absolute() else workspace.resolve()
+    settings.workspace_dir = (
+        (BASE_DIR / workspace).resolve() if not workspace.is_absolute() else workspace.resolve()
+    )
     for field_name in (
         "qwen_tts_root",
         "qwen_tts_python",
@@ -347,7 +356,9 @@ def _get_live_settings() -> Settings:
                         from app.infrastructure.credential_store import load_secret
 
                         for field_name, credential_id in credential_refs.items():
-                            if field_name in Settings.model_fields and isinstance(credential_id, str):
+                            if field_name in Settings.model_fields and isinstance(
+                                credential_id, str
+                            ):
                                 data[field_name] = load_secret(credential_id)
                     settings = Settings.model_validate(data)
     except (ImportError, json.JSONDecodeError, OperationalError, ValidationError):

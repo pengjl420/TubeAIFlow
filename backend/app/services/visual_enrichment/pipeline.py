@@ -95,7 +95,10 @@ class VisualEnrichmentPipeline:
             "audio_validation": "skipped_dry_run" if self.dry_run else "not_available",
         }
         report_path = self.artifacts.write_json("work/01_ingest/ingest_report.json", report)
-        return {"canonical_timeline.jsonl": str(self.project_dir / relative), "ingest_report.json": str(report_path)}
+        return {
+            "canonical_timeline.jsonl": str(self.project_dir / relative),
+            "ingest_report.json": str(report_path),
+        }
 
     def run_semantic(self) -> dict[str, str]:
         timeline = self._load_timeline()
@@ -110,7 +113,9 @@ class VisualEnrichmentPipeline:
         chapter_relative = "work/02_semantic/chapters.json"
         scene_relative = "work/02_semantic/scenes.json"
         candidate_relative = "work/03_candidates/visual_candidates.json"
-        if self._can_resume(chapter_relative, input_hash) and self._can_resume(scene_relative, input_hash):
+        if self._can_resume(chapter_relative, input_hash) and self._can_resume(
+            scene_relative, input_hash
+        ):
             chapters = self._read_model_list(chapter_relative, Chapter)
             scenes = self._read_model_list(scene_relative, SemanticScene)
         else:
@@ -157,11 +162,15 @@ class VisualEnrichmentPipeline:
 
     def run_plan(self) -> dict[str, str]:
         timeline = self._load_timeline()
-        candidates = self._read_model_list("work/03_candidates/visual_candidates.json", VisualCandidate)
+        candidates = self._read_model_list(
+            "work/03_candidates/visual_candidates.json", VisualCandidate
+        )
         selection = self.config.get("selection", {})
         duration_ms = timeline[-1].end_ms
         input_hash = self._hash_payload(
-            [item.model_dump(mode="json") for item in candidates], selection, self.config.get("image", {})
+            [item.model_dump(mode="json") for item in candidates],
+            selection,
+            self.config.get("image", {}),
         )
         relative = "work/04_plan/visual_plan.json"
         if self._can_resume(relative, input_hash):
@@ -227,7 +236,9 @@ class VisualEnrichmentPipeline:
                 project_id=self.project_id,
                 generation_type=f"image:{visual.visual_id}",
                 provider=self.image.name,
-                model=str(self.config.get("image", {}).get("default_model", "deterministic-mock-v1")),
+                model=str(
+                    self.config.get("image", {}).get("default_model", "deterministic-mock-v1")
+                ),
                 prompt=visual.prompt,
                 input_data=request,
                 output_data={"outputs": outputs},
@@ -379,23 +390,17 @@ class VisualEnrichmentPipeline:
             timeout_seconds=float(semantic.get("timeout_seconds", 180)),
         )
         embedding_provider = BgeM3OnnxEmbeddingProvider(
-            self._config_path(
-                embedding.get("model_path", "models/embedding/bge-m3-onnx")
-            ),
+            self._config_path(embedding.get("model_path", "models/embedding/bge-m3-onnx")),
             max_length=int(embedding.get("max_length", 512)),
         )
         image_provider = ComfyUIImageProvider(
             str(image.get("base_url", "http://127.0.0.1:8188")),
-            self._config_path(
-                image.get("workflow_path", "workflows/flux2_klein_scene_api.json")
-            ),
+            self._config_path(image.get("workflow_path", "workflows/flux2_klein_scene_api.json")),
             self.project_dir / "work/05_assets/generated",
             timeout_seconds=float(image.get("timeout_seconds", 900)),
         )
         vision_provider = Qwen3VLVisionProvider(
-            self._config_path(
-                qc.get("model_path", "models/vision/qwen3-vl-4b-instruct-fp8")
-            ),
+            self._config_path(qc.get("model_path", "models/vision/qwen3-vl-4b-instruct-fp8")),
             max_new_tokens=int(qc.get("max_new_tokens", 512)),
             semantic_match_min=int(qc.get("semantic_match_min", 4)),
             reject_random_text=bool(qc.get("reject_random_text", True)),
@@ -421,6 +426,11 @@ class VisualEnrichmentPipeline:
         if not isinstance(payload, dict):
             raise ValueError("Pipeline config must be a YAML object")
         hardware = payload.get("hardware", {})
-        if hardware.get("parallel_large_models") is not False or int(hardware.get("max_gpu_jobs", 1)) != 1:
-            raise ValueError("Phase 0-3 requires one serial GPU job and parallel_large_models=false")
+        if (
+            hardware.get("parallel_large_models") is not False
+            or int(hardware.get("max_gpu_jobs", 1)) != 1
+        ):
+            raise ValueError(
+                "Phase 0-3 requires one serial GPU job and parallel_large_models=false"
+            )
         return payload

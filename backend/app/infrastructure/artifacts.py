@@ -39,8 +39,7 @@ class ArtifactStore:
     def write_jsonl(self, relative_path: str, values: list[BaseModel]) -> Path:
         encoded = (
             "\n".join(
-                json.dumps(value.model_dump(mode="json"), ensure_ascii=False)
-                for value in values
+                json.dumps(value.model_dump(mode="json"), ensure_ascii=False) for value in values
             )
             + "\n"
         ).encode("utf-8")
@@ -90,4 +89,3 @@ class ArtifactStore:
         except (OSError, json.JSONDecodeError):
             return {}
         return value if isinstance(value, dict) else {}
-

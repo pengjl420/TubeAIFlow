@@ -67,9 +67,7 @@ def test_scan_rank_and_assign_local_asset(tmp_path):
             scanned = asset_library_service.scan_project_directory(session, project)
         candidates = asset_library_service.scene_candidates(session, project, scene.id)
         cached_candidates = asset_library_service.scene_candidates(session, project, scene.id)
-        assert [item["id"] for item in cached_candidates] == [
-            item["id"] for item in candidates
-        ]
+        assert [item["id"] for item in cached_candidates] == [item["id"] for item in candidates]
         with patch.object(
             scene_workspace_service,
             "get_settings",
@@ -161,9 +159,7 @@ def test_unchanged_library_file_skips_hash_and_probe_on_rescan(tmp_path):
                 "probe_media",
                 return_value={"duration_ms": 1_000, "width": 1280, "height": 720},
             ) as probe,
-            patch.object(
-                asset_library_service, "_sha256", return_value="a" * 64
-            ) as digest,
+            patch.object(asset_library_service, "_sha256", return_value="a" * 64) as digest,
         ):
             asset_library_service.scan_project_directory(session, project)
             asset_library_service.scan_project_directory(session, project)

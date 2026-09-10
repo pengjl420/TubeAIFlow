@@ -41,10 +41,7 @@ class ProjectUtilsTests(unittest.TestCase):
                 id="project-1",
                 name="人物故事",
                 output_dir=str(root / "exports"),
-                config_json=(
-                    '{"project_directory_name":"人物故事",'
-                    '"output_filename":"第一期"}'
-                ),
+                config_json=('{"project_directory_name":"人物故事","output_filename":"第一期"}'),
             )
 
             work_dir = get_project_work_dir(project, root / "workspace")

@@ -14,7 +14,9 @@ except ImportError:
     from runner_io import write_json
 
 
-def progress_payload(total, segment_ids, results, current_segment_id, current_index, status) -> dict:
+def progress_payload(
+    total, segment_ids, results, current_segment_id, current_index, status
+) -> dict:
     payload = {
         "total": total,
         "completed": sum(1 for item in results if item["success"]),
@@ -47,9 +49,9 @@ def segment_attempt_seed(
     seed_round: int = 0,
 ) -> int:
     """Return a reproducible seed that changes for each explicit retry round."""
-    material = (
-        f"tubeaiflow-cosyvoice-v2\0{segment_id}\0{text}\0{seed_round}\0{attempt}"
-    ).encode("utf-8")
+    material = (f"tubeaiflow-cosyvoice-v2\0{segment_id}\0{text}\0{seed_round}\0{attempt}").encode(
+        "utf-8"
+    )
     return int.from_bytes(hashlib.sha256(material).digest()[:4], "big")
 
 
@@ -156,14 +158,7 @@ def initialization_failure_results(tasks: list[dict], error: Exception) -> list[
 
 def use_cached_wetext(cosyvoice_root: Path) -> bool:
     """Route WeText to its complete local cache without a ModelScope API call."""
-    model_dir = (
-        cosyvoice_root
-        / "model_cache"
-        / "modelscope"
-        / "hub"
-        / "pengzhendong"
-        / "wetext"
-    )
+    model_dir = cosyvoice_root / "model_cache" / "modelscope" / "hub" / "pengzhendong" / "wetext"
     required_files = (
         model_dir / "en" / "tn" / "tagger.fst",
         model_dir / "en" / "tn" / "verbalizer.fst",

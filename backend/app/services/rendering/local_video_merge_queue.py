@@ -29,9 +29,7 @@ def enqueue(
     local_video_merge_service.validate_local_video_input(
         media_dir, output_dir, output_filename, target_duration
     )
-    last_sequence = session.exec(
-        select(func.max(LocalVideoMergeTask.queue_sequence))
-    ).one()
+    last_sequence = session.exec(select(func.max(LocalVideoMergeTask.queue_sequence))).one()
     task = LocalVideoMergeTask(
         id=uuid.uuid4().hex,
         media_dir=media_dir.strip(),

@@ -79,7 +79,9 @@ def get_local_asset(
         requested = Path(path).expanduser().resolve()
         requested.relative_to(root)
     except ValueError as exc:
-        raise HTTPException(status_code=403, detail={"error": "Asset is outside the configured directory"}) from exc
+        raise HTTPException(
+            status_code=403, detail={"error": "Asset is outside the configured directory"}
+        ) from exc
     if not requested.is_file():
         raise HTTPException(status_code=404, detail={"error": "Asset file not found"})
     return FileResponse(requested)

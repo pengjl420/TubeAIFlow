@@ -7,7 +7,7 @@ from pathlib import Path
 from sqlmodel import Session, select
 
 from app.config import get_settings
-from app.infrastructure.atomic_files import write_json_atomic, write_text_atomic
+from app.infrastructure.atomic_files import atomic_output_path, write_json_atomic, write_text_atomic
 from app.infrastructure.ffmpeg import probe_duration, run_ffmpeg
 from app.infrastructure.project_layout import (
     ensure_project_dirs,
@@ -51,22 +51,29 @@ def render_timeline_preview(
     output_path = preview_dir / f"range_{start_ms}_{actual_duration_ms}_{signature[:12]}.mp4"
     manifest_path = preview_dir / "manifest.json"
     if output_path.is_file():
-        return _result(output_path, start_ms, actual_duration_ms, signature, skipped=True)
+        try:
+            preview_duration = probe_duration(output_path)
+            if abs(preview_duration * 1000 - actual_duration_ms) <= 100:
+                return _result(output_path, start_ms, actual_duration_ms, signature, skipped=True)
+        except (OSError, RuntimeError, ValueError):
+            output_path.unlink(missing_ok=True)
 
     subtitle_path = _write_preview_subtitles(
         cues, preview_dir, start_ms, actual_duration_ms, signature
     )
-    args = build_preview_args(
-        visual_path,
-        audio_path,
-        output_path,
-        visual_seek_ms=visual_seek_ms,
-        audio_seek_ms=start_ms,
-        duration_ms=actual_duration_ms,
-        subtitle_path=subtitle_path,
-        concat_input=concat_input,
-    )
-    run_ffmpeg(args, project.id)
+    with atomic_output_path(output_path) as temporary_output:
+        args = build_preview_args(
+            visual_path,
+            audio_path,
+            temporary_output,
+            visual_seek_ms=visual_seek_ms,
+            audio_seek_ms=start_ms,
+            duration_ms=actual_duration_ms,
+            subtitle_path=subtitle_path,
+            concat_input=concat_input,
+        )
+        run_ffmpeg(args, project.id)
+        probe_duration(temporary_output)
     result = _result(output_path, start_ms, actual_duration_ms, signature, skipped=False)
     manifest = _load_manifest(manifest_path)
     manifest[signature] = result

@@ -6,6 +6,9 @@ import time
 from pathlib import Path
 
 
+OOM_RETRY_SCALE = 0.75
+
+
 def _write_json(path: Path, value) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
@@ -64,20 +67,13 @@ def main() -> int:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         entry = {"variant_id": job["variant_id"], "output_path": str(output_path)}
         try:
-            generator = torch.Generator(device=args.device).manual_seed(int(job["seed"]))
-            image = pipeline(
-                prompt=job["prompt"],
-                negative_prompt=job["negative_prompt"],
-                width=int(job["width"]),
-                height=int(job["height"]),
-                num_inference_steps=int(job["steps"]),
-                guidance_scale=float(job["guidance_scale"]),
-                generator=generator,
-            ).images[0]
+            image, attempts, degraded = _generate_with_oom_fallback(pipeline, torch, args, job)
             image.save(output_path, format="PNG", optimize=True)
             entry.update(
                 status="completed",
                 generation_seconds=round(time.monotonic() - started, 3),
+                attempts=attempts,
+                oom_fallback=degraded,
             )
         except Exception as exc:
             entry.update(
@@ -102,6 +98,53 @@ def main() -> int:
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
     return 0 if all(item["status"] == "completed" for item in results) else 1
+
+
+def _generate_with_oom_fallback(pipeline, torch, args, job):
+    requested_width = int(job["width"])
+    requested_height = int(job["height"])
+    attempts = [(requested_width, requested_height)]
+    if args.device.startswith("cuda"):
+        attempts.append(_reduced_dimensions(requested_width, requested_height))
+    last_error: Exception | None = None
+    for attempt, (width, height) in enumerate(attempts, start=1):
+        try:
+            generator = torch.Generator(device=args.device).manual_seed(int(job["seed"]))
+            image = pipeline(
+                prompt=job["prompt"],
+                negative_prompt=job["negative_prompt"],
+                width=width,
+                height=height,
+                num_inference_steps=int(job["steps"]),
+                guidance_scale=float(job["guidance_scale"]),
+                generator=generator,
+            ).images[0]
+            degraded = width != requested_width or height != requested_height
+            if degraded:
+                image = image.resize((requested_width, requested_height))
+            return image, attempt, degraded
+        except Exception as exc:
+            last_error = exc
+            if attempt == len(attempts) or not _is_cuda_oom(exc):
+                raise
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            if not args.cpu_offload:
+                pipeline.enable_model_cpu_offload(
+                    gpu_id=int(args.device.split(":", 1)[1]) if ":" in args.device else 0
+                )
+    raise last_error or RuntimeError("Image generation failed")
+
+
+def _is_cuda_oom(error: BaseException) -> bool:
+    message = str(error).lower()
+    return "out of memory" in message and ("cuda" in message or "gpu" in message)
+
+
+def _reduced_dimensions(width: int, height: int) -> tuple[int, int]:
+    reduced_width = max(512, int(width * OOM_RETRY_SCALE) // 8 * 8)
+    reduced_height = max(512, int(height * OOM_RETRY_SCALE) // 8 * 8)
+    return min(width, reduced_width), min(height, reduced_height)
 
 
 if __name__ == "__main__":

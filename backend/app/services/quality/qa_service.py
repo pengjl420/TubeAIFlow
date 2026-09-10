@@ -48,9 +48,7 @@ def run_quality_check(session: Session, project: Project) -> dict:
         ).all()
     )
     all_assignments = list(
-        session.exec(
-            select(SceneAssignment).where(SceneAssignment.project_id == project.id)
-        ).all()
+        session.exec(select(SceneAssignment).where(SceneAssignment.project_id == project.id)).all()
     )
     assignments: dict[str, list[SceneAssignment]] = {}
     for item in all_assignments:
@@ -59,9 +57,7 @@ def run_quality_check(session: Session, project: Project) -> dict:
     audio_path = get_final_audio_path(project, get_settings().workspace_dir)
     video_path = get_final_video_path(project, get_settings().workspace_dir)
     visual_track_path = (
-        get_project_work_dir(project, get_settings().workspace_dir)
-        / "renders"
-        / "visual_track.mp4"
+        get_project_work_dir(project, get_settings().workspace_dir) / "renders" / "visual_track.mp4"
     )
     audio_duration = _duration_or_issue(audio_path, "audio_missing", "完整配音文件不存在", issues)
     video_duration = _duration_or_issue(video_path, "video_missing", "最终视频不存在", issues)
@@ -126,7 +122,13 @@ def run_quality_check(session: Session, project: Project) -> dict:
             if not shot or not media_file:
                 _issue(issues, "source_missing", "error", "场景素材记录不完整", scene_id=scene.id)
             elif not media_file.provider or not media_file.id or not media_file.path:
-                _issue(issues, "source_metadata_missing", "error", "素材来源信息不完整", scene_id=scene.id)
+                _issue(
+                    issues,
+                    "source_metadata_missing",
+                    "error",
+                    "素材来源信息不完整",
+                    scene_id=scene.id,
+                )
         rendered_path = scene_output_path(project, scene)
         if not rendered_path.is_file():
             _issue(issues, "scene_render_missing", "error", "场景中间视频不存在", scene_id=scene.id)
@@ -380,7 +382,9 @@ def _check_repetition(
             )
 
 
-def _duration_or_issue(path: Path, issue_type: str, message: str, issues: list[dict]) -> float | None:
+def _duration_or_issue(
+    path: Path, issue_type: str, message: str, issues: list[dict]
+) -> float | None:
     if not path.is_file():
         _issue(issues, issue_type, "error", message)
         return None

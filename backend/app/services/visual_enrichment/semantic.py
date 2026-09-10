@@ -111,7 +111,11 @@ def segment_scenes(
     for index, group in enumerate(groups, start=1):
         narration = " ".join(item.subtitle_text.replace("\n", " ") for item in group)
         chapter_id = next(
-            (chapter.chapter_id for chapter in chapters if chapter.start_ms <= group[0].start_ms < chapter.end_ms),
+            (
+                chapter.chapter_id
+                for chapter in chapters
+                if chapter.start_ms <= group[0].start_ms < chapter.end_ms
+            ),
             chapters[-1].chapter_id,
         )
         has_number = bool(NUMBER_RE.search(narration))

@@ -46,27 +46,50 @@ class FcpxmlExportTests(unittest.TestCase):
                     config_json='{"output_filename":"Story","project_directory_name":"Story","video_mode":"ai_generated_images","video_output_format":"fcpxml"}',
                 )
                 scene = VisualScene(
-                    id="scene-1", project_id=project.id, scene_index=1,
-                    start_ms=0, end_ms=2_000, narration="Narration",
+                    id="scene-1",
+                    project_id=project.id,
+                    scene_index=1,
+                    start_ms=0,
+                    end_ms=2_000,
+                    narration="Narration",
                 )
                 media = MediaFile(
-                    id="media-1", path=str(source_path), filename=source_path.name,
-                    media_type="video", file_hash="hash", duration_ms=10_000,
-                    width=1920, height=1080,
+                    id="media-1",
+                    path=str(source_path),
+                    filename=source_path.name,
+                    media_type="video",
+                    file_hash="hash",
+                    duration_ms=10_000,
+                    width=1920,
+                    height=1080,
                 )
                 shot = MediaShot(
-                    id="shot-1", media_file_id=media.id, shot_index=1,
-                    start_ms=1_000, end_ms=5_000,
+                    id="shot-1",
+                    media_file_id=media.id,
+                    shot_index=1,
+                    start_ms=1_000,
+                    end_ms=5_000,
                 )
                 assignment = SceneAssignment(
-                    id="assignment-1", project_id=project.id, scene_id=scene.id,
-                    media_shot_id=shot.id, scene_offset_start_ms=0,
-                    scene_offset_end_ms=2_000, trim_start_ms=500,
-                    trim_end_ms=2_500, playback_speed=0.85, manual_confirmed=True,
+                    id="assignment-1",
+                    project_id=project.id,
+                    scene_id=scene.id,
+                    media_shot_id=shot.id,
+                    scene_offset_start_ms=0,
+                    scene_offset_end_ms=2_000,
+                    trim_start_ms=500,
+                    trim_end_ms=2_500,
+                    playback_speed=0.85,
+                    manual_confirmed=True,
                 )
                 cue = SubtitleCue(
-                    id="cue-1", project_id=project.id, source_segment_id="segment-1",
-                    cue_index=1, start_ms=100, end_ms=1_900, text="Hello & goodbye",
+                    id="cue-1",
+                    project_id=project.id,
+                    source_segment_id="segment-1",
+                    cue_index=1,
+                    start_ms=100,
+                    end_ms=1_900,
+                    text="Hello & goodbye",
                 )
                 session.add(project)
                 session.add(scene)
@@ -117,9 +140,7 @@ class FcpxmlExportTests(unittest.TestCase):
             self.assertEqual(premiere_clip.findtext("in"), "45")
             self.assertEqual(premiere_clip.findtext("out"), "96")
             self.assertEqual(
-                premiere_clip.findtext(
-                    "filter/effect/parameter[parameterid='speed']/value"
-                ),
+                premiere_clip.findtext("filter/effect/parameter[parameterid='speed']/value"),
                 "85",
             )
             self.assertEqual(
@@ -144,7 +165,9 @@ class FcpxmlExportTests(unittest.TestCase):
 
     def test_prproj_and_dual_output_formats_are_supported(self) -> None:
         self.assertEqual(project_service.normalize_video_output_format("prproj"), "prproj")
-        self.assertEqual(project_service.normalize_video_output_format("editable_both"), "editable_both")
+        self.assertEqual(
+            project_service.normalize_video_output_format("editable_both"), "editable_both"
+        )
 
     def test_prproj_export_uses_premiere_conversion_boundary(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -152,14 +175,16 @@ class FcpxmlExportTests(unittest.TestCase):
             output_dir = root / "output"
             output_dir.mkdir()
             fcpxml_path = output_dir / "Story.fcpxml"
-            fcpxml_path.write_text("<fcpxml version=\"1.10\"/>", encoding="utf-8")
+            fcpxml_path.write_text('<fcpxml version="1.10"/>', encoding="utf-8")
             premiere_xml_path = output_dir / "Story.premiere.xml"
-            premiere_xml_path.write_text("<xmeml version=\"5\"/>", encoding="utf-8")
+            premiere_xml_path.write_text('<xmeml version="5"/>', encoding="utf-8")
             executable = root / "Adobe Premiere Pro.exe"
             executable.write_bytes(b"exe")
             settings = SimpleNamespace(workspace_dir=root / "workspace")
             project = Project(
-                id="prproj-project", name="Story", output_dir=str(output_dir),
+                id="prproj-project",
+                name="Story",
+                output_dir=str(output_dir),
                 config_json='{"output_filename":"Story","project_directory_name":"Story","video_mode":"none"}',
             )
             engine = create_engine(f"sqlite:///{root / 'prproj.db'}")
@@ -187,7 +212,9 @@ class FcpxmlExportTests(unittest.TestCase):
                             "format": "premiere_xml",
                         },
                     ),
-                    patch.object(prproj_export_service, "_run_premiere_conversion", side_effect=create_output),
+                    patch.object(
+                        prproj_export_service, "_run_premiere_conversion", side_effect=create_output
+                    ),
                 ):
                     report = prproj_export_service.export_project_prproj(
                         session, project, premiere_executable=executable
@@ -278,7 +305,7 @@ class FcpxmlExportTests(unittest.TestCase):
         self.assertIn("sequence.videoTracks.numTracks", script)
         self.assertIn("Premiere imported the project without a sequence", script)
         self.assertNotIn("JSON.stringify", script)
-        self.assertIn('payload = \'{"success":true\'', script)
+        self.assertIn("payload = '{\"success\":true'", script)
 
     def test_landscape_mode_exports_selected_sources_without_rendering_mp4(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -319,7 +346,11 @@ class FcpxmlExportTests(unittest.TestCase):
                 with (
                     patch.object(fcpxml_export_service, "get_settings", return_value=settings),
                     patch.object(rough_cut_service, "get_settings", return_value=settings),
-                    patch.object(rough_cut_service, "probe_duration", side_effect=lambda path: 4.0 if Path(path) == audio_path else 8.0),
+                    patch.object(
+                        rough_cut_service,
+                        "probe_duration",
+                        side_effect=lambda path: 4.0 if Path(path) == audio_path else 8.0,
+                    ),
                 ):
                     report = fcpxml_export_service.export_project_fcpxml(session, project)
 
@@ -327,7 +358,10 @@ class FcpxmlExportTests(unittest.TestCase):
             clips = document.findall("./library/event/project/sequence/spine/asset-clip")
             self.assertEqual(len(clips), 1)
             self.assertEqual(clips[0].attrib["duration"], "4/1s")
-            self.assertIn(source_path.resolve().as_uri(), [item.attrib["src"] for item in document.findall(".//media-rep")])
+            self.assertIn(
+                source_path.resolve().as_uri(),
+                [item.attrib["src"] for item in document.findall(".//media-rep")],
+            )
             self.assertFalse((output_dir / "Story.mp4").exists())
             engine.dispose()
 
@@ -351,8 +385,13 @@ class FcpxmlExportTests(unittest.TestCase):
                 session.add(project)
                 session.add(
                     SubtitleCue(
-                        id="cue-1", project_id=project.id, source_segment_id="segment-1",
-                        cue_index=1, start_ms=0, end_ms=2_000, text="Audio only subtitle",
+                        id="cue-1",
+                        project_id=project.id,
+                        source_segment_id="segment-1",
+                        cue_index=1,
+                        start_ms=0,
+                        end_ms=2_000,
+                        text="Audio only subtitle",
                     )
                 )
                 session.commit()
@@ -368,5 +407,7 @@ class FcpxmlExportTests(unittest.TestCase):
             self.assertEqual(len(document.findall(".//media-rep")), 1)
             self.assertEqual(report["clip_count"], 0)
             engine.dispose()
+
+
 if __name__ == "__main__":
     unittest.main()

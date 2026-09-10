@@ -102,9 +102,7 @@ def main() -> int:
             results.append({"segment_id": task["segment_id"], "success": True})
         except Exception as exc:
             output_path.unlink(missing_ok=True)
-            results.append(
-                {"segment_id": task["segment_id"], "success": False, "error": str(exc)}
-            )
+            results.append({"segment_id": task["segment_id"], "success": False, "error": str(exc)})
         write_json(result_file, results)
         write_json(
             progress_file,

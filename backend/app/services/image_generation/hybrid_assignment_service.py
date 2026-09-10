@@ -43,9 +43,7 @@ def assign_landscape_scenes(session: Session, project: Project) -> dict:
         scene
         for scene in scenes
         if scene.storyboard_json
-        and StoryboardContent.model_validate_json(
-            scene.storyboard_json
-        ).allow_landscape_fallback
+        and StoryboardContent.model_validate_json(scene.storyboard_json).allow_landscape_fallback
     ]
     if not eligible:
         return {"scene_count": len(scenes), "landscape_scene_count": 0, "assignments": []}

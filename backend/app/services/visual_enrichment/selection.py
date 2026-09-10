@@ -85,7 +85,9 @@ def build_candidates(
 def temporal_nms(candidates: list[VisualCandidate], min_gap_ms: int) -> list[VisualCandidate]:
     """Suppress lower-scoring triggers within the configured temporal gap."""
     kept: list[VisualCandidate] = []
-    for candidate in sorted(candidates, key=lambda item: (-item.score, item.trigger_ms, item.candidate_id)):
+    for candidate in sorted(
+        candidates, key=lambda item: (-item.score, item.trigger_ms, item.candidate_id)
+    ):
         if all(abs(candidate.trigger_ms - other.trigger_ms) >= min_gap_ms for other in kept):
             kept.append(candidate)
     return sorted(kept, key=lambda item: (item.start_ms, item.candidate_id))
@@ -95,7 +97,9 @@ def weighted_interval_selection(
     candidates: list[VisualCandidate], *, pre_margin_ms: int = 0, post_gap_ms: int = 0
 ) -> list[VisualCandidate]:
     """Maximum-score non-overlapping selection with deterministic tie-breaking."""
-    ordered = sorted(candidates, key=lambda item: (item.end_ms + post_gap_ms, item.start_ms, item.candidate_id))
+    ordered = sorted(
+        candidates, key=lambda item: (item.end_ms + post_gap_ms, item.start_ms, item.candidate_id)
+    )
     ends = [item.end_ms + post_gap_ms for item in ordered]
     predecessors = [
         bisect_right(ends, item.start_ms - pre_margin_ms, hi=index) - 1

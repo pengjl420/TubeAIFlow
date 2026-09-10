@@ -49,9 +49,12 @@ class ProcessRunnerDeferredTests(unittest.TestCase):
         with self.assertRaises(process_runner.TaskCancelledError):
             with process_runner.controlled("project-cancel", "tts"):
                 process_runner.register_process("project-cancel", process)
-                with patch.object(process_runner.sys, "platform", "win32"), patch.object(
-                    process_runner.subprocess, "run", return_value=Mock(returncode=0)
-                ) as taskkill:
+                with (
+                    patch.object(process_runner.sys, "platform", "win32"),
+                    patch.object(
+                        process_runner.subprocess, "run", return_value=Mock(returncode=0)
+                    ) as taskkill,
+                ):
                     result = process_runner.cancel("project-cancel")
 
                 self.assertTrue(result["cancelled"])

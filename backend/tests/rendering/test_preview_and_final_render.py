@@ -72,9 +72,13 @@ class PreviewAndFinalRenderTests(unittest.TestCase):
 
         with Session(self.engine) as session:
             project = self._seed(session)
+
+            def fake_probe(path):
+                return 120.0 if Path(path).suffix == ".wav" else 30.0
+
             with (
                 patch.object(preview_renderer, "get_settings", return_value=self.settings),
-                patch.object(preview_renderer, "probe_duration", return_value=120.0),
+                patch.object(preview_renderer, "probe_duration", side_effect=fake_probe),
                 patch.object(preview_renderer, "run_ffmpeg", side_effect=fake_run),
             ):
                 first = preview_renderer.render_timeline_preview(

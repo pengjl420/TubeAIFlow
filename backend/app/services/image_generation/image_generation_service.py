@@ -274,7 +274,9 @@ def _generate(
     failures = [item for item in variants if item.status == "failed"]
     if failures:
         # Keep the previous successful generation and its assignment intact.
-        raise RuntimeError(f"{len(failures)} 个图片候选生成失败，请检查 image_generation_results.json")
+        raise RuntimeError(
+            f"{len(failures)} 个图片候选生成失败，请检查 image_generation_results.json"
+        )
 
     registered = 0
     for variant in variants:
@@ -321,7 +323,9 @@ def _prompts(storyboard: StoryboardContent, configured_negative: str) -> tuple[s
         parts.append("location: " + ", ".join(storyboard.locations))
     if storyboard.must_include:
         parts.append("must visibly include " + ", ".join(storyboard.must_include))
-    parts.append("photorealistic, natural lighting, coherent anatomy, 16:9 composition, no visible text")
+    parts.append(
+        "photorealistic, natural lighting, coherent anatomy, 16:9 composition, no visible text"
+    )
     negative = ", ".join([configured_negative, *storyboard.avoid])
     return ", ".join(part for part in parts if part), negative
 
@@ -340,14 +344,23 @@ def _run_batch(
 ) -> None:
     runner = Path(__file__).parents[2] / "integrations" / "image_generation" / "sdxl_runner.py"
     command = [
-        str(python_path), "-s", str(runner),
-        "--model-path", str(model_path),
-        "--config-dir", str(config_dir),
-        "--batch-file", str(batch_path),
-        "--result-file", str(result_path),
-        "--progress-file", str(progress_path),
-        "--device", device,
-        "--dtype", dtype,
+        str(python_path),
+        "-s",
+        str(runner),
+        "--model-path",
+        str(model_path),
+        "--config-dir",
+        str(config_dir),
+        "--batch-file",
+        str(batch_path),
+        "--result-file",
+        str(result_path),
+        "--progress-file",
+        str(progress_path),
+        "--device",
+        device,
+        "--dtype",
+        dtype,
     ]
     if cpu_offload:
         command.append("--cpu-offload")
@@ -394,9 +407,7 @@ def _load_results_by_variant(result_path: Path) -> dict[str, dict]:
     return {
         str(item["variant_id"]): item
         for item in results
-        if isinstance(item, dict)
-        and item.get("variant_id")
-        and item.get("status") == "completed"
+        if isinstance(item, dict) and item.get("variant_id") and item.get("status") == "completed"
     }
 
 
@@ -412,7 +423,9 @@ def _valid_generated_image(path: Path, width: int, height: int) -> bool:
         return False
 
 
-def _register_generated_image(session: Session, project: Project, variant: GeneratedImageVariant) -> None:
+def _register_generated_image(
+    session: Session, project: Project, variant: GeneratedImageVariant
+) -> None:
     path = Path(variant.path).resolve()
     file_hash = _sha256(path)
     media_file = session.exec(
@@ -477,7 +490,9 @@ def _register_generated_image(session: Session, project: Project, variant: Gener
         session.add_all([media_file, shot])
         session.flush()
     else:
-        shot = session.exec(select(MediaShot).where(MediaShot.media_file_id == media_file.id)).first()
+        shot = session.exec(
+            select(MediaShot).where(MediaShot.media_file_id == media_file.id)
+        ).first()
         if shot is None:
             raise RuntimeError("生成图片素材缺少 MediaShot")
 
@@ -528,11 +543,15 @@ def _clear_scene_generated_assets(
         shots = list(
             session.exec(select(MediaShot).where(MediaShot.media_file_id == media_id)).all()
         )
-        referenced_assignment = session.exec(
-            select(SceneAssignment).where(
-                SceneAssignment.media_shot_id.in_([shot.id for shot in shots])
-            )
-        ).first() if shots else None
+        referenced_assignment = (
+            session.exec(
+                select(SceneAssignment).where(
+                    SceneAssignment.media_shot_id.in_([shot.id for shot in shots])
+                )
+            ).first()
+            if shots
+            else None
+        )
         if referenced_assignment:
             continue
         for shot in shots:
@@ -570,8 +589,28 @@ def _regeneration_seed(
     return int.from_bytes(value[:4], "big") & 0x7FFFFFFF or 1
 
 
-def _signature(prompt: str, negative: str, model: Path, seed: int, width: int, height: int, steps: int, guidance: float) -> str:
-    payload = [WORKFLOW_VERSION, prompt, negative, str(model.resolve()), model.stat().st_mtime_ns, seed, width, height, steps, guidance]
+def _signature(
+    prompt: str,
+    negative: str,
+    model: Path,
+    seed: int,
+    width: int,
+    height: int,
+    steps: int,
+    guidance: float,
+) -> str:
+    payload = [
+        WORKFLOW_VERSION,
+        prompt,
+        negative,
+        str(model.resolve()),
+        model.stat().st_mtime_ns,
+        seed,
+        width,
+        height,
+        steps,
+        guidance,
+    ]
     return stable_json_hash(payload)
 
 

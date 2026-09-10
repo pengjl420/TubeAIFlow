@@ -36,7 +36,8 @@ LIBRARY_ROLE = LIBRARY_ROLE_LOCAL_SEMANTIC
 def scan_project_directory(session: Session, project: Project) -> dict:
     root = project_media_directory(project)
     paths = sorted(
-        path for path in root.rglob("*")
+        path
+        for path in root.rglob("*")
         if path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS | IMAGE_EXTENSIONS
     )
     indexed = 0
@@ -96,7 +97,10 @@ def scene_candidates(
         tag_score = _overlap(query_tokens, tag_tokens)
         technical_score = _technical_score(media)
         repeat_penalty = 0.18 if shot.id in used_shot_ids else 0.0
-        total = max(0.0, min(1.0, text_score * 0.55 + tag_score * 0.2 + technical_score * 0.25 - repeat_penalty))
+        total = max(
+            0.0,
+            min(1.0, text_score * 0.55 + tag_score * 0.2 + technical_score * 0.25 - repeat_penalty),
+        )
         candidate = SceneCandidate(
             id=f"candidate_{uuid.uuid4().hex}",
             project_id=project.id,
@@ -109,7 +113,11 @@ def scene_candidates(
             tag_score=tag_score,
             technical_score=technical_score,
             total_score=total,
-            status="RECOMMENDED" if total >= 0.45 else "USABLE" if total >= 0.25 else "LOW_RELEVANCE",
+            status="RECOMMENDED"
+            if total >= 0.45
+            else "USABLE"
+            if total >= 0.25
+            else "LOW_RELEVANCE",
             conflicts_json=json.dumps(["used_in_project"] if repeat_penalty else []),
             selection_stage="local_semantic",
         )
@@ -145,7 +153,9 @@ def assign_local_candidate(
     else:
         if source_duration <= 0:
             raise ValueError("Local video duration is unavailable")
-        display_duration = min(duration_ms, round(source_duration / timeline_composer.MIN_PLAYBACK_SPEED))
+        display_duration = min(
+            duration_ms, round(source_duration / timeline_composer.MIN_PLAYBACK_SPEED)
+        )
         playback_speed = max(
             timeline_composer.MIN_PLAYBACK_SPEED,
             min(1.0, source_duration / max(1, display_duration)),
@@ -253,9 +263,7 @@ def _register_file(session: Session, root: Path, path: Path) -> bool:
     media.updated_at = utc_now_iso()
     session.add(media)
     session.flush()
-    shot = session.exec(
-        select(MediaShot).where(MediaShot.media_file_id == media.id)
-    ).first()
+    shot = session.exec(select(MediaShot).where(MediaShot.media_file_id == media.id)).first()
     if shot is None:
         shot = MediaShot(
             id=f"local_shot_{path_key[:24]}",
@@ -275,9 +283,7 @@ def _register_file(session: Session, root: Path, path: Path) -> bool:
     return True
 
 
-def _same_library_content(
-    session: Session, root: Path, digest: str
-) -> MediaFile | None:
+def _same_library_content(session: Session, root: Path, digest: str) -> MediaFile | None:
     for media in session.exec(
         select(MediaFile).where(
             MediaFile.provider == "local_library",
@@ -370,7 +376,7 @@ def _tokens(value: str) -> set[str]:
     normalized = value.lower()
     words = set(re.findall(r"[a-z0-9]{2,}|[\u4e00-\u9fff]+", normalized))
     cjk = "".join(re.findall(r"[\u4e00-\u9fff]", normalized))
-    words.update(cjk[index:index + 2] for index in range(max(0, len(cjk) - 1)))
+    words.update(cjk[index : index + 2] for index in range(max(0, len(cjk) - 1)))
     return {word for word in words if word}
 
 

@@ -95,13 +95,10 @@ def create_batch(
     output_root = Path(output_dir).expanduser().resolve()
     output_root.mkdir(parents=True, exist_ok=True)
     video_root = Path(media_video_dir).expanduser().resolve() if media_video_dir.strip() else None
-    if (
-        resolved_video_mode in {
-            project_service.VIDEO_MODE_LANDSCAPE,
-            project_service.VIDEO_MODE_AI_LANDSCAPE_MIX,
-        }
-        and (video_root is None or not video_root.is_dir())
-    ):
+    if resolved_video_mode in {
+        project_service.VIDEO_MODE_LANDSCAPE,
+        project_service.VIDEO_MODE_AI_LANDSCAPE_MIX,
+    } and (video_root is None or not video_root.is_dir()):
         raise ValueError("当前视频模式必须选择有效的风景素材视频目录")
 
     now = utc_now_iso()
@@ -211,9 +208,7 @@ def get_batch(session: Session, batch_id: str) -> BatchJob | None:
 def get_batch_items(session: Session, batch_id: str) -> list[BatchItem]:
     return list(
         session.exec(
-            select(BatchItem)
-            .where(BatchItem.batch_id == batch_id)
-            .order_by(BatchItem.order_index)
+            select(BatchItem).where(BatchItem.batch_id == batch_id).order_by(BatchItem.order_index)
         ).all()
     )
 

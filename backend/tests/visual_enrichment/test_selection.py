@@ -1,7 +1,11 @@
 import unittest
 
 from app.services.visual_enrichment.models import VisualCandidate, VisualType
-from app.services.visual_enrichment.selection import score_candidate, temporal_nms, weighted_interval_selection
+from app.services.visual_enrichment.selection import (
+    score_candidate,
+    temporal_nms,
+    weighted_interval_selection,
+)
 
 
 def candidate(candidate_id: str, start: int, end: int, score: float) -> VisualCandidate:

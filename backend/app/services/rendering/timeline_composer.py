@@ -56,7 +56,9 @@ def reflow_scene_assignments(
 
         remaining_ms = scene_duration_ms - cursor_ms
         if media_file.media_type == "image":
-            placement_ms = min(assignment.display_duration_ms or DEFAULT_IMAGE_DURATION_MS, remaining_ms)
+            placement_ms = min(
+                assignment.display_duration_ms or DEFAULT_IMAGE_DURATION_MS, remaining_ms
+            )
         else:
             source_ms = _source_duration_ms(assignment, shot, media_file)
             if source_ms <= 0:
@@ -86,9 +88,7 @@ def scene_coverage(session: Session, scene: VisualScene) -> dict:
     }
 
 
-def _source_duration_ms(
-    assignment: SceneAssignment, shot: MediaShot, media_file: MediaFile
-) -> int:
+def _source_duration_ms(assignment: SceneAssignment, shot: MediaShot, media_file: MediaFile) -> int:
     relative_end = assignment.trim_end_ms
     if relative_end is None:
         shot_end = shot.end_ms if shot.end_ms is not None else media_file.duration_ms

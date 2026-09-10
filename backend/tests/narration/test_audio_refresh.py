@@ -26,9 +26,15 @@ class SegmentOutputRefreshTests(unittest.TestCase):
             )
 
             with (
-                patch.object(narration_generation, "get_settings", return_value=SimpleNamespace(workspace_dir=Path(directory))),
+                patch.object(
+                    narration_generation,
+                    "get_settings",
+                    return_value=SimpleNamespace(workspace_dir=Path(directory)),
+                ),
                 patch.object(narration_generation, "get_final_audio_path", return_value=full_audio),
-                patch.object(narration_generation.tts_service, "regenerate_segment_tts", return_value=segment) as regenerate,
+                patch.object(
+                    narration_generation.tts_service, "regenerate_segment_tts", return_value=segment
+                ) as regenerate,
                 patch.object(narration_generation.audio_service, "merge_project_audio") as merge,
             ):
                 result = narration_generation.regenerate_segment_and_refresh_outputs(
@@ -53,9 +59,15 @@ class SegmentOutputRefreshTests(unittest.TestCase):
             )
 
             with (
-                patch.object(narration_generation, "get_settings", return_value=SimpleNamespace(workspace_dir=Path(directory))),
+                patch.object(
+                    narration_generation,
+                    "get_settings",
+                    return_value=SimpleNamespace(workspace_dir=Path(directory)),
+                ),
                 patch.object(narration_generation, "get_final_audio_path", return_value=full_audio),
-                patch.object(narration_generation.tts_service, "regenerate_segment_tts", return_value=segment),
+                patch.object(
+                    narration_generation.tts_service, "regenerate_segment_tts", return_value=segment
+                ),
                 patch.object(narration_generation.audio_service, "merge_project_audio") as merge,
             ):
                 narration_generation.regenerate_segment_and_refresh_outputs(
@@ -89,7 +101,9 @@ class AtomicAudioMergeTests(unittest.TestCase):
             project = Project(id="p1", name="Project")
 
             with (
-                patch.object(audio_service, "get_settings", return_value=SimpleNamespace(workspace_dir=root)),
+                patch.object(
+                    audio_service, "get_settings", return_value=SimpleNamespace(workspace_dir=root)
+                ),
                 patch.object(audio_service, "get_project_work_dir", return_value=root),
                 patch.object(audio_service, "get_final_audio_path", return_value=full_audio),
                 patch.object(audio_service, "ensure_project_dirs"),

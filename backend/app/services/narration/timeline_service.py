@@ -15,9 +15,7 @@ def build_timeline(session: Session, project: Project, gap_seconds: float = 0.0)
     if gap_seconds < 0:
         raise ValueError("Timeline gap cannot be negative")
     segments = session.exec(
-        select(Segment)
-        .where(Segment.project_id == project.id)
-        .order_by(Segment.segment_index)
+        select(Segment).where(Segment.project_id == project.id).order_by(Segment.segment_index)
     ).all()
     current = 0.0
     timeline_segments = []

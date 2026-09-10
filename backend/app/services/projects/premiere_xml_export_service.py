@@ -92,9 +92,7 @@ def convert_fcpxml_for_premiere(project: Project, fcpxml_path: Path) -> dict:
     ET.fromstring(xml_body)
     temp_path = output_path.with_suffix(".xml.tmp")
     temp_path.write_text(
-        '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<!DOCTYPE xmeml>\n'
-        f"{xml_body}\n",
+        f'<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE xmeml>\n{xml_body}\n',
         encoding="utf-8",
     )
     temp_path.replace(output_path)

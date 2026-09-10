@@ -21,18 +21,25 @@ class VideoServiceTests(unittest.TestCase):
                     raise PermissionError("busy")
                 return original_replace(source, target)
 
-            with patch.object(Path, "replace", flaky_replace), patch("app.services.rendering.rough_cut_service.time.sleep"):
+            with (
+                patch.object(Path, "replace", flaky_replace),
+                patch("app.services.rendering.rough_cut_service.time.sleep"),
+            ):
                 video_service.write_video_progress(path, "running", "normalizing", 25)
 
             self.assertEqual(attempts, 2)
-            self.assertEqual(video_service.json.loads(path.read_text(encoding="utf-8"))["percent"], 25)
+            self.assertEqual(
+                video_service.json.loads(path.read_text(encoding="utf-8"))["percent"], 25
+            )
             self.assertEqual(list(Path(directory).glob("*.tmp")), [])
 
     def test_compose_video_rejects_duplicate_project(self) -> None:
         project = type("ProjectStub", (), {"id": "project-1"})()
         video_service._composing_project_ids.add(project.id)
         try:
-            with self.assertRaisesRegex(video_service.VideoCompositionRunningError, "already running"):
+            with self.assertRaisesRegex(
+                video_service.VideoCompositionRunningError, "already running"
+            ):
                 video_service.compose_video(object(), project)
         finally:
             video_service._composing_project_ids.discard(project.id)
@@ -50,9 +57,7 @@ class VideoServiceTests(unittest.TestCase):
     )
     @patch("app.services.rendering.rough_cut_service.run_ffmpeg")
     def test_normalizing_skips_source_first_frames(self, run_mock, _probe_mock) -> None:
-        selected = [
-            video_service.SelectedVideo(Path("source.mp4"), "source", 2.0, 1.9)
-        ]
+        selected = [video_service.SelectedVideo(Path("source.mp4"), "source", 2.0, 1.9)]
 
         with tempfile.TemporaryDirectory() as directory:
             video_service.normalize_selected_clips(selected, Path(directory))
@@ -84,9 +89,7 @@ class VideoServiceTests(unittest.TestCase):
 
     @patch("app.services.rendering.rough_cut_service.run_ffmpeg")
     def test_final_concat_reencodes_without_audio(self, run_mock) -> None:
-        video_service.concatenate_normalized_clips(
-            Path("concat.txt"), Path("out.mp4")
-        )
+        video_service.concatenate_normalized_clips(Path("concat.txt"), Path("out.mp4"))
 
         args = run_mock.call_args.args[0]
         self.assertNotIn("copy", args)
@@ -101,9 +104,7 @@ class VideoServiceTests(unittest.TestCase):
 
     @patch("app.services.rendering.rough_cut_service.run_ffmpeg")
     def test_final_concat_accepts_measured_tail_padding(self, run_mock) -> None:
-        video_service.concatenate_normalized_clips(
-            Path("concat.txt"), Path("out.mp4"), 0.981
-        )
+        video_service.concatenate_normalized_clips(Path("concat.txt"), Path("out.mp4"), 0.981)
 
         args = run_mock.call_args.args[0]
         self.assertIn(
@@ -146,7 +147,10 @@ class VideoServiceTests(unittest.TestCase):
             self.assertIn("xfade=transition=dissolve", script_path.read_text(encoding="utf-8"))
 
     @patch("app.services.rendering.rough_cut_service.random.choices", return_value=["fade"])
-    @patch("app.services.rendering.rough_cut_service.random.sample", side_effect=lambda values, count: values[:count])
+    @patch(
+        "app.services.rendering.rough_cut_service.random.sample",
+        side_effect=lambda values, count: values[:count],
+    )
     @patch("app.services.rendering.rough_cut_service.random.randint", side_effect=[3, 1, 3, 1])
     def test_transition_plan_adds_only_some_boundaries(
         self, _randint_mock, _sample_mock, _choices_mock
@@ -163,7 +167,9 @@ class VideoServiceTests(unittest.TestCase):
         self.assertTrue(all(item.effect == "fade" for item in plan))
         self.assertLess(len(plan), len(selected) - 1)
 
-    @patch("app.services.rendering.rough_cut_service.random.choice", side_effect=lambda paths: paths[0])
+    @patch(
+        "app.services.rendering.rough_cut_service.random.choice", side_effect=lambda paths: paths[0]
+    )
     @patch("app.services.rendering.rough_cut_service.random.shuffle")
     @patch("app.services.rendering.rough_cut_service.probe_duration")
     def test_selection_keeps_last_clip_in_full(
@@ -182,7 +188,9 @@ class VideoServiceTests(unittest.TestCase):
             self.assertAlmostEqual(item.clip_duration, 4.0)
         self.assertGreater(sum(item.clip_duration for item in selected), 5.0)
 
-    @patch("app.services.rendering.rough_cut_service.random.choice", side_effect=lambda paths: paths[0])
+    @patch(
+        "app.services.rendering.rough_cut_service.random.choice", side_effect=lambda paths: paths[0]
+    )
     @patch("app.services.rendering.rough_cut_service.random.shuffle")
     @patch("app.services.rendering.rough_cut_service.probe_duration", side_effect=[2.1, 2.1])
     def test_selection_reserves_duration_for_transition_overlap(

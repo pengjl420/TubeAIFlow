@@ -46,7 +46,10 @@ def list_profiles(session: Session) -> list[dict]:
         if project.status in {"narration_in_progress", "video_in_progress"}:
             counts["running_project_count"] += 1
     return [
-        {**serialize_profile(profile), **usage.get(profile.id, {"usage_count": 0, "running_project_count": 0})}
+        {
+            **serialize_profile(profile),
+            **usage.get(profile.id, {"usage_count": 0, "running_project_count": 0}),
+        }
         for profile in profiles
     ]
 
@@ -69,7 +72,9 @@ def create_profile(
 ) -> VoiceProfile:
     profile_id = uuid.uuid4().hex[:12]
     validated_name = _validate_name(name)
-    config = _validated_config(tts_engine, reference_audio_text, original_filename, cosyvoice_speed, tags, language)
+    config = _validated_config(
+        tts_engine, reference_audio_text, original_filename, cosyvoice_speed, tags, language
+    )
     audio_path = _save_audio(profile_id, validated_name, source, original_filename)
     now = utc_now_iso()
     profile = VoiceProfile(
@@ -104,14 +109,18 @@ def update_profile(
 ) -> VoiceProfile:
     validated_name = _validate_name(name)
     current_config = load_profile_config(profile)
-    filename = original_filename or str(current_config.get("original_filename") or Path(profile.reference_audio_path).name)
+    filename = original_filename or str(
+        current_config.get("original_filename") or Path(profile.reference_audio_path).name
+    )
     if cosyvoice_speed is None:
         cosyvoice_speed = profile_cosyvoice_speed(current_config)
     if tags is None:
         tags = list(current_config.get("tags") or [])
     if language is None:
         language = profile_language(current_config)
-    config = _validated_config(tts_engine, reference_audio_text, filename, cosyvoice_speed, tags, language)
+    config = _validated_config(
+        tts_engine, reference_audio_text, filename, cosyvoice_speed, tags, language
+    )
     old_path = Path(profile.reference_audio_path)
     if source is not None:
         audio_path = _save_audio(
@@ -131,9 +140,7 @@ def update_profile(
     elif not old_path.is_file():
         raise ValueError("参考音频文件不存在，请重新上传")
     else:
-        profile.reference_audio_path = str(
-            _relocate_audio(profile.id, validated_name, old_path)
-        )
+        profile.reference_audio_path = str(_relocate_audio(profile.id, validated_name, old_path))
 
     profile.name = validated_name
     profile.config_json = json.dumps(config, ensure_ascii=False)
@@ -152,7 +159,9 @@ def delete_profile(session: Session, profile: VoiceProfile) -> None:
         if str(load_project_config(project).get("voice_profile_id") or "") == profile.id
     ]
     if assigned_projects:
-        raise ValueError(f"该音色正被 {len(assigned_projects)} 个项目使用，请先为这些项目选择其他音色")
+        raise ValueError(
+            f"该音色正被 {len(assigned_projects)} 个项目使用，请先为这些项目选择其他音色"
+        )
     audio_path = Path(profile.reference_audio_path)
     session.delete(profile)
     session.commit()
@@ -198,7 +207,9 @@ def serialize_profile(profile: VoiceProfile) -> dict:
         "language": profile_language(config),
         "reference_audio_text": str(config.get("reference_audio_text") or ""),
         "cosyvoice_speed": profile_cosyvoice_speed(config),
-        "original_filename": str(config.get("original_filename") or Path(profile.reference_audio_path).name),
+        "original_filename": str(
+            config.get("original_filename") or Path(profile.reference_audio_path).name
+        ),
         "tags": list(config.get("tags") or []),
         "created_at": profile.created_at,
         "updated_at": profile.updated_at,
@@ -230,7 +241,9 @@ def apply_profile_to_project(session: Session, project: Project, profile_id: str
     config["voice_language"] = profile_language(profile_config)
     config["reference_audio_text"] = str(profile_config.get("reference_audio_text") or "")
     config["cosyvoice_speed"] = profile_cosyvoice_speed(profile_config)
-    config["reference_audio_filename"] = str(profile_config.get("original_filename") or audio_path.name)
+    config["reference_audio_filename"] = str(
+        profile_config.get("original_filename") or audio_path.name
+    )
     config["reference_audio_path"] = str(audio_path)
     project.reference_audio_path = str(audio_path)
     return config
@@ -290,7 +303,9 @@ def migrate_profile_language_engines(session: Session) -> int:
     return migrated
 
 
-def _synchronize_projects(session: Session, profile: VoiceProfile, force_reset: bool = False) -> None:
+def _synchronize_projects(
+    session: Session, profile: VoiceProfile, force_reset: bool = False
+) -> None:
     for project in session.exec(select(Project)).all():
         config = load_project_config(project)
         if str(config.get("voice_profile_id") or "") != profile.id:
@@ -311,7 +326,9 @@ def _synchronize_projects(session: Session, profile: VoiceProfile, force_reset: 
         project.config_json = json.dumps(config, ensure_ascii=False)
         project.updated_at = utc_now_iso()
         if force_reset or previous_tts_config != current_tts_config:
-            for segment in session.exec(select(Segment).where(Segment.project_id == project.id)).all():
+            for segment in session.exec(
+                select(Segment).where(Segment.project_id == project.id)
+            ).all():
                 segment.audio_path = None
                 segment.duration = None
                 segment.start_time = None

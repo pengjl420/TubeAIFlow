@@ -66,9 +66,7 @@ class SensitiveDataFilter(logging.Filter):
         record.msg = redact_sensitive(record.msg)
         if record.args:
             if isinstance(record.args, dict):
-                record.args = {
-                    key: _redact_argument(value) for key, value in record.args.items()
-                }
+                record.args = {key: _redact_argument(value) for key, value in record.args.items()}
             else:
                 record.args = tuple(_redact_argument(value) for value in record.args)
         return True
@@ -85,10 +83,7 @@ def configure_logging(workspace_dir: Path, *, level: int = logging.INFO) -> Path
     log_path = log_dir / "engine.log"
 
     root = logging.getLogger()
-    if any(
-        getattr(handler, "_tubeaifolw_engine_handler", False)
-        for handler in root.handlers
-    ):
+    if any(getattr(handler, "_tubeaifolw_engine_handler", False) for handler in root.handlers):
         return log_path
 
     handler = RotatingFileHandler(

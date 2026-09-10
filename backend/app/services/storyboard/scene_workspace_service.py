@@ -30,7 +30,10 @@ def scene_assets(session: Session, project: Project, scene_id: str) -> dict:
         assignment_values.append(_assignment_value(assignment, shot, media))
     variants = session.exec(
         select(GeneratedImageVariant)
-        .where(GeneratedImageVariant.project_id == project.id, GeneratedImageVariant.scene_id == scene.id)
+        .where(
+            GeneratedImageVariant.project_id == project.id,
+            GeneratedImageVariant.scene_id == scene.id,
+        )
         .order_by(GeneratedImageVariant.variant_index)
     ).all()
     coverage = timeline_composer.scene_coverage(session, scene)
@@ -73,15 +76,22 @@ def assign_generated_variant(
     if variant.status != "completed" or not variant.media_file_id:
         raise ValueError("Image candidate is not ready")
     media = session.get(MediaFile, variant.media_file_id)
-    shot = session.exec(select(MediaShot).where(MediaShot.media_file_id == variant.media_file_id)).first()
+    shot = session.exec(
+        select(MediaShot).where(MediaShot.media_file_id == variant.media_file_id)
+    ).first()
     if not media or not shot or not Path(media.path).is_file():
         raise ValueError("Image candidate file is missing")
     session.exec(delete(SceneAssignment).where(SceneAssignment.scene_id == scene.id))
     duration_ms = scene.end_ms - scene.start_ms
     assignment = SceneAssignment(
-        id=f"assignment_{uuid.uuid4().hex}", project_id=project.id, scene_id=scene.id,
-        media_shot_id=shot.id, sequence_index=1, scene_offset_start_ms=0,
-        scene_offset_end_ms=duration_ms, display_duration_ms=duration_ms,
+        id=f"assignment_{uuid.uuid4().hex}",
+        project_id=project.id,
+        scene_id=scene.id,
+        media_shot_id=shot.id,
+        sequence_index=1,
+        scene_offset_start_ms=0,
+        scene_offset_end_ms=duration_ms,
+        display_duration_ms=duration_ms,
         selection_stage="generated_image",
     )
     session.add(assignment)
@@ -133,10 +143,14 @@ def _assert_visual_editable(scene: VisualScene) -> None:
 
 def _assignment_value(assignment: SceneAssignment, shot: MediaShot, media: MediaFile) -> dict:
     return {
-        "id": assignment.id, "media_shot_id": shot.id, "media_file_id": media.id,
-        "path": media.path, "media_type": media.media_type,
+        "id": assignment.id,
+        "media_shot_id": shot.id,
+        "media_file_id": media.id,
+        "path": media.path,
+        "media_type": media.media_type,
         "sequence_index": assignment.sequence_index,
         "start_ms": assignment.scene_offset_start_ms,
         "end_ms": assignment.scene_offset_end_ms,
-        "motion_type": assignment.motion_type, "transition": assignment.transition,
+        "motion_type": assignment.motion_type,
+        "transition": assignment.transition,
     }

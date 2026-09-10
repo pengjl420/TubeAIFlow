@@ -9,6 +9,7 @@ from app.models.project import Project
 from app.models.storyboard import VisualScene
 from app.services.rendering.render_config import get_project_render_config
 from app.services.rendering.scene_quality_checker import check_scene_video
+from app.services.rendering.ffmpeg_runner import run_with_encoder_fallback
 from app.services.rendering import scene_renderer
 from app.services.rendering.rough_cut_service import (
     PlannedTransition,
@@ -16,7 +17,10 @@ from app.services.rendering.rough_cut_service import (
 )
 from app.services.rendering.timeline_composer import scene_frame_window
 from app.infrastructure.project_layout import load_project_config
-from app.infrastructure.atomic_files import write_json_atomic
+from app.infrastructure.atomic_files import atomic_output_path, write_json_atomic
+
+
+MAX_WINDOWS_FFMPEG_ARGUMENT_CHARACTERS = 24_000
 
 
 def compose_visual_track(session: Session, project: Project) -> dict:
@@ -62,35 +66,55 @@ def compose_visual_track(session: Session, project: Project) -> dict:
             max_per_group=getattr(settings, "storyboard_transition_max_per_group", 2),
             duration=getattr(settings, "storyboard_transition_duration_seconds", 0.45),
         )
-    if transition_plan:
-        filter_script_path = base_dir / "renders" / "visual_track_filter.txt"
-        transition_args = build_scene_transition_args(
-            scene_paths,
-            [window[2] / config.video.fps for window in frame_windows],
-            transition_plan,
-            output_path,
-            config.video,
-            expected_frame_count,
+    transition_fallback = None
+    if transition_plan and not _transition_inputs_fit(scene_paths):
+        transition_plan = []
+        transition_fallback = (
+            "Scene 数量或路径长度超过 Windows 安全命令行上限，已使用无转场流复制合成"
         )
-        run_ffmpeg(
-            _externalize_filter_graph(transition_args, filter_script_path),
-            project.id,
+    with atomic_output_path(output_path) as temporary_output:
+        if transition_plan:
+            filter_script_path = base_dir / "renders" / "visual_track_filter.txt"
+            transition_args = build_scene_transition_args(
+                scene_paths,
+                [window[2] / config.video.fps for window in frame_windows],
+                transition_plan,
+                temporary_output,
+                config.video,
+                expected_frame_count,
+            )
+            run_with_encoder_fallback(
+                _externalize_filter_graph(transition_args, filter_script_path),
+                project.id,
+                run_ffmpeg,
+            )
+        else:
+            run_ffmpeg(
+                [
+                    "-y",
+                    "-f",
+                    "concat",
+                    "-safe",
+                    "0",
+                    "-i",
+                    str(concat_path),
+                    "-map",
+                    "0:v:0",
+                    "-an",
+                    "-c:v",
+                    "copy",
+                    "-movflags",
+                    "+faststart",
+                    str(temporary_output),
+                ],
+                project.id,
+            )
+        quality = check_scene_video(
+            temporary_output,
+            expected_duration,
+            config,
+            expected_frame_count=expected_frame_count,
         )
-    else:
-        run_ffmpeg(
-            [
-                "-y", "-f", "concat", "-safe", "0", "-i", str(concat_path),
-                "-map", "0:v:0", "-an", "-c:v", "copy", "-movflags", "+faststart",
-                str(output_path),
-            ],
-            project.id,
-        )
-    quality = check_scene_video(
-        output_path,
-        expected_duration,
-        config,
-        expected_frame_count=expected_frame_count,
-    )
     report = {
         "path": str(output_path),
         "scene_count": len(scenes),
@@ -98,6 +122,7 @@ def compose_visual_track(session: Session, project: Project) -> dict:
         "timeline_duration_seconds": timeline_duration,
         "expected_frame_count": expected_frame_count,
         "transitions": [item.__dict__ for item in transition_plan],
+        "transition_fallback": transition_fallback,
         "quality": quality,
     }
     report_path = base_dir / "reports" / "visual_track_report.json"
@@ -132,10 +157,7 @@ def build_scene_transition_args(
         # MP4s can still expose different container time bases even though they
         # share the same FPS and render settings, so normalize every input
         # before it reaches either xfade or concat.
-        filters.append(
-            f"[{index}:v]settb=AVTB,setpts=PTS-STARTPTS,setsar=1"
-            f"{suffix}[v{index}]"
-        )
+        filters.append(f"[{index}:v]settb=AVTB,setpts=PTS-STARTPTS,setsar=1{suffix}[v{index}]")
 
     current_label = "v0"
     current_duration = scene_durations[0]
@@ -148,25 +170,34 @@ def build_scene_transition_args(
                 f"duration={transition.duration:.3f}:offset={current_duration:.3f}[{output_label}]"
             )
         else:
-            filters.append(
-                f"[{current_label}][v{index}]concat=n=2:v=1:a=0[{output_label}]"
-            )
+            filters.append(f"[{current_label}][v{index}]concat=n=2:v=1:a=0[{output_label}]")
         current_label = output_label
         current_duration += scene_durations[index]
 
-    args.extend([
-        "-filter_complex", ";".join(filters),
-        "-map", f"[{current_label}]",
-        "-frames:v", str(expected_frame_count),
-        "-an",
-        "-c:v", video_config.video_codec,
-        "-preset", video_config.preset,
-        "-crf", str(video_config.crf),
-        "-pix_fmt", video_config.pixel_format,
-        "-r", str(video_config.fps),
-        "-movflags", "+faststart",
-        str(output_path),
-    ])
+    args.extend(
+        [
+            "-filter_complex",
+            ";".join(filters),
+            "-map",
+            f"[{current_label}]",
+            "-frames:v",
+            str(expected_frame_count),
+            "-an",
+            "-c:v",
+            video_config.video_codec,
+            "-preset",
+            video_config.preset,
+            "-crf",
+            str(video_config.crf),
+            "-pix_fmt",
+            video_config.pixel_format,
+            "-r",
+            str(video_config.fps),
+            "-movflags",
+            "+faststart",
+            str(output_path),
+        ]
+    )
     return args
 
 
@@ -185,3 +216,11 @@ def _externalize_filter_graph(args: list[str], script_path: Path) -> list[str]:
         str(script_path),
         *args[filter_index + 2 :],
     ]
+
+
+def _transition_inputs_fit(scene_paths: list[Path]) -> bool:
+    # The filter graph is stored in a script, but every `-i <path>` remains on
+    # the Windows command line. Keep enough headroom for FFmpeg options and the
+    # executable path; stability is more important than decorative transitions.
+    input_characters = sum(len(str(path.resolve())) + len(' -i "') + 1 for path in scene_paths)
+    return input_characters <= MAX_WINDOWS_FFMPEG_ARGUMENT_CHARACTERS

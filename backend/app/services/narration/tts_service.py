@@ -17,7 +17,11 @@ from app.models.narration import VoiceProfile
 from app.infrastructure import gpu_resource, process_runner as task_control
 from app.infrastructure.ffmpeg import probe_duration, run_ffmpeg
 from app.infrastructure.logging_config import current_task_id, format_task_log, task_log_context
-from app.infrastructure.project_layout import ensure_project_dirs, get_project_work_dir, load_project_config
+from app.infrastructure.project_layout import (
+    ensure_project_dirs,
+    get_project_work_dir,
+    load_project_config,
+)
 from app.shared.time import utc_now_iso
 from app.services.narration import voice_profile_service
 
@@ -49,7 +53,9 @@ def generate_single_audio(
                     "tts_engine": str(profile_config.get("tts_engine") or "qwen3_tts"),
                     "voice_language": voice_profile_service.profile_language(profile_config),
                     "reference_audio_text": str(profile_config.get("reference_audio_text") or ""),
-                    "cosyvoice_speed": voice_profile_service.profile_cosyvoice_speed(profile_config),
+                    "cosyvoice_speed": voice_profile_service.profile_cosyvoice_speed(
+                        profile_config
+                    ),
                 },
                 ensure_ascii=False,
             ),
@@ -101,7 +107,9 @@ def generate_segmented_audio(
                     "tts_engine": str(profile_config.get("tts_engine") or "qwen3_tts"),
                     "voice_language": voice_profile_service.profile_language(profile_config),
                     "reference_audio_text": str(profile_config.get("reference_audio_text") or ""),
-                    "cosyvoice_speed": voice_profile_service.profile_cosyvoice_speed(profile_config),
+                    "cosyvoice_speed": voice_profile_service.profile_cosyvoice_speed(
+                        profile_config
+                    ),
                 },
                 ensure_ascii=False,
             ),
@@ -139,7 +147,8 @@ def generate_segmented_audio(
             )
             logger.info(
                 "TTS segment ready: segment=%s duration=%.3fs",
-                segment.segment_id, segment_results[-1]["duration"],
+                segment.segment_id,
+                segment_results[-1]["duration"],
             )
 
         output_path = output_dir / output_filename
@@ -153,10 +162,20 @@ def generate_segmented_audio(
             encoding="utf-8",
         )
         logger.info("Audio merge started: segments=%s", len(segment_results))
-        run_ffmpeg([
-            "-y", "-f", "concat", "-safe", "0", "-i", str(concat_path),
-            "-c", "copy", str(output_path),
-        ])
+        run_ffmpeg(
+            [
+                "-y",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                str(concat_path),
+                "-c",
+                "copy",
+                str(output_path),
+            ]
+        )
         if not output_path.is_file():
             raise RuntimeError("FFmpeg 未生成合并后的完整音频")
 
@@ -176,9 +195,7 @@ def generate_project_tts(session: Session, project: Project) -> list[Segment]:
     settings = get_settings()
     segments = list(
         session.exec(
-            select(Segment)
-            .where(Segment.project_id == project.id)
-            .order_by(Segment.segment_index)
+            select(Segment).where(Segment.project_id == project.id).order_by(Segment.segment_index)
         ).all()
     )
     engine, reference_audio_path = _validate_configuration(project, segments)
@@ -217,8 +234,7 @@ def generate_project_tts(session: Session, project: Project) -> list[Segment]:
     result_by_id = {}
     if result_path.exists():
         result_by_id = {
-            item["segment_id"]: item
-            for item in json.loads(result_path.read_text(encoding="utf-8"))
+            item["segment_id"]: item for item in json.loads(result_path.read_text(encoding="utf-8"))
         }
 
     for segment in segments:
@@ -231,11 +247,15 @@ def generate_project_tts(session: Session, project: Project) -> list[Segment]:
             segment.error_message = None
         else:
             segment.status = "failed"
-            segment.error_message = result.get("error", f"{_engine_label(engine)} did not create an audio file")
+            segment.error_message = result.get(
+                "error", f"{_engine_label(engine)} did not create an audio file"
+            )
         segment.updated_at = datetime.utcnow().isoformat()
         session.add(segment)
 
-    project.status = "failed" if any(item.status == "failed" for item in segments) else "tts_completed"
+    project.status = (
+        "failed" if any(item.status == "failed" for item in segments) else "tts_completed"
+    )
     project.updated_at = datetime.utcnow().isoformat()
     session.add(project)
     session.commit()
@@ -281,7 +301,9 @@ def regenerate_segment_tts(session: Session, project: Project, segment: Segment)
         segment.error_message = None
     else:
         segment.status = "failed"
-        segment.error_message = result.get("error", f"{_engine_label(engine)} did not create an audio file")
+        segment.error_message = result.get(
+            "error", f"{_engine_label(engine)} did not create an audio file"
+        )
     segment.updated_at = datetime.utcnow().isoformat()
     session.add(segment)
     session.commit()
@@ -336,7 +358,9 @@ def _validate_cosyvoice_assets(settings: Settings, project: Project) -> None:
     if not any((settings.cosyvoice_model_dir / name).is_file() for name in model_configs):
         raise ValueError("CosyVoice model config is missing")
     if not _project_reference_audio_text(project):
-        raise ValueError("CosyVoice zero-shot voice cloning requires the reference audio transcript")
+        raise ValueError(
+            "CosyVoice zero-shot voice cloning requires the reference audio transcript"
+        )
 
 
 def _validate_index_assets(settings: Settings) -> None:
@@ -426,7 +450,9 @@ def _run_qwen3_tts_batch(
 ) -> None:
     settings = get_settings()
     batch_path, result_path, progress_path = _prepare_batch_files(segments, audio_dir, logs_dir)
-    runner_path = (Path(__file__).parents[2] / "integrations" / "tts" / "qwen3_tts_runner.py").resolve()
+    runner_path = (
+        Path(__file__).parents[2] / "integrations" / "tts" / "qwen3_tts_runner.py"
+    ).resolve()
     command = [
         str(settings.qwen_tts_python),
         "-s",
@@ -454,7 +480,9 @@ def _run_qwen3_tts_batch(
         "--max-new-tokens",
         str(settings.qwen_tts_max_new_tokens),
     ]
-    _execute_batch_runner(project.id, command, settings.qwen_tts_root, logs_dir, result_path, "Qwen3-TTS")
+    _execute_batch_runner(
+        project.id, command, settings.qwen_tts_root, logs_dir, result_path, "Qwen3-TTS"
+    )
 
 
 def _run_cosyvoice_batch(
@@ -466,7 +494,9 @@ def _run_cosyvoice_batch(
 ) -> None:
     settings = get_settings()
     batch_path, result_path, progress_path = _prepare_batch_files(segments, audio_dir, logs_dir)
-    runner_path = (Path(__file__).parents[2] / "integrations" / "tts" / "cosyvoice_runner.py").resolve()
+    runner_path = (
+        Path(__file__).parents[2] / "integrations" / "tts" / "cosyvoice_runner.py"
+    ).resolve()
     command = [
         str(settings.cosyvoice_python),
         "-s",
@@ -531,18 +561,31 @@ def _run_index_tts_batch(
 ) -> None:
     settings = get_settings()
     batch_path, result_path, progress_path = _prepare_batch_files(segments, audio_dir, logs_dir)
-    runner_path = (Path(__file__).parents[2] / "integrations" / "tts" / "index_tts_runner.py").resolve()
+    runner_path = (
+        Path(__file__).parents[2] / "integrations" / "tts" / "index_tts_runner.py"
+    ).resolve()
     command = [
-        str(settings.index_tts_python), "-s", str(runner_path),
-        "--index-root", str(settings.index_tts_root.resolve()),
-        "--model-dir", str(settings.index_tts_model_dir.resolve()),
-        "--batch-file", str(batch_path),
-        "--voice", str(reference_audio_path.resolve()),
-        "--result-file", str(result_path),
-        "--progress-file", str(progress_path),
-        "--max-text-tokens", str(settings.index_tts_max_text_tokens_per_sentence),
+        str(settings.index_tts_python),
+        "-s",
+        str(runner_path),
+        "--index-root",
+        str(settings.index_tts_root.resolve()),
+        "--model-dir",
+        str(settings.index_tts_model_dir.resolve()),
+        "--batch-file",
+        str(batch_path),
+        "--voice",
+        str(reference_audio_path.resolve()),
+        "--result-file",
+        str(result_path),
+        "--progress-file",
+        str(progress_path),
+        "--max-text-tokens",
+        str(settings.index_tts_max_text_tokens_per_sentence),
     ]
-    _execute_batch_runner(project.id, command, settings.index_tts_root, logs_dir, result_path, "IndexTTS")
+    _execute_batch_runner(
+        project.id, command, settings.index_tts_root, logs_dir, result_path, "IndexTTS"
+    )
 
 
 def _run_moss_tts_batch(
@@ -556,19 +599,33 @@ def _run_moss_tts_batch(
     if _project_voice_language(project) != "en-US":
         raise ValueError("MOSS-TTS is configured for English voice profiles")
     batch_path, result_path, progress_path = _prepare_batch_files(segments, audio_dir, logs_dir)
-    runner_path = (Path(__file__).parents[2] / "integrations" / "tts" / "moss_tts_runner.py").resolve()
+    runner_path = (
+        Path(__file__).parents[2] / "integrations" / "tts" / "moss_tts_runner.py"
+    ).resolve()
     command = [
-        str(settings.moss_tts_python), "-s", str(runner_path),
-        "--moss-root", str(settings.moss_tts_root.resolve()),
-        "--model-dir", str(settings.moss_tts_model_dir.resolve()),
-        "--codec-dir", str(settings.moss_tts_codec_dir.resolve()),
-        "--batch-file", str(batch_path),
-        "--voice", str(reference_audio_path.resolve()),
-        "--result-file", str(result_path),
-        "--progress-file", str(progress_path),
-        "--device", settings.moss_tts_device,
-        "--dtype", settings.moss_tts_dtype,
-        "--max-new-tokens", str(settings.moss_tts_max_new_tokens),
+        str(settings.moss_tts_python),
+        "-s",
+        str(runner_path),
+        "--moss-root",
+        str(settings.moss_tts_root.resolve()),
+        "--model-dir",
+        str(settings.moss_tts_model_dir.resolve()),
+        "--codec-dir",
+        str(settings.moss_tts_codec_dir.resolve()),
+        "--batch-file",
+        str(batch_path),
+        "--voice",
+        str(reference_audio_path.resolve()),
+        "--result-file",
+        str(result_path),
+        "--progress-file",
+        str(progress_path),
+        "--device",
+        settings.moss_tts_device,
+        "--dtype",
+        settings.moss_tts_dtype,
+        "--max-new-tokens",
+        str(settings.moss_tts_max_new_tokens),
     ]
     _execute_batch_runner(
         project.id,
@@ -713,7 +770,9 @@ def _execute_batch_runner(
         raise RuntimeError(message[-4000:])
 
 
-def _run_controlled_process(project_id: str, command: list[str], **kwargs) -> subprocess.CompletedProcess:
+def _run_controlled_process(
+    project_id: str, command: list[str], **kwargs
+) -> subprocess.CompletedProcess:
     if not task_control.status(project_id)["running"]:
         return subprocess.run(command, **kwargs)
     task_control.check_cancelled(project_id)

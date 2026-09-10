@@ -10,7 +10,11 @@ from app.config import get_settings
 from app.models.project import Project
 from app.models.narration import Segment
 from app.infrastructure.ffmpeg import probe_duration, run_ffmpeg
-from app.infrastructure.project_layout import ensure_project_dirs, get_final_audio_path, get_project_work_dir
+from app.infrastructure.project_layout import (
+    ensure_project_dirs,
+    get_final_audio_path,
+    get_project_work_dir,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -18,9 +22,7 @@ logger = logging.getLogger(__name__)
 
 def update_segment_durations(session: Session, project: Project) -> list[Segment]:
     segments = session.exec(
-        select(Segment)
-        .where(Segment.project_id == project.id)
-        .order_by(Segment.segment_index)
+        select(Segment).where(Segment.project_id == project.id).order_by(Segment.segment_index)
     ).all()
     for segment in segments:
         if not segment.audio_path:
@@ -33,9 +35,7 @@ def update_segment_durations(session: Session, project: Project) -> list[Segment
 
 def merge_project_audio(session: Session, project: Project) -> Path:
     segments = session.exec(
-        select(Segment)
-        .where(Segment.project_id == project.id)
-        .order_by(Segment.segment_index)
+        select(Segment).where(Segment.project_id == project.id).order_by(Segment.segment_index)
     ).all()
     if not segments:
         raise ValueError("Project has no segments to merge")
@@ -72,7 +72,18 @@ def merge_project_audio(session: Session, project: Project) -> Path:
         raise RuntimeError(f"Cannot write FFmpeg concat list: {list_path}") from exc
     try:
         run_ffmpeg(
-            ["-y", "-f", "concat", "-safe", "0", "-i", str(list_path), "-c", "copy", str(temporary_path)],
+            [
+                "-y",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                str(list_path),
+                "-c",
+                "copy",
+                str(temporary_path),
+            ],
             project.id,
         )
         if not temporary_path.is_file():

@@ -97,8 +97,10 @@ class SubtitleAlignmentTests(unittest.TestCase):
         text = "Dr. Smith paid $1,250 in 2026."
         units = source_units(text, "en")
 
-        self.assertEqual([item.text for item in units], ["Dr", "Smith", "paid", "1,250", "in", "2026"])
-        self.assertEqual(text[units[3].display_start:units[3].display_end], "1,250")
+        self.assertEqual(
+            [item.text for item in units], ["Dr", "Smith", "paid", "1,250", "in", "2026"]
+        )
+        self.assertEqual(text[units[3].display_start : units[3].display_end], "1,250")
 
     def test_chinese_numbers_are_normalized_only_for_alignment(self) -> None:
         text = "2026 年增长 3.5%，收入 1,200 元。"
@@ -119,7 +121,9 @@ class SubtitleAlignmentTests(unittest.TestCase):
                 [AsrWord(text="二零二六年增长三点五收入一千二百元", start_ms=0, end_ms=4800)]
             ),
         )
-        self.assertEqual("".join(cue.text.replace(" ", "") for cue in result.cues), text.replace(" ", ""))
+        self.assertEqual(
+            "".join(cue.text.replace(" ", "") for cue in result.cues), text.replace(" ", "")
+        )
         self.assertGreater(result.text_similarity, 0.8)
 
     def test_srt_generation_writes_traceable_alignment_and_qa(self) -> None:

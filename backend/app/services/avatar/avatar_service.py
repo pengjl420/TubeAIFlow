@@ -56,7 +56,9 @@ def _save_upload(source: BinaryIO, destination: Path) -> None:
         shutil.copyfileobj(source, target, length=1024 * 1024)
 
 
-def create_profile(session: Session, *, name: str, source: BinaryIO, filename: str) -> AvatarProfile:
+def create_profile(
+    session: Session, *, name: str, source: BinaryIO, filename: str
+) -> AvatarProfile:
     clean_name = name.strip()
     if not clean_name:
         raise ValueError("人物形象名称不能为空")
@@ -161,9 +163,7 @@ def enqueue_task(
 def serialize_task(session: Session, task: AvatarGenerationTask) -> dict:
     clips = list(
         session.exec(
-            select(AvatarClip)
-            .where(AvatarClip.task_id == task.id)
-            .order_by(AvatarClip.clip_index)
+            select(AvatarClip).where(AvatarClip.task_id == task.id).order_by(AvatarClip.clip_index)
         ).all()
     )
     data = task.model_dump()
@@ -209,15 +209,17 @@ def retry_task(session: Session, task: AvatarGenerationTask) -> AvatarGeneration
         raise ValueError("只有失败的数字人任务可以重试")
     clips = list(
         session.exec(
-            select(AvatarClip)
-            .where(AvatarClip.task_id == task.id)
-            .order_by(AvatarClip.clip_index)
+            select(AvatarClip).where(AvatarClip.task_id == task.id).order_by(AvatarClip.clip_index)
         ).all()
     )
     for clip in clips:
         if clip.status == "ready" and clip.output_path and Path(clip.output_path).is_file():
             continue
-        clip.status = "generating" if DuixClient().expected_result_path(clip.duix_task_code).is_file() else "pending"
+        clip.status = (
+            "generating"
+            if DuixClient().expected_result_path(clip.duix_task_code).is_file()
+            else "pending"
+        )
         clip.progress = 0
         clip.error_message = None
         clip.updated_at = utc_now_iso()
@@ -254,9 +256,7 @@ def _chunk_bounds(
     if not 0 < minimum_ms <= target_ms <= maximum_ms:
         raise ValueError("分段时长范围无效")
     silence_centres = sorted(
-        round(((start + end) / 2) * 1000)
-        for start, end in (silence_intervals or [])
-        if end > start
+        round(((start + end) / 2) * 1000) for start, end in (silence_intervals or []) if end > start
     )
     boundaries = [0]
     while duration_ms - boundaries[-1] > maximum_ms:
@@ -265,7 +265,11 @@ def _chunk_bounds(
         lower = start + minimum_ms
         upper = min(start + maximum_ms, duration_ms - minimum_ms)
         candidates = [point for point in silence_centres if lower <= point <= upper]
-        boundary = min(candidates, key=lambda point: abs(point - target)) if candidates else min(target, upper)
+        boundary = (
+            min(candidates, key=lambda point: abs(point - target))
+            if candidates
+            else min(target, upper)
+        )
         if boundary <= start:
             break
         boundaries.append(boundary)
@@ -289,9 +293,7 @@ def _generation_window(
 def _prepare_clips(session: Session, task: AvatarGenerationTask) -> list[AvatarClip]:
     existing = list(
         session.exec(
-            select(AvatarClip)
-            .where(AvatarClip.task_id == task.id)
-            .order_by(AvatarClip.clip_index)
+            select(AvatarClip).where(AvatarClip.task_id == task.id).order_by(AvatarClip.clip_index)
         ).all()
     )
     if existing:
@@ -299,7 +301,9 @@ def _prepare_clips(session: Session, task: AvatarGenerationTask) -> list[AvatarC
     try:
         silences = detect_silence_intervals(Path(task.audio_path))
     except RuntimeError:
-        logger.exception("Silence detection failed for avatar task %s; using timed boundaries", task.id)
+        logger.exception(
+            "Silence detection failed for avatar task %s; using timed boundaries", task.id
+        )
         silences = []
     if task.chunk_seconds <= 90:
         # Resume old tasks created before chapter-level generation was introduced.
@@ -316,21 +320,32 @@ def _prepare_clips(session: Session, task: AvatarGenerationTask) -> list[AvatarC
     clips_dir.mkdir(parents=True, exist_ok=True)
     clips = []
     for index, (start_ms, end_ms) in enumerate(bounds, 1):
-        generation_start_ms, generation_end_ms, trim_start_ms, trim_end_ms = (
-            _generation_window(
-                start_ms,
-                end_ms,
-                task.audio_duration_ms,
-                task.context_ms,
-            )
+        generation_start_ms, generation_end_ms, trim_start_ms, trim_end_ms = _generation_window(
+            start_ms,
+            end_ms,
+            task.audio_duration_ms,
+            task.context_ms,
         )
         audio_path = clips_dir / f"clip_{index:04d}.wav"
-        run_ffmpeg([
-            "-y", "-ss", f"{generation_start_ms / 1000:.3f}",
-            "-t", f"{(generation_end_ms - generation_start_ms) / 1000:.3f}",
-            "-i", task.audio_path, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le",
-            str(audio_path),
-        ])
+        run_ffmpeg(
+            [
+                "-y",
+                "-ss",
+                f"{generation_start_ms / 1000:.3f}",
+                "-t",
+                f"{(generation_end_ms - generation_start_ms) / 1000:.3f}",
+                "-i",
+                task.audio_path,
+                "-vn",
+                "-ac",
+                "1",
+                "-ar",
+                "16000",
+                "-c:a",
+                "pcm_s16le",
+                str(audio_path),
+            ]
+        )
         clip = AvatarClip(
             id=uuid.uuid4().hex,
             task_id=task.id,
@@ -362,14 +377,18 @@ def _update_clip_progress(task_id: str, clip_id: str, remote_progress: float) ->
         clip.status = "generating"
         clip.progress = max(0, min(100, remote_progress))
         clip.updated_at = utc_now_iso()
-        task.progress = ((task.completed_chunks + clip.progress / 100) / max(1, task.total_chunks)) * 100
+        task.progress = (
+            (task.completed_chunks + clip.progress / 100) / max(1, task.total_chunks)
+        ) * 100
         task.updated_at = utc_now_iso()
         session.add(clip)
         session.add(task)
         session.commit()
 
 
-def _generate_clip(session: Session, task: AvatarGenerationTask, profile: AvatarProfile, clip: AvatarClip) -> None:
+def _generate_clip(
+    session: Session, task: AvatarGenerationTask, profile: AvatarProfile, clip: AvatarClip
+) -> None:
     output_path = Path(task.audio_path).parents[1] / "clips" / f"clip_{clip.clip_index:04d}.mp4"
     if clip.status == "ready" and output_path.is_file():
         return
@@ -427,11 +446,27 @@ def _generate_clip(session: Session, task: AvatarGenerationTask, profile: Avatar
             f"{raw_actual_ms - expected_generation_ms}ms，超过 100ms"
         )
     core_duration_ms = clip.end_ms - clip.start_ms
-    run_ffmpeg([
-        "-y", "-i", str(source), "-ss", f"{clip.trim_start_ms / 1000:.3f}",
-        "-t", f"{core_duration_ms / 1000:.3f}", "-an", "-vf", "fps=30,format=yuv420p",
-        "-c:v", "libx264", "-preset", "medium", "-crf", "18", str(output_path),
-    ])
+    run_ffmpeg(
+        [
+            "-y",
+            "-i",
+            str(source),
+            "-ss",
+            f"{clip.trim_start_ms / 1000:.3f}",
+            "-t",
+            f"{core_duration_ms / 1000:.3f}",
+            "-an",
+            "-vf",
+            "fps=30,format=yuv420p",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-crf",
+            "18",
+            str(output_path),
+        ]
+    )
     actual_ms = round(probe_duration(output_path) * 1000)
     if abs(actual_ms - core_duration_ms) > 100:
         raise RuntimeError(
@@ -478,29 +513,51 @@ def _write_continuity_report(task: AvatarGenerationTask, clips: list[AvatarClip]
         left_frame = frame_dir / f"seam_{left.clip_index:04d}_last.jpg"
         right_frame = frame_dir / f"seam_{right.clip_index:04d}_first.jpg"
         left_duration = max(0, (left.actual_duration_ms or (left.end_ms - left.start_ms)) - 40)
-        run_ffmpeg([
-            "-y", "-ss", f"{left_duration / 1000:.3f}", "-i", str(left_path),
-            "-frames:v", "1", "-q:v", "2", str(left_frame),
-        ])
-        run_ffmpeg([
-            "-y", "-ss", "0", "-i", str(right_path),
-            "-frames:v", "1", "-q:v", "2", str(right_frame),
-        ])
+        run_ffmpeg(
+            [
+                "-y",
+                "-ss",
+                f"{left_duration / 1000:.3f}",
+                "-i",
+                str(left_path),
+                "-frames:v",
+                "1",
+                "-q:v",
+                "2",
+                str(left_frame),
+            ]
+        )
+        run_ffmpeg(
+            [
+                "-y",
+                "-ss",
+                "0",
+                "-i",
+                str(right_path),
+                "-frames:v",
+                "1",
+                "-q:v",
+                "2",
+                str(right_frame),
+            ]
+        )
         full_similarity, mouth_similarity, weighted_similarity = _frame_similarity(
             left_frame, right_frame
         )
         similarity = round(weighted_similarity, 4)
         severity = "ok" if similarity >= 0.85 else "warning" if similarity >= 0.72 else "high"
-        seams.append({
-            "left_clip": left.clip_index,
-            "right_clip": right.clip_index,
-            "timeline_ms": left.end_ms,
-            "similarity": similarity,
-            "full_frame_similarity": round(full_similarity, 4),
-            "mouth_region_similarity": round(mouth_similarity, 4),
-            "severity": severity,
-            "cut_reason": "silence_preferred_boundary",
-        })
+        seams.append(
+            {
+                "left_clip": left.clip_index,
+                "right_clip": right.clip_index,
+                "timeline_ms": left.end_ms,
+                "similarity": similarity,
+                "full_frame_similarity": round(full_similarity, 4),
+                "mouth_region_similarity": round(mouth_similarity, 4),
+                "severity": severity,
+                "cut_reason": "silence_preferred_boundary",
+            }
+        )
     report = {
         "task_id": task.id,
         "context_ms": task.context_ms,
@@ -525,12 +582,44 @@ def _compose_final(task: AvatarGenerationTask, clips: list[AvatarClip]) -> Path:
     concat_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
     silent_video = task_root / "avatar_video_only.mp4"
     final_path = task_root / task.output_filename
-    run_ffmpeg(["-y", "-f", "concat", "-safe", "0", "-i", str(concat_file), "-c", "copy", str(silent_video)])
-    run_ffmpeg([
-        "-y", "-i", str(silent_video), "-i", task.audio_path,
-        "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-ar", "48000",
-        "-t", f"{task.audio_duration_ms / 1000:.3f}", "-movflags", "+faststart", str(final_path),
-    ])
+    run_ffmpeg(
+        [
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(concat_file),
+            "-c",
+            "copy",
+            str(silent_video),
+        ]
+    )
+    run_ffmpeg(
+        [
+            "-y",
+            "-i",
+            str(silent_video),
+            "-i",
+            task.audio_path,
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:a:0",
+            "-c:v",
+            "copy",
+            "-c:a",
+            "aac",
+            "-ar",
+            "48000",
+            "-t",
+            f"{task.audio_duration_ms / 1000:.3f}",
+            "-movflags",
+            "+faststart",
+            str(final_path),
+        ]
+    )
     if not final_path.is_file():
         raise RuntimeError("最终数字人视频未生成")
     return final_path
@@ -612,7 +701,9 @@ def wake_worker() -> None:
     global _worker_thread
     with _worker_lock:
         if not _worker_thread or not _worker_thread.is_alive():
-            _worker_thread = threading.Thread(target=_worker_loop, name="avatar-worker", daemon=True)
+            _worker_thread = threading.Thread(
+                target=_worker_loop, name="avatar-worker", daemon=True
+            )
             _worker_thread.start()
     _wake_event.set()
 

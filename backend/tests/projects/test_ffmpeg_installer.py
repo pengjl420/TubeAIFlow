@@ -15,13 +15,7 @@ class FfmpegInstallerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
             discovered = (
-                workspace
-                / "tools"
-                / "ffmpeg"
-                / "windows-x64"
-                / "9.0"
-                / "bin"
-                / "ffmpeg.exe"
+                workspace / "tools" / "ffmpeg" / "windows-x64" / "9.0" / "bin" / "ffmpeg.exe"
             )
             discovered.parent.mkdir(parents=True)
             discovered.write_bytes(b"binary")
@@ -32,7 +26,15 @@ class FfmpegInstallerTests(unittest.TestCase):
                 patch.object(ffmpeg.shutil, "which", return_value=None),
             ):
                 resolved = ffmpeg._resolve_tool(
-                    str(workspace / "tools" / "ffmpeg" / "windows-x64" / "8.1" / "bin" / "ffmpeg.exe")
+                    str(
+                        workspace
+                        / "tools"
+                        / "ffmpeg"
+                        / "windows-x64"
+                        / "8.1"
+                        / "bin"
+                        / "ffmpeg.exe"
+                    )
                 )
 
             self.assertEqual(Path(resolved), discovered.resolve())
@@ -47,9 +49,7 @@ class FfmpegInstallerTests(unittest.TestCase):
                 archive.writestr("ffmpeg-test/bin/ffprobe.exe", b"ffprobe")
                 archive.writestr("ffmpeg-test/doc/readme.txt", b"ignored")
 
-            ffmpeg_path, ffprobe_path = installer._extract_executables(
-                archive_path, destination
-            )
+            ffmpeg_path, ffprobe_path = installer._extract_executables(archive_path, destination)
 
             self.assertEqual(ffmpeg_path.read_bytes(), b"ffmpeg")
             self.assertEqual(ffprobe_path.read_bytes(), b"ffprobe")

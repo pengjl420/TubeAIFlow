@@ -17,8 +17,7 @@ from app.infrastructure.logging_config import (
 class LoggingConfigTests(unittest.TestCase):
     def test_redacts_common_secret_formats(self) -> None:
         text = redact_sensitive(
-            "Authorization: Bearer abc.def api_key=secret-value "
-            "password=hunter2 sk-exampletoken"
+            "Authorization: Bearer abc.def api_key=secret-value password=hunter2 sk-exampletoken"
         )
         self.assertNotIn("abc.def", text)
         self.assertNotIn("secret-value", text)
@@ -48,7 +47,9 @@ class LoggingConfigTests(unittest.TestCase):
             def emit(task_id: str) -> None:
                 with task_log_context(task_id):
                     barrier.wait(timeout=5)
-                    logging.getLogger("provider.nested").info("%s first\n%s second", task_id, task_id)
+                    logging.getLogger("provider.nested").info(
+                        "%s first\n%s second", task_id, task_id
+                    )
                     try:
                         raise RuntimeError(f"{task_id} password=private-secret")
                     except RuntimeError:
@@ -88,8 +89,13 @@ class LoggingConfigTests(unittest.TestCase):
 
     def test_filter_handles_mapping_arguments(self) -> None:
         record = logging.LogRecord(
-            "test", logging.INFO, __file__, 1, "%(value)s",
-            ({"value": "Bearer token"},), None,
+            "test",
+            logging.INFO,
+            __file__,
+            1,
+            "%(value)s",
+            ({"value": "Bearer token"},),
+            None,
         )
         self.assertTrue(SensitiveDataFilter().filter(record))
         self.assertEqual(record.getMessage(), "Bearer [REDACTED]")

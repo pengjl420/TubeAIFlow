@@ -10,6 +10,7 @@ from sqlmodel import Session, select
 from app.database import engine
 from app.config import use_settings_snapshot
 from app.infrastructure import process_runner as runtime_control
+from app.infrastructure.resource_preflight import check_project_disk_space
 from app.infrastructure.project_layout import use_project_config_snapshot
 from app.infrastructure.serialization import dump_json, load_json_object
 from app.models.batch import BatchItem, BatchJob
@@ -227,9 +228,7 @@ def process_next_task() -> bool:
         task.error_message = None
         if _updates_project_lifecycle(task):
             project.status = (
-                "video_in_progress"
-                if _is_video_task(task)
-                else "narration_in_progress"
+                "video_in_progress" if _is_video_task(task) else "narration_in_progress"
             )
         project.updated_at = now
         session.add(task)
@@ -272,7 +271,9 @@ def process_next_task() -> bool:
                 next_stage=stage,
             )
             session.add(current)
-            current_item = session.get(BatchItem, current.batch_item_id) if current.batch_item_id else None
+            current_item = (
+                session.get(BatchItem, current.batch_item_id) if current.batch_item_id else None
+            )
             if current_item:
                 current_item.current_stage = stage
                 current_item.updated_at = changed_at
@@ -308,6 +309,7 @@ def process_next_task() -> bool:
             with ExitStack() as stack:
                 stack.enter_context(use_project_config_snapshot(project.id, project_snapshot))
                 stack.enter_context(use_settings_snapshot(settings_snapshot))
+                check_project_disk_space(session, project, task.current_stage)
                 runtime = get_workflow_runtime(task.workflow)
                 runtime.run(
                     session,
@@ -327,10 +329,25 @@ def process_next_task() -> bool:
             session.rollback()
             logger.exception("Task %s failed at stage %s", task.id, task.current_stage)
             current = session.get(TaskRun, task.id)
-            current_batch = session.get(BatchJob, current.batch_id) if current and current.batch_id else None
-            current_item = session.get(BatchItem, current.batch_item_id) if current and current.batch_item_id else None
+            current_batch = (
+                session.get(BatchJob, current.batch_id) if current and current.batch_id else None
+            )
+            current_item = (
+                session.get(BatchItem, current.batch_item_id)
+                if current and current.batch_item_id
+                else None
+            )
             if current:
-                _fail_task(session, current, current_batch, current_item, str(exc))
+                error_code, retryable = _classify_error(exc)
+                _fail_task(
+                    session,
+                    current,
+                    current_batch,
+                    current_item,
+                    str(exc),
+                    error_code=error_code,
+                    retryable=retryable,
+                )
         else:
             _complete_task(session, task.id)
         return True
@@ -401,8 +418,34 @@ def _fail_task(
     batch: BatchJob | None,
     item: BatchItem | None,
     error: str,
+    error_code: str = "JOB_EXECUTION_FAILED",
+    retryable: bool = False,
 ) -> None:
     now = utc_now_iso()
+    if retryable and task.attempt_count <= task.max_retries:
+        failed_stage = task.current_stage
+        task_service.queue_paused_task(session, task)
+        _append_checkpoint_event(
+            task,
+            "automatic_retry",
+            failed_stage,
+            now,
+            error,
+            checkpoint_stage=failed_stage,
+        )
+        if item:
+            item.status = "pending"
+            item.current_stage = failed_stage
+            item.error_message = f"自动重试：{error[-1000:]}"
+            item.finished_at = None
+            item.updated_at = now
+            session.add(item)
+        if batch:
+            batch.status = "queued"
+            batch.updated_at = now
+            session.add(batch)
+        session.commit()
+        return
     task.status = "failed"
     task.cancel_requested = False
     task.lease_owner = None
@@ -410,7 +453,7 @@ def _fail_task(
     task.finished_at = now
     task.updated_at = now
     task.error_message = (error or "生成失败")[-4000:]
-    task.error_code = "JOB_EXECUTION_FAILED"
+    task.error_code = error_code
     _append_checkpoint_event(task, "failed", task.current_stage, now, task.error_message)
     session.add(task)
     project = session.get(Project, task.project_id)
@@ -438,6 +481,24 @@ def _fail_task(
     _sync_project_descriptor(project)
     if batch:
         refresh_batch_status(session, batch.id)
+
+
+def _classify_error(error: BaseException) -> tuple[str, bool]:
+    explicit = str(getattr(error, "code", "")).strip()
+    if explicit:
+        return explicit, False
+    message = str(error).lower()
+    if "out of memory" in message and ("cuda" in message or "gpu" in message):
+        return "GPU_OUT_OF_MEMORY", True
+    if "rate limit" in message or "too many requests" in message or "http 429" in message:
+        return "PROVIDER_RATE_LIMIT", True
+    if "timed out" in message or "timeout" in message:
+        return "PROVIDER_TIMEOUT", True
+    if "ffmpeg" in message:
+        return "FFMPEG_RENDER_FAILED", True
+    if "connection" in message and ("provider" in message or "api" in message):
+        return "PROVIDER_UNAVAILABLE", True
+    return "JOB_EXECUTION_FAILED", False
 
 
 def _cancel_task(session: Session, task_id: str, error: str) -> None:

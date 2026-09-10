@@ -22,6 +22,41 @@ from app.services.tasks import task_service, task_worker
 
 
 class TaskQueueTests(unittest.TestCase):
+    def test_retryable_failure_is_automatically_requeued_with_stable_error_history(self) -> None:
+        with Session(self.engine) as session:
+            project = Project(id="project", name="Project")
+            session.add(project)
+            session.add(
+                TaskRun(
+                    id="task",
+                    project_id=project.id,
+                    queue_sequence=1,
+                    max_retries=2,
+                )
+            )
+            session.commit()
+
+        with patch.object(
+            task_worker.narration_generation,
+            "run_project_generation",
+            side_effect=RuntimeError("FFmpeg temporary failure"),
+        ):
+            self.assertTrue(task_worker.process_next_task())
+
+        with Session(self.engine) as session:
+            task = session.get(TaskRun, "task")
+            self.assertEqual(task.status, "queued")
+            self.assertEqual(task.attempt_count, 1)
+            event = json.loads(task.checkpoint_json)["stage_history"][-1]
+            self.assertEqual(event["event"], "automatic_retry")
+            self.assertEqual(event["stage"], "segmenting")
+
+    def test_non_retryable_failure_stops_without_consuming_retry_budget(self) -> None:
+        self.assertEqual(
+            task_worker._classify_error(ValueError("invalid project configuration")),
+            ("JOB_EXECUTION_FAILED", False),
+        )
+
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.engine = create_engine(
@@ -75,7 +110,11 @@ class TaskQueueTests(unittest.TestCase):
         def fake_generation(session, project, _stage, _include_video, update_stage):
             calls.append(project.id)
             running_counts.append(
-                len(session.exec(TaskRun.__table__.select().where(TaskRun.status == "running")).all())
+                len(
+                    session.exec(
+                        TaskRun.__table__.select().where(TaskRun.status == "running")
+                    ).all()
+                )
             )
             update_stage("completed")
 
@@ -479,9 +518,28 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertEqual(
             versions,
             [
-                (1,), (2,), (3,), (4,), (5,), (6,), (7,), (8,), (9,), (10,),
-                (11,), (12,), (13,), (14,), (15,), (16,), (17,), (18,), (19,),
-                (20,), (21,), (22,),
+                (1,),
+                (2,),
+                (3,),
+                (4,),
+                (5,),
+                (6,),
+                (7,),
+                (8,),
+                (9,),
+                (10,),
+                (11,),
+                (12,),
+                (13,),
+                (14,),
+                (15,),
+                (16,),
+                (17,),
+                (18,),
+                (19,),
+                (20,),
+                (21,),
+                (22,),
             ],
         )
 
@@ -527,7 +585,9 @@ class DatabaseMigrationTests(unittest.TestCase):
 
     def test_source_subtitle_migration_removes_bilingual_schema_and_config(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            engine = create_sqlalchemy_engine(f"sqlite:///{Path(directory) / 'legacy-subtitles.db'}")
+            engine = create_sqlalchemy_engine(
+                f"sqlite:///{Path(directory) / 'legacy-subtitles.db'}"
+            )
             with engine.begin() as connection:
                 connection.exec_driver_sql(
                     "CREATE TABLE projects (id VARCHAR PRIMARY KEY, status VARCHAR, config_json VARCHAR)"
@@ -535,7 +595,7 @@ class DatabaseMigrationTests(unittest.TestCase):
                 connection.exec_driver_sql(
                     "INSERT INTO projects (id, status, config_json) VALUES "
                     "('p1', 'zh_subtitle_created', "
-                    "'{\"include_translation\": false, \"include_video\": true}')"
+                    '\'{"include_translation": false, "include_video": true}\')'
                 )
                 connection.exec_driver_sql(
                     """
@@ -587,11 +647,24 @@ class DatabaseMigrationTests(unittest.TestCase):
             engine.dispose()
 
         self.assertEqual(segment_text, "原文")
-        self.assertEqual(columns, {
-            "id", "segment_id", "project_id", "segment_index", "text", "audio_path",
-            "duration", "start_time", "end_time", "status", "error_message",
-            "created_at", "updated_at",
-        })
+        self.assertEqual(
+            columns,
+            {
+                "id",
+                "segment_id",
+                "project_id",
+                "segment_index",
+                "text",
+                "audio_path",
+                "duration",
+                "start_time",
+                "end_time",
+                "status",
+                "error_message",
+                "created_at",
+                "updated_at",
+            },
+        )
         self.assertNotIn("subtitle_templates", tables)
         self.assertNotIn("include_translation", config_json)
         self.assertEqual(project_status, "narration_ready")
@@ -649,23 +722,27 @@ class TaskApiTests(unittest.TestCase):
             segment_audio.parent.mkdir(parents=True)
             segment_audio.write_bytes(b"audio")
             with Session(engine) as session:
-                session.add(Project(
-                    id="project",
-                    name="Project",
-                    output_dir=str(root),
-                    script_clean_path=str(root / "script.txt"),
-                    config_json='{"output_filename":"project","include_video":false}',
-                ))
-                session.add(Segment(
-                    id="segment",
-                    segment_id="0001",
-                    project_id="project",
-                    segment_index=1,
-                    text="已生成的配音",
-                    audio_path=str(segment_audio),
-                    duration=1.0,
-                    status="completed",
-                ))
+                session.add(
+                    Project(
+                        id="project",
+                        name="Project",
+                        output_dir=str(root),
+                        script_clean_path=str(root / "script.txt"),
+                        config_json='{"output_filename":"project","include_video":false}',
+                    )
+                )
+                session.add(
+                    Segment(
+                        id="segment",
+                        segment_id="0001",
+                        project_id="project",
+                        segment_index=1,
+                        text="已生成的配音",
+                        audio_path=str(segment_audio),
+                        duration=1.0,
+                        status="completed",
+                    )
+                )
                 session.commit()
 
             app = FastAPI()

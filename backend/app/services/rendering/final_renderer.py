@@ -3,7 +3,7 @@ import shutil
 from sqlmodel import Session, select
 
 from app.config import get_settings
-from app.infrastructure.atomic_files import write_json_atomic
+from app.infrastructure.atomic_files import atomic_output_path, write_json_atomic
 from app.infrastructure.ffmpeg import probe_duration, run_ffmpeg
 from app.infrastructure.project_layout import (
     ensure_project_dirs,
@@ -15,6 +15,7 @@ from app.infrastructure.project_layout import (
 from app.models.project import Project
 from app.models.storyboard import VisualScene
 from app.services.rendering.render_config import get_project_render_config
+from app.services.rendering.ffmpeg_runner import run_with_encoder_fallback
 
 
 def compose_final_video(session: Session, project: Project) -> dict:
@@ -73,12 +74,15 @@ def compose_final_video(session: Session, project: Project) -> dict:
             "192k",
             "-movflags",
             "+faststart",
-            str(output_path),
         ]
     )
-    run_ffmpeg(args, project.id)
-    shutil.copyfile(output_path, preview_path)
-    video_duration = probe_duration(output_path)
+    with atomic_output_path(output_path) as temporary_output:
+        selected_codec = run_with_encoder_fallback(
+            [*args, str(temporary_output)], project.id, run_ffmpeg
+        )
+        video_duration = probe_duration(temporary_output)
+    with atomic_output_path(preview_path) as temporary_preview:
+        shutil.copyfile(output_path, temporary_preview)
     report = {
         "path": str(output_path),
         "preview_path": str(preview_path),
@@ -87,6 +91,7 @@ def compose_final_video(session: Session, project: Project) -> dict:
         "audio_duration_seconds": audio_duration,
         "video_duration_seconds": video_duration,
         "subtitles_burned": subtitle_path.is_file(),
+        "video_codec": selected_codec,
     }
     write_json_atomic(base_dir / "reports" / "render_report.json", report)
     return report

@@ -1,6 +1,10 @@
 import unittest
 
-from app.services.visual_enrichment.ingest import build_canonical_timeline, normalize_transcript, parse_srt
+from app.services.visual_enrichment.ingest import (
+    build_canonical_timeline,
+    normalize_transcript,
+    parse_srt,
+)
 
 
 SRT = """1

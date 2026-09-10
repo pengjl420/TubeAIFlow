@@ -27,8 +27,12 @@ class SceneJobApiTests(unittest.TestCase):
                 session.add(Project(id="p1", name="Project", status="review_required"))
                 session.add(
                     VisualScene(
-                        id="s1", project_id="p1", scene_index=1,
-                        start_ms=0, end_ms=5000, narration="Narration",
+                        id="s1",
+                        project_id="p1",
+                        scene_index=1,
+                        start_ms=0,
+                        end_ms=5000,
+                        narration="Narration",
                     )
                 )
                 session.commit()
@@ -46,9 +50,7 @@ class SceneJobApiTests(unittest.TestCase):
                     created = client.post("/api/projects/p1/jobs/scenes/s1/storyboard")
 
             self.assertEqual(created.status_code, 200, created.text)
-            self.assertEqual(
-                created.json()["data"]["job_type"], "scene_storyboard_regeneration"
-            )
+            self.assertEqual(created.json()["data"]["job_type"], "scene_storyboard_regeneration")
             self.assertEqual(created.json()["data"]["resource_class"], "api")
             self.assertEqual(created.json()["data"]["scene_id"], "s1")
             engine.dispose()
@@ -75,7 +77,9 @@ class SceneJobApiTests(unittest.TestCase):
                 session.commit()
                 with (
                     patch.object(render_jobs.scene_renderer, "render_all_scenes") as render_scenes,
-                    patch.object(render_jobs.visual_track_composer, "compose_visual_track") as visual,
+                    patch.object(
+                        render_jobs.visual_track_composer, "compose_visual_track"
+                    ) as visual,
                     patch.object(
                         render_jobs.final_renderer,
                         "compose_final_video",
@@ -216,9 +220,7 @@ class SceneJobApiTests(unittest.TestCase):
                         data = created.json()["data"]
                         self.assertEqual(data["job_type"], job_type)
                         self.assertEqual(data["resource_class"], resource_class)
-                        cancelled = client.post(
-                            f"/api/projects/p1/jobs/{data['id']}/cancel"
-                        )
+                        cancelled = client.post(f"/api/projects/p1/jobs/{data['id']}/cancel")
                         self.assertEqual(cancelled.json()["data"]["status"], "cancelled")
             engine.dispose()
 

@@ -146,9 +146,7 @@ def _subtitles_step(context: WorkflowContext) -> str:
             .where(Segment.project_id == context.project.id)
             .order_by(Segment.segment_index)
         ).all()
-        srt_service.create_full_srt(
-            context.project, list(segments), session=context.session
-        )
+        srt_service.create_full_srt(context.project, list(segments), session=context.session)
     context.project.status = "narration_ready"
     context.session.add(context.project)
     context.session.commit()
@@ -228,9 +226,7 @@ def _stage_after_narration(project: Project, include_video: bool) -> str:
 def _artifact_exists(session: Session, project: Project, name: str) -> bool:
     segments = list(
         session.exec(
-            select(Segment)
-            .where(Segment.project_id == project.id)
-            .order_by(Segment.segment_index)
+            select(Segment).where(Segment.project_id == project.id).order_by(Segment.segment_index)
         ).all()
     )
     if name == "segments":
@@ -263,17 +259,13 @@ def initial_stage(session: Session, project: Project, include_video: bool) -> st
     """Return the earliest incomplete stage for a one-click continuation."""
     segments = list(
         session.exec(
-            select(Segment)
-            .where(Segment.project_id == project.id)
-            .order_by(Segment.segment_index)
+            select(Segment).where(Segment.project_id == project.id).order_by(Segment.segment_index)
         ).all()
     )
     if not segments:
         return "segmenting"
     if any(
-        item.status != "completed"
-        or not item.audio_path
-        or not Path(item.audio_path).is_file()
+        item.status != "completed" or not item.audio_path or not Path(item.audio_path).is_file()
         for item in segments
     ):
         return "tts"
@@ -302,9 +294,12 @@ def _narration_outputs_exist(session: Session, project: Project) -> bool:
         work_dir / "timeline" / f"{stem}_timeline.json",
         work_dir / "timeline" / "timeline.json",
     )
-    has_cues = session.exec(
-        select(SubtitleCue.id).where(SubtitleCue.project_id == project.id).limit(1)
-    ).first() is not None
+    has_cues = (
+        session.exec(
+            select(SubtitleCue.id).where(SubtitleCue.project_id == project.id).limit(1)
+        ).first()
+        is not None
+    )
     return (
         get_final_srt_path(project, settings.workspace_dir).is_file()
         and any(path.is_file() for path in timeline_paths)

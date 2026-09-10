@@ -211,9 +211,7 @@ def _run_narration_workflow(
     )
 
 
-def _initial_narration_stage(
-    session: Session, project: Project, include_video: bool
-) -> str:
+def _initial_narration_stage(session: Session, project: Project, include_video: bool) -> str:
     from app.workflows import narration_generation
 
     return narration_generation.initial_stage(session, project, include_video)
@@ -228,14 +226,10 @@ def _run_video_workflow(
 ) -> None:
     from app.workflows import video_synthesis
 
-    video_synthesis.run_video_synthesis(
-        session, project, current_stage, on_stage_changed
-    )
+    video_synthesis.run_video_synthesis(session, project, current_stage, on_stage_changed)
 
 
-def _initial_video_stage(
-    session: Session, project: Project, _include_video: bool
-) -> str:
+def _initial_video_stage(session: Session, project: Project, _include_video: bool) -> str:
     from app.workflows import video_synthesis
 
     return video_synthesis.initial_stage(session, project.id)

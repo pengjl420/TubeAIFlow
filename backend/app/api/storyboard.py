@@ -38,7 +38,10 @@ def import_project_srt(
 ) -> dict:
     project = _require_project(session, project_id)
     try:
-        return {"success": True, "data": subtitle_service.import_srt(session, project, payload.content)}
+        return {
+            "success": True,
+            "data": subtitle_service.import_srt(session, project, payload.content),
+        }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"success": False, "error": str(exc)}) from exc
 
@@ -58,7 +61,10 @@ def get_project_storyboard(
     session: Session = Depends(get_session),
 ) -> dict:
     _require_project(session, project_id)
-    return {"success": True, "data": {"scenes": storyboard_service.list_scenes(session, project_id)}}
+    return {
+        "success": True,
+        "data": {"scenes": storyboard_service.list_scenes(session, project_id)},
+    }
 
 
 @router.put("/projects/{project_id}/storyboard/scenes/{scene_id}")
@@ -80,8 +86,12 @@ def update_project_scene(
             storyboard=payload.storyboard if "storyboard" in payload.model_fields_set else None,
             status=payload.status if "status" in payload.model_fields_set else None,
             locked_text=payload.locked_text if "locked_text" in payload.model_fields_set else None,
-            locked_audio=payload.locked_audio if "locked_audio" in payload.model_fields_set else None,
-            locked_visual=payload.locked_visual if "locked_visual" in payload.model_fields_set else None,
+            locked_audio=payload.locked_audio
+            if "locked_audio" in payload.model_fields_set
+            else None,
+            locked_visual=payload.locked_visual
+            if "locked_visual" in payload.model_fields_set
+            else None,
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail={"error": str(exc)}) from exc
@@ -113,9 +123,7 @@ def restore_scene_revision(
 ) -> dict:
     project = _require_project(session, project_id)
     try:
-        scene = storyboard_service.restore_scene_revision(
-            session, project, scene_id, revision_id
-        )
+        scene = storyboard_service.restore_scene_revision(session, project, scene_id, revision_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail={"error": str(exc)}) from exc
     return {"success": True, "data": scene}
@@ -134,7 +142,9 @@ def regenerate_project_scene(
 
 
 @router.get("/projects/{project_id}/storyboard/scenes/{scene_id}/assets")
-def get_scene_assets(project_id: str, scene_id: str, session: Session = Depends(get_session)) -> dict:
+def get_scene_assets(
+    project_id: str, scene_id: str, session: Session = Depends(get_session)
+) -> dict:
     project = _require_project(session, project_id)
     try:
         data = scene_workspace_service.scene_assets(session, project, scene_id)
@@ -144,7 +154,12 @@ def get_scene_assets(project_id: str, scene_id: str, session: Session = Depends(
 
 
 @router.put("/projects/{project_id}/storyboard/scenes/{scene_id}/assets/selection")
-def select_scene_asset(project_id: str, scene_id: str, payload: SceneAssetSelectionRequest, session: Session = Depends(get_session)) -> dict:
+def select_scene_asset(
+    project_id: str,
+    scene_id: str,
+    payload: SceneAssetSelectionRequest,
+    session: Session = Depends(get_session),
+) -> dict:
     project = _require_project(session, project_id)
     try:
         data = scene_workspace_service.assign_generated_variant(
@@ -158,7 +173,9 @@ def select_scene_asset(project_id: str, scene_id: str, payload: SceneAssetSelect
 
 
 @router.delete("/projects/{project_id}/storyboard/scenes/{scene_id}/assets/selection")
-def clear_scene_asset(project_id: str, scene_id: str, session: Session = Depends(get_session)) -> dict:
+def clear_scene_asset(
+    project_id: str, scene_id: str, session: Session = Depends(get_session)
+) -> dict:
     project = _require_project(session, project_id)
     try:
         data = scene_workspace_service.clear_scene_assignments(session, project, scene_id)
@@ -168,7 +185,9 @@ def clear_scene_asset(project_id: str, scene_id: str, session: Session = Depends
 
 
 @router.post("/projects/{project_id}/storyboard/scenes/{scene_id}/assets/regenerate")
-def regenerate_scene_assets(project_id: str, scene_id: str, session: Session = Depends(get_session)) -> dict:
+def regenerate_scene_assets(
+    project_id: str, scene_id: str, session: Session = Depends(get_session)
+) -> dict:
     # Preserve the legacy URL while image generation becomes durable and cancellable.
     from app.api.tasks import enqueue_scene_image_job
 
@@ -178,5 +197,7 @@ def regenerate_scene_assets(project_id: str, scene_id: str, session: Session = D
 def _require_project(session: Session, project_id: str):
     project = project_service.get_project(session, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail={"success": False, "error": "Project not found"})
+        raise HTTPException(
+            status_code=404, detail={"success": False, "error": "Project not found"}
+        )
     return project

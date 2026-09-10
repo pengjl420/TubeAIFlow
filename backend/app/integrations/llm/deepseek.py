@@ -68,7 +68,15 @@ class DeepSeekClient:
                 return parsed
             except task_control.TaskCancelledError:
                 raise
-            except (httpx.HTTPError, OSError, KeyError, IndexError, TypeError, json.JSONDecodeError, RuntimeError) as exc:
+            except (
+                httpx.HTTPError,
+                OSError,
+                KeyError,
+                IndexError,
+                TypeError,
+                json.JSONDecodeError,
+                RuntimeError,
+            ) as exc:
                 last_error = exc
             finally:
                 if self.project_id:

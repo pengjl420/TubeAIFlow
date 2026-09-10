@@ -3,13 +3,22 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
+from sqlalchemy import delete
 from sqlmodel import Session, select
 
 from app.config import get_settings
 from app.models.project import Project
 from app.models.narration import Segment
 from app.models.batch import BatchItem, BatchJob
-from app.models.media import GeneratedImageVariant, MediaFile, MediaShot, SceneAssignment
+from app.models.media import (
+    GeneratedImageVariant,
+    MediaFile,
+    MediaShot,
+    SELECTION_STAGE_LOCAL_LANDSCAPE_MIX,
+    SELECTION_STAGE_MANUAL_LOCAL_ASSET,
+    SceneAssignment,
+    SceneCandidate,
+)
 from app.models.task import TaskRun
 from app.providers import ProviderCategory, provider_registry
 from app.models.storyboard import SceneRevision, SubtitleCue, VisualScene
@@ -642,6 +651,149 @@ def update_project_settings(
     session.refresh(project)
     write_project_descriptor(project)
     return project
+
+
+def update_video_workflow_settings(
+    session: Session,
+    project: Project,
+    *,
+    video_mode: str,
+    media_video_dir: str = "",
+    storyboard_mode: str = STORYBOARD_MODE_AI,
+    storyboard_transition_enabled: bool = True,
+) -> Project:
+    """Enable or adjust downstream video production without invalidating narration."""
+    resolved_video_mode = normalize_video_mode(video_mode, video_mode != VIDEO_MODE_NONE)
+    resolved_storyboard_mode = normalize_storyboard_mode(storyboard_mode)
+    video_directory: Path | None = None
+    if media_video_dir.strip():
+        video_directory = Path(media_video_dir).expanduser().resolve()
+        if not video_directory.is_dir():
+            raise ValueError("Video material directory does not exist")
+    if resolved_video_mode in {VIDEO_MODE_LANDSCAPE, VIDEO_MODE_AI_LANDSCAPE_MIX} and video_directory is None:
+        raise ValueError("Video material directory is required for the selected video mode")
+
+    config = load_project_config(project)
+    previous_values = {
+        "video_mode": get_project_video_mode(project),
+        "media_video_dir": str(config.get("media_video_dir") or ""),
+        "storyboard_mode": get_storyboard_mode(project),
+        "storyboard_transition_enabled": config.get(
+            "storyboard_transition_enabled", True
+        ),
+    }
+    next_values = {
+        "video_mode": resolved_video_mode,
+        "media_video_dir": str(video_directory) if video_directory else "",
+        "storyboard_mode": resolved_storyboard_mode,
+        "storyboard_transition_enabled": storyboard_transition_enabled,
+    }
+    if previous_values != next_values:
+        video_mode_changed = previous_values["video_mode"] != next_values["video_mode"]
+        media_directory_changed = (
+            previous_values["media_video_dir"] != next_values["media_video_dir"]
+        )
+        storyboard_changed = (
+            previous_values["storyboard_mode"] != next_values["storyboard_mode"]
+        )
+        _invalidate_video_workflow(
+            session,
+            project,
+            storyboard_changed=storyboard_changed,
+            assignment_policy=(
+                "all"
+                if video_mode_changed or storyboard_changed
+                else "local"
+                if media_directory_changed
+                else "none"
+            ),
+        )
+    config.update(
+        {
+            "include_video": resolved_video_mode != VIDEO_MODE_NONE,
+            **next_values,
+        }
+    )
+    project.config_json = json.dumps(config, ensure_ascii=False)
+    project.updated_at = utc_now_iso()
+    session.add(project)
+    session.commit()
+    session.refresh(project)
+    write_project_descriptor(project)
+    return project
+
+
+def _invalidate_video_workflow(
+    session: Session,
+    project: Project,
+    *,
+    storyboard_changed: bool,
+    assignment_policy: str,
+) -> None:
+    """Invalidate video-only state while preserving narration audio and subtitles."""
+    from app.services.storyboard import scene_workspace_service
+
+    scenes = list(
+        session.exec(
+            select(VisualScene)
+            .where(VisualScene.project_id == project.id)
+            .order_by(VisualScene.scene_index)
+        ).all()
+    )
+    if assignment_policy != "none" or storyboard_changed:
+        session.exec(
+            delete(SceneCandidate).where(SceneCandidate.project_id == project.id)
+        )
+    unlocked_scene_ids = [scene.id for scene in scenes if not scene.locked_visual]
+    if unlocked_scene_ids and assignment_policy != "none":
+        criteria = [
+            SceneAssignment.project_id == project.id,
+            SceneAssignment.scene_id.in_(unlocked_scene_ids),
+        ]
+        if assignment_policy == "local":
+            criteria.append(
+                SceneAssignment.selection_stage.in_(
+                    {
+                        SELECTION_STAGE_LOCAL_LANDSCAPE_MIX,
+                        SELECTION_STAGE_MANUAL_LOCAL_ASSET,
+                    }
+                )
+            )
+        session.exec(delete(SceneAssignment).where(*criteria))
+    for scene in scenes:
+        if storyboard_changed and not scene.locked_visual:
+            scene.storyboard_json = None
+            scene.confidence = None
+            scene.status = "draft"
+            scene.updated_at = utc_now_iso()
+            session.add(scene)
+        scene_workspace_service.invalidate_scene_outputs(project, scene)
+
+    settings = get_settings()
+    work_dir = get_project_work_dir(project, settings.workspace_dir)
+    for path in (
+        work_dir / "renders" / "scenes" / "manifest.json",
+        work_dir / "renders" / "visual_track.mp4",
+        work_dir / "reports" / "visual_track_report.json",
+        work_dir / "reports" / "quality_report.json",
+        work_dir / "timeline" / "timeline.json",
+        get_final_video_path(project, settings.workspace_dir),
+        get_final_fcpxml_path(project, settings.workspace_dir),
+        get_final_premiere_xml_path(project, settings.workspace_dir),
+        get_final_prproj_path(project, settings.workspace_dir),
+    ):
+        path.unlink(missing_ok=True)
+    scene_render_dir = work_dir / "renders" / "scenes"
+    if scene_render_dir.is_dir():
+        for path in scene_render_dir.glob("scene_*.mp4"):
+            path.unlink(missing_ok=True)
+
+    if project.status == "completed" or (
+        project.status == "failed"
+        and get_final_audio_path(project, settings.workspace_dir).is_file()
+        and get_final_srt_path(project, settings.workspace_dir).is_file()
+    ):
+        project.status = "narration_ready"
 
 
 def ensure_output_filename(session: Session, project: Project) -> Project:

@@ -149,6 +149,19 @@ export interface PremiereStatus {
   configured_path: string | null
 }
 
+export interface HardwareStatus {
+  rating: 'recommended' | 'compatible' | 'limited'
+  os: { name: string; release: string; version: string }
+  cpu: { name: string; logical_cores: number | null }
+  memory: { total_gb: number | null; load_percent?: number }
+  disk: { path: string; total_gb: number; free_gb: number }
+  gpus: Array<{ index: number; name: string; vram_total_mb: number | null; vram_free_mb: number | null; driver_version: string }>
+  cuda_version: string | null
+  ffmpeg_available: boolean
+  hardware_encoders: string[]
+  recommended_encoder: string
+}
+
 export async function getSystemSettings(): Promise<SystemSettings> {
   return unwrap<SystemSettings>(await apiClient.get('/settings'))
 }
@@ -195,6 +208,10 @@ export async function getFfmpegStatus(): Promise<FfmpegStatus> {
 
 export async function getPremiereStatus(): Promise<PremiereStatus> {
   return unwrap<PremiereStatus>(await apiClient.get('/settings/premiere/status'))
+}
+
+export async function getHardwareStatus(): Promise<HardwareStatus> {
+  return unwrap<HardwareStatus>(await apiClient.get('/settings/hardware/status'))
 }
 
 export async function installFfmpeg(): Promise<FfmpegInstallResult> {

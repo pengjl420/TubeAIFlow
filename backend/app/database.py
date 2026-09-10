@@ -12,7 +12,7 @@ from sqlmodel import Session, SQLModel, create_engine
 from app.config import DATABASE_PATH
 
 
-LATEST_SCHEMA_VERSION = 21
+LATEST_SCHEMA_VERSION = 22
 logger = logging.getLogger(__name__)
 
 
@@ -492,6 +492,10 @@ def _apply_migrations() -> None:
         # Version 16 installed triggers before scene_revisions existed. Re-run
         # trigger installation after all revision tables are present.
         21: [],
+        22: [
+            "DROP INDEX IF EXISTS uq_media_files_hash",
+            "CREATE INDEX IF NOT EXISTS ix_media_files_hash ON media_files (file_hash)",
+        ],
     }
     with engine.begin() as connection:
         connection.exec_driver_sql(

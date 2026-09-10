@@ -26,6 +26,7 @@ from app.models.media import (
 )
 from app.models.project import Project
 from app.models.storyboard import VisualScene
+from app.providers import ImageBatchRequest, ImageProviderRuntime, provider_registry
 from app.schemas.storyboard import StoryboardContent
 from app.shared.time import utc_now_iso
 
@@ -35,7 +36,7 @@ WORKFLOW_VERSION = "sdxl_single_file_v1"
 PROVIDER = "local_image_generation"
 
 
-def generate_project_images(session: Session, project: Project) -> dict:
+def _generate_project_images_local(session: Session, project: Project) -> dict:
     scenes = list(
         session.exec(
             select(VisualScene)
@@ -61,7 +62,7 @@ def generate_project_images(session: Session, project: Project) -> dict:
     )
 
 
-def regenerate_scene_images(
+def _regenerate_scene_images_local(
     session: Session,
     project: Project,
     scene_id: str,
@@ -80,6 +81,37 @@ def regenerate_scene_images(
         project,
         [scene],
         force=True,
+        regeneration_id=regeneration_id,
+    )
+
+
+def _runtime(project: Project) -> ImageProviderRuntime:
+    provider_id = "image.local_sdxl"
+    try:
+        config = json.loads(project.config_json or "{}")
+        provider_id = str(config.get("image_provider_id") or provider_id)
+    except (TypeError, json.JSONDecodeError):
+        pass
+    return provider_registry.runtime(provider_id, ImageProviderRuntime)
+
+
+def generate_project_images(session: Session, project: Project) -> dict:
+    bind_builtin_provider_runtimes()
+    return _generate_project_images_local(session, project)
+
+
+def regenerate_scene_images(
+    session: Session,
+    project: Project,
+    scene_id: str,
+    *,
+    regeneration_id: str,
+) -> dict:
+    bind_builtin_provider_runtimes()
+    return _regenerate_scene_images_local(
+        session,
+        project,
+        scene_id,
         regeneration_id=regeneration_id,
     )
 
@@ -220,22 +252,21 @@ def _generate(
     if jobs:
         batch_path = logs_dir / "image_generation_batch.json"
         progress_path = logs_dir / "image_generation_progress.json"
-        result_path.unlink(missing_ok=True)
-        write_json(batch_path, jobs)
-        write_json(progress_path, {"status": "queued", "completed": 0, "failed": 0, "total": len(jobs)})
-        with gpu_resource.exclusive_gpu(f"image-generation:project:{project.id}"):
-            _run_batch(
-                project,
-                python_path,
-                model_path,
-                config_dir,
-                batch_path,
-                result_path,
-                progress_path,
-                settings.image_generation_device,
-                settings.image_generation_dtype,
-                settings.image_generation_cpu_offload,
+        _runtime(project).generate_batch(
+            ImageBatchRequest(
+                project_id=project.id,
+                jobs=tuple(jobs),
+                batch_path=batch_path,
+                result_path=result_path,
+                progress_path=progress_path,
+                python_path=python_path,
+                model_path=model_path,
+                config_dir=config_dir,
+                device=settings.image_generation_device,
+                dtype=settings.image_generation_dtype,
+                cpu_offload=settings.image_generation_cpu_offload,
             )
+        )
         _apply_results(session, result_path)
 
     for variant in variants:
@@ -296,7 +327,7 @@ def _prompts(storyboard: StoryboardContent, configured_negative: str) -> tuple[s
 
 
 def _run_batch(
-    project: Project,
+    project_id: str,
     python_path: Path,
     model_path: Path,
     config_dir: Path,
@@ -322,12 +353,12 @@ def _run_batch(
         command.append("--cpu-offload")
     started = time.monotonic()
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    task_control.register_process(project.id, process)
+    task_control.register_process(project_id, process)
     try:
         stdout, stderr = process.communicate()
     finally:
-        task_control.unregister_process(project.id, process)
-    task_control.check_cancelled(project.id)
+        task_control.unregister_process(project_id, process)
+    task_control.check_cancelled(project_id)
     logger.info("Image generation runner completed in %.2fs", time.monotonic() - started)
     if process.returncode != 0:
         details = (stderr or stdout or "图片生成子进程失败").strip()
@@ -384,7 +415,26 @@ def _valid_generated_image(path: Path, width: int, height: int) -> bool:
 def _register_generated_image(session: Session, project: Project, variant: GeneratedImageVariant) -> None:
     path = Path(variant.path).resolve()
     file_hash = _sha256(path)
-    media_file = session.exec(select(MediaFile).where(MediaFile.file_hash == file_hash)).first()
+    media_file = session.exec(
+        select(MediaFile).where(
+            MediaFile.provider == PROVIDER,
+            MediaFile.provider_asset_id == variant.id,
+        )
+    ).first()
+    if media_file is None:
+        for candidate in session.exec(
+            select(MediaFile).where(
+                MediaFile.provider == PROVIDER,
+                MediaFile.file_hash == file_hash,
+            )
+        ).all():
+            try:
+                metadata = json.loads(candidate.metadata_json or "{}")
+            except json.JSONDecodeError:
+                continue
+            if metadata.get("project_id") == project.id:
+                media_file = candidate
+                break
     if media_file is None:
         with Image.open(path) as image:
             width, height = image.size
@@ -531,3 +581,33 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _generate_batch_local(request: ImageBatchRequest) -> None:
+    request.result_path.unlink(missing_ok=True)
+    write_json(request.batch_path, list(request.jobs))
+    write_json(
+        request.progress_path,
+        {"status": "queued", "completed": 0, "failed": 0, "total": len(request.jobs)},
+    )
+    with gpu_resource.exclusive_gpu(f"image-generation:project:{request.project_id}"):
+        _run_batch(
+            request.project_id,
+            request.python_path,
+            request.model_path,
+            request.config_dir,
+            request.batch_path,
+            request.result_path,
+            request.progress_path,
+            request.device,
+            request.dtype,
+            request.cpu_offload,
+        )
+
+
+def bind_builtin_provider_runtimes() -> None:
+    if not provider_registry.is_executable("image.local_sdxl"):
+        provider_registry.bind_runtime(
+            "image.local_sdxl",
+            ImageProviderRuntime(generate_batch=_generate_batch_local),
+        )

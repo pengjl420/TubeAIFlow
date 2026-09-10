@@ -52,6 +52,13 @@ class ProjectSettingsRequest(BaseModel):
     storyboard_mode: str = project_service.STORYBOARD_MODE_AI
 
 
+class VideoWorkflowSettingsRequest(BaseModel):
+    video_mode: str
+    media_video_dir: str = ""
+    storyboard_mode: str = project_service.STORYBOARD_MODE_AI
+    storyboard_transition_enabled: bool = True
+
+
 class DirectoryPickerRequest(BaseModel):
     initial_path: str | None = None
     title: str = "选择文件夹"
@@ -119,13 +126,14 @@ def create_project(
             storyboard_mode,
         )
         if voice_profile_id.strip():
-            return ok(project)
-        return ok(project_service.save_reference_audio(
+            return ok(project_service.get_project_response(session, project))
+        project = project_service.save_reference_audio(
                 session,
                 project,
                 reference_audio.file,
                 reference_audio.filename or "reference.wav",
-            ))
+            )
+        return ok(project_service.get_project_response(session, project))
     except (OSError, ValueError) as exc:
         if "project" in locals():
             session.delete(project)
@@ -265,12 +273,13 @@ def save_output_settings(
     if not project_service.is_project_editable(project):
         fail("只有未开始生成的项目可以修改", 409)
     try:
-        return ok(project_service.update_output_settings(
+        updated = project_service.update_output_settings(
             session,
             project,
             payload.output_dir,
             payload.output_filename,
-        ))
+        )
+        return ok(project_service.get_project_response(session, updated))
     except ValueError as exc:
         logger.exception("Failed to save output settings for project %s", project_id)
         fail(str(exc))
@@ -288,7 +297,7 @@ def save_project_settings(
     if not project_service.is_project_editable(project):
         fail("只有未开始生成的项目可以修改", 409)
     try:
-        return ok(project_service.update_project_settings(
+        updated = project_service.update_project_settings(
             session,
             project,
             payload.name,
@@ -304,7 +313,8 @@ def save_project_settings(
             payload.storyboard_transition_enabled,
             payload.segmentation_mode,
             payload.storyboard_mode,
-        ))
+        )
+        return ok(project_service.get_project_response(session, updated))
     except (OSError, ValueError) as exc:
         logger.exception("Failed to save settings for project %s", project_id)
         fail(str(exc))
@@ -352,9 +362,39 @@ def save_script(project_id: str, payload: ScriptRequest, session: Session = Depe
         fail("Project not found", 404)
     try:
         project = project_service.ensure_output_filename(session, project)
-        return ok(project_service.save_script(session, project, payload.text))
+        updated = project_service.save_script(session, project, payload.text)
+        return ok(project_service.get_project_response(session, updated))
     except ValueError as exc:
         logger.exception("Failed to save script for project %s", project_id)
+        fail(str(exc))
+
+
+@router.put("/projects/{project_id}/video-workflow-settings")
+def save_video_workflow_settings(
+    project_id: str,
+    payload: VideoWorkflowSettingsRequest,
+    session: Session = Depends(get_session),
+) -> dict:
+    project = project_service.get_project(session, project_id)
+    if not project:
+        fail("Project not found", 404)
+    from app.services.tasks import task_service
+
+    if task_service.get_active_project_task(session, project.id) or project.status in (
+        project_service.GENERATING_STATUSES
+    ):
+        fail("生成任务运行时不能修改视频配置", 409)
+    try:
+        updated = project_service.update_video_workflow_settings(
+            session,
+            project,
+            video_mode=payload.video_mode,
+            media_video_dir=payload.media_video_dir,
+            storyboard_mode=payload.storyboard_mode,
+            storyboard_transition_enabled=payload.storyboard_transition_enabled,
+        )
+        return ok(project_service.get_project_response(session, updated))
+    except (OSError, ValueError) as exc:
         fail(str(exc))
 
 
@@ -404,11 +444,10 @@ def save_reference_audio(
         fail("Project not found", 404)
     try:
         project = project_service.ensure_output_filename(session, project)
-        return ok(
-            project_service.save_reference_audio(
-                session, project, file.file, file.filename or "reference.wav"
-            )
+        updated = project_service.save_reference_audio(
+            session, project, file.file, file.filename or "reference.wav"
         )
+        return ok(project_service.get_project_response(session, updated))
     except ValueError as exc:
         logger.exception("Failed to save reference audio for project %s", project_id)
         fail(str(exc))
@@ -421,7 +460,8 @@ def create_segments(project_id: str, session: Session = Depends(get_session)) ->
         fail("Project not found", 404)
     try:
         project = project_service.ensure_output_filename(session, project)
-        return ok(project_service.create_segments(session, project))
+        updated = project_service.create_segments(session, project)
+        return ok(project_service.get_project_response(session, updated))
     except (RuntimeError, ValueError) as exc:
         logger.exception("Failed to create segments for project %s", project_id)
         fail(str(exc))

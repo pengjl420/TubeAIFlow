@@ -71,6 +71,13 @@ def get_ffmpeg_status() -> dict:
     return {"success": True, "data": system_settings_service.get_ffmpeg_status()}
 
 
+@router.get("/settings/hardware/status")
+def get_hardware_status() -> dict:
+    from app.services.settings import hardware_service
+
+    return {"success": True, "data": hardware_service.hardware_status()}
+
+
 @router.get("/settings/premiere/status")
 def get_premiere_status() -> dict:
     return {"success": True, "data": system_settings_service.get_premiere_status()}

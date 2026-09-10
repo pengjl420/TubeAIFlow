@@ -174,15 +174,6 @@ def _register_video(session: Session, path: Path) -> tuple[MediaFile, MediaShot]
     if not duration_ms or duration_ms <= 0:
         return None
     file_hash = _sha256(resolved)
-    media_file = session.exec(
-        select(MediaFile).where(MediaFile.file_hash == file_hash)
-    ).first()
-    if media_file:
-        shot = session.exec(
-            select(MediaShot).where(MediaShot.media_file_id == media_file.id)
-        ).first()
-        return (media_file, shot) if shot else None
-
     media_file = MediaFile(
         id=f"landscape_media_{provider_asset_id[:20]}",
         provider="local_landscape",
@@ -218,7 +209,10 @@ def _register_video(session: Session, path: Path) -> tuple[MediaFile, MediaShot]
             session.flush()
     except IntegrityError:
         media_file = session.exec(
-            select(MediaFile).where(MediaFile.file_hash == file_hash)
+            select(MediaFile).where(
+                MediaFile.provider == "local_landscape",
+                MediaFile.provider_asset_id == provider_asset_id,
+            )
         ).first()
         if not media_file:
             return None

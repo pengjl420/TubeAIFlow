@@ -441,6 +441,9 @@ class DatabaseMigrationTests(unittest.TestCase):
                 table_names = set(inspect(engine).get_table_names())
                 columns = {column["name"] for column in inspect(engine).get_columns("task_runs")}
                 indexes = {index["name"] for index in inspect(engine).get_indexes("task_runs")}
+                media_indexes = {
+                    index["name"] for index in inspect(engine).get_indexes("media_files")
+                }
                 with engine.connect() as connection:
                     versions = connection.exec_driver_sql(
                         "SELECT version FROM schema_migrations ORDER BY version"
@@ -457,6 +460,8 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertIn("request_json", columns)
         self.assertIn("uq_task_runs_active_project", indexes)
         self.assertNotIn("uq_task_runs_single_running", indexes)
+        self.assertNotIn("uq_media_files_hash", media_indexes)
+        self.assertIn("ix_media_files_hash", media_indexes)
         self.assertIn("subtitle_cues", table_names)
         self.assertIn("visual_scenes", table_names)
         self.assertIn("scene_revisions", table_names)
@@ -476,7 +481,7 @@ class DatabaseMigrationTests(unittest.TestCase):
             [
                 (1,), (2,), (3,), (4,), (5,), (6,), (7,), (8,), (9,), (10,),
                 (11,), (12,), (13,), (14,), (15,), (16,), (17,), (18,), (19,),
-                (20,), (21,),
+                (20,), (21,), (22,),
             ],
         )
 

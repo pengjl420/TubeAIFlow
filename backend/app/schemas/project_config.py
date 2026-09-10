@@ -18,6 +18,7 @@ class ProjectConfig(BaseModel):
     tts_engine: str = Field(default="index_tts", min_length=1)
     segmentation_mode: Literal["newline", "ai"] = "newline"
     storyboard_mode: Literal["ai", "segments"] = "ai"
+    image_provider_id: str = "image.local_sdxl"
     video_mode: Literal[
         "none", "landscape", "ai_generated_images", "ai_landscape_mix"
     ] = "none"
@@ -31,4 +32,3 @@ class ProjectConfig(BaseModel):
     height: int = Field(default=1080, ge=360, le=4320, multiple_of=2)
     aspect_ratio: str = "16:9"
     locked: bool = False
-

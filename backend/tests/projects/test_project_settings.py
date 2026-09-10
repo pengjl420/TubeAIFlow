@@ -5,11 +5,19 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.models.project import Project
 from app.models.narration import Segment
+from app.models.media import SceneAssignment, SceneCandidate
+from app.models.storyboard import VisualScene
 from app.models.task import TaskRun
+from app.infrastructure.project_layout import (
+    get_final_audio_path,
+    get_final_srt_path,
+    get_final_video_path,
+    get_project_work_dir,
+)
 from app.services.projects import project_service
 
 
@@ -186,6 +194,115 @@ class ProjectSettingsTests(unittest.TestCase):
             self.assertTrue(config["include_video"])
             self.assertEqual(config["video_mode"], "ai_generated_images")
             self.assertNotIn("media_video_dir", config)
+
+    def test_video_settings_can_be_enabled_without_invalidating_narration(self) -> None:
+        project = Project(
+            id="project-id",
+            name="Narration ready",
+            status="narration_ready",
+            config_json='{"include_video":false,"tts_engine":"qwen3_tts"}',
+        )
+
+        result = project_service.update_video_workflow_settings(
+            FakeSession(),
+            project,
+            video_mode="ai_generated_images",
+        )
+
+        config = json.loads(result.config_json or "{}")
+        self.assertEqual(result.status, "narration_ready")
+        self.assertEqual(config["tts_engine"], "qwen3_tts")
+        self.assertTrue(config["include_video"])
+        self.assertEqual(config["video_mode"], "ai_generated_images")
+
+    def test_video_setting_change_invalidates_only_downstream_video_state(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            settings = SimpleNamespace(workspace_dir=root / "workspace")
+            project = Project(
+                id="project-id",
+                name="Project",
+                output_dir=str(root / "output"),
+                status="completed",
+                config_json=json.dumps(
+                    {
+                        "output_filename": "project",
+                        "project_directory_name": "project-work",
+                        "include_video": True,
+                        "video_mode": "ai_generated_images",
+                        "storyboard_mode": "ai",
+                    }
+                ),
+            )
+            scene = VisualScene(
+                id="scene-id",
+                project_id=project.id,
+                scene_index=1,
+                start_ms=0,
+                end_ms=1_000,
+                narration="Narration",
+                storyboard_json='{"visual_summary":"old"}',
+            )
+            engine = create_engine("sqlite://")
+            SQLModel.metadata.create_all(engine)
+            with Session(engine) as session:
+                session.add(project)
+                session.add(scene)
+                session.add(
+                    SceneAssignment(
+                        id="assignment",
+                        project_id=project.id,
+                        scene_id=scene.id,
+                        media_shot_id="shot",
+                    )
+                )
+                session.add(
+                    SceneCandidate(
+                        id="candidate",
+                        project_id=project.id,
+                        scene_id=scene.id,
+                        media_shot_id="shot",
+                    )
+                )
+                session.commit()
+
+                audio_path = get_final_audio_path(project, settings.workspace_dir)
+                subtitle_path = get_final_srt_path(project, settings.workspace_dir)
+                video_path = get_final_video_path(project, settings.workspace_dir)
+                work_dir = get_project_work_dir(project, settings.workspace_dir)
+                for path in (
+                    audio_path,
+                    subtitle_path,
+                    video_path,
+                    work_dir / "renders" / "visual_track.mp4",
+                    work_dir / "reports" / "quality_report.json",
+                    work_dir / "timeline" / "timeline.json",
+                ):
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(b"artifact")
+
+                with (
+                    patch.object(project_service, "get_settings", return_value=settings),
+                    patch.object(project_service, "write_project_descriptor"),
+                ):
+                    result = project_service.update_video_workflow_settings(
+                        session,
+                        project,
+                        video_mode="ai_generated_images",
+                        storyboard_mode="segments",
+                    )
+
+                self.assertEqual(result.status, "narration_ready")
+                self.assertTrue(audio_path.is_file())
+                self.assertTrue(subtitle_path.is_file())
+                self.assertFalse(video_path.exists())
+                self.assertFalse((work_dir / "renders" / "visual_track.mp4").exists())
+                self.assertFalse((work_dir / "reports" / "quality_report.json").exists())
+                self.assertFalse((work_dir / "timeline" / "timeline.json").exists())
+                self.assertEqual(len(session.exec(select(SceneAssignment)).all()), 0)
+                self.assertEqual(len(session.exec(select(SceneCandidate)).all()), 0)
+                self.assertIsNone(session.get(VisualScene, scene.id).storyboard_json)
+            engine.dispose()
 
     def test_legacy_include_video_projects_resolve_to_landscape_mode(self) -> None:
         project = Project(

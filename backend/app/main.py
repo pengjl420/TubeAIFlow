@@ -13,6 +13,7 @@ from app.api import (
     batches,
     exports,
     local_video_merge,
+    media_library,
     projects,
     providers,
     quality,
@@ -28,6 +29,7 @@ from app.api import (
 )
 from app.database import create_db_and_tables, engine
 from app.services.avatar import avatar_service
+from app.services.image_generation import image_generation_service
 from app.services.narration import voice_generation_queue, voice_profile_service
 from app.services.rendering import local_video_merge_queue
 from app.services.settings import system_settings_service
@@ -37,6 +39,7 @@ from app.services.tasks import task_worker
 
 
 logger = logging.getLogger(__name__)
+image_generation_service.bind_builtin_provider_runtimes()
 
 
 @asynccontextmanager
@@ -130,6 +133,7 @@ app.include_router(avatars.router, prefix="/api")
 app.include_router(batches.router, prefix="/api")
 app.include_router(exports.router, prefix="/api")
 app.include_router(local_video_merge.router, prefix="/api")
+app.include_router(media_library.router, prefix="/api")
 app.include_router(projects.router, prefix="/api")
 app.include_router(providers.router, prefix="/api")
 app.include_router(quality.router, prefix="/api")

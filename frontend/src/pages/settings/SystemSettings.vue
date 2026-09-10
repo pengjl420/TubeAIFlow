@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute } from 'vue-router'
 import { AlertTriangle, CheckCircle2, ChevronDown, Cloud, Cpu, Download, RefreshCw, Route, Save } from 'lucide-vue-next'
 
@@ -10,12 +10,14 @@ import {
   getCleanupStatus,
   type CleanupStatus,
   getFfmpegStatus,
+  getHardwareStatus,
   getPremiereStatus,
   getSystemSettings,
   installFfmpeg,
   listLocalLLMModels,
   saveSystemSettings,
   type FfmpegStatus,
+  type HardwareStatus,
   type LocalLLMModel,
   type PremiereStatus,
   type SystemSettings,
@@ -28,6 +30,7 @@ const section = computed(() => String(route.params.section || 'general'))
 const settings = ref<SystemSettings | null>(null)
 const ffmpegStatus = ref<FfmpegStatus | null>(null)
 const premiereStatus = ref<PremiereStatus | null>(null)
+const hardwareStatus = ref<HardwareStatus | null>(null)
 const loading = ref(true)
 const saving = ref(false)
 const error = ref('')
@@ -136,12 +139,19 @@ async function load() {
       getFfmpegStatus(),
       getPremiereStatus(),
     ])
+    if (section.value === 'diagnostics') hardwareStatus.value = await getHardwareStatus()
     savedSnapshot.value = JSON.stringify(settings.value)
     await refreshCleanupStatus()
     await refreshLocalModels()
   } catch (err) { error.value = err instanceof Error ? err.message : '系统设置加载失败' }
   finally { loading.value = false }
 }
+
+watch(section, async value => {
+  if (value !== 'diagnostics' || hardwareStatus.value) return
+  try { hardwareStatus.value = await getHardwareStatus() }
+  catch (err) { error.value = err instanceof Error ? err.message : '本地环境检测失败' }
+})
 
 async function save() {
   if (!settings.value) return
@@ -236,6 +246,7 @@ function exportDiagnostics() {
     settings: settings.value,
     ffmpeg: ffmpegStatus.value,
     premiere: premiereStatus.value,
+    hardware: hardwareStatus.value,
   }, null, 2)
   const url = URL.createObjectURL(new Blob([report], { type: 'application/json' }))
   const link = document.createElement('a')
@@ -381,7 +392,25 @@ onBeforeUnmount(() => { if (modelTimer) clearInterval(modelTimer) })
 
       <article v-else-if="section === 'transitions'" class="setting-card"><h3>转场比例（{{ transitionTotal }}%）</h3><div class="transition-table"><label v-for="item in settings.storyboard_transition_effects" :key="item.name"><strong>{{ item.name }}</strong><input v-model.number="item.percentage" type="number" :aria-label="`${item.name} 转场比例`" :disabled="!item.enabled" /><input v-model="item.enabled" type="checkbox" :aria-label="`启用 ${item.name} 转场`" @change="normalizeTransitions" /></label></div><label class="field"><span>转场时长</span><input v-model.number="settings.storyboard_transition_duration_seconds" type="number" min="0.05" max="10" step="0.05" aria-label="转场时长（秒）" /></label></article>
 
-      <article v-else class="setting-card"><h3>{{ section === 'render' ? 'FFmpeg 状态' : '本地环境诊断' }}</h3><p>{{ ffmpegStatus?.installed ? ffmpegStatus.version : '未检测到 FFmpeg' }}</p><p>{{ ffmpegStatus?.ffmpeg_path || settings.ffmpeg_path }}</p><button v-if="!ffmpegStatus?.installed" @click="downloadFfmpeg">自动安装 FFmpeg</button></article>
+      <article v-else-if="section === 'render'" class="setting-card"><h3>FFmpeg 状态</h3><p>{{ ffmpegStatus?.installed ? ffmpegStatus.version : '未检测到 FFmpeg' }}</p><p>{{ ffmpegStatus?.ffmpeg_path || settings.ffmpeg_path }}</p><button v-if="!ffmpegStatus?.installed" @click="downloadFfmpeg">自动安装 FFmpeg</button></article>
+
+      <div v-else class="setting-stack diagnostics-stack">
+        <div v-if="hardwareStatus" class="setting-metrics four">
+          <article><div><small>运行能力</small><strong :class="`rating-${hardwareStatus.rating}`">{{ hardwareStatus.rating === 'recommended' ? '推荐配置' : hardwareStatus.rating === 'compatible' ? '兼容配置' : '受限配置' }}</strong><em>{{ hardwareStatus.ffmpeg_available ? 'FFmpeg 可用' : '需要安装 FFmpeg' }}</em></div></article>
+          <article><div><small>内存</small><strong>{{ hardwareStatus.memory.total_gb ?? '未知' }} GB</strong><em v-if="hardwareStatus.memory.load_percent !== undefined">当前负载 {{ hardwareStatus.memory.load_percent }}%</em></div></article>
+          <article><div><small>工作盘可用空间</small><strong>{{ hardwareStatus.disk.free_gb }} GB</strong><em>{{ hardwareStatus.disk.path }}</em></div></article>
+          <article><div><small>推荐编码器</small><strong>{{ hardwareStatus.recommended_encoder }}</strong><em>{{ hardwareStatus.hardware_encoders.length ? '已检测硬件编码' : '软件编码回退' }}</em></div></article>
+        </div>
+        <article v-if="hardwareStatus" class="setting-card diagnostic-table">
+          <h3>本地运行环境</h3>
+          <div class="table-head"><span>组件</span><span>状态</span><span>详情</span></div>
+          <p><strong>操作系统</strong><b class="ok">可用</b><em>{{ hardwareStatus.os.name }} {{ hardwareStatus.os.release }} · {{ hardwareStatus.os.version }}</em></p>
+          <p><strong>CPU</strong><b class="ok">{{ hardwareStatus.cpu.logical_cores ?? '—' }} 线程</b><em>{{ hardwareStatus.cpu.name }}</em></p>
+          <p><strong>GPU / CUDA</strong><b :class="hardwareStatus.gpus.length ? 'ok' : 'warn'">{{ hardwareStatus.gpus.length ? `${hardwareStatus.gpus.length} 张` : '未检测' }}</b><em>{{ hardwareStatus.gpus.length ? hardwareStatus.gpus.map(gpu => `${gpu.name} · ${gpu.vram_total_mb ?? '未知'} MB`).join('；') : '仍可使用 CPU 与软件编码' }}{{ hardwareStatus.cuda_version ? ` · CUDA ${hardwareStatus.cuda_version}` : '' }}</em></p>
+          <p><strong>硬件编码</strong><b :class="hardwareStatus.hardware_encoders.length ? 'ok' : 'warn'">{{ hardwareStatus.hardware_encoders.length ? '可用' : '回退' }}</b><em>{{ hardwareStatus.hardware_encoders.join('、') || 'libx264' }}</em></p>
+          <p><strong>FFmpeg</strong><b :class="hardwareStatus.ffmpeg_available ? 'ok' : 'bad'">{{ hardwareStatus.ffmpeg_available ? '可用' : '缺失' }}</b><em>{{ ffmpegStatus?.ffmpeg_path || settings.ffmpeg_path }}</em></p>
+        </article>
+      </div>
 
       <footer class="settings-actions">
         <div class="settings-save-state" :class="{ dirty }"><CheckCircle2 v-if="!dirty" :size="16" /><AlertTriangle v-else :size="16" /><span>{{ dirty ? '修改尚未保存' : lastSavedAt ? `${lastSavedAt.toLocaleTimeString()} 已保存` : '当前设置已同步' }}</span></div>

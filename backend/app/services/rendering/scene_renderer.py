@@ -9,7 +9,11 @@ from app.infrastructure.ffmpeg import run_ffmpeg
 from app.infrastructure.project_layout import ensure_project_dirs, get_project_work_dir
 from app.models.media import (
     LIBRARY_ROLE_LOCAL_LANDSCAPE,
+    LIBRARY_ROLE_LOCAL_SEMANTIC,
     LIBRARY_ROLE_PROJECT_GENERATED,
+    SELECTION_STAGE_GENERATED_IMAGE,
+    SELECTION_STAGE_LOCAL_LANDSCAPE_MIX,
+    SELECTION_STAGE_MANUAL_LOCAL_ASSET,
     MediaFile,
     MediaShot,
     SceneAssignment,
@@ -201,7 +205,7 @@ def validate_visual_assignment(
     shot: MediaShot,
     media_file: MediaFile,
 ) -> None:
-    if assignment.selection_stage == "local_landscape_mix":
+    if assignment.selection_stage == SELECTION_STAGE_LOCAL_LANDSCAPE_MIX:
         if (
             shot.library_role != LIBRARY_ROLE_LOCAL_LANDSCAPE
             or media_file.library_role != LIBRARY_ROLE_LOCAL_LANDSCAPE
@@ -209,7 +213,15 @@ def validate_visual_assignment(
         ):
             raise ValueError("Mixed-mode landscape assignment is not a registered local video")
         return
-    if assignment.selection_stage != "generated_image":
+    if assignment.selection_stage == SELECTION_STAGE_MANUAL_LOCAL_ASSET:
+        if (
+            shot.library_role != LIBRARY_ROLE_LOCAL_SEMANTIC
+            or media_file.library_role != LIBRARY_ROLE_LOCAL_SEMANTIC
+            or media_file.media_type not in {"image", "video"}
+        ):
+            raise ValueError("手动选择的本地素材不是已注册的图片或视频")
+        return
+    if assignment.selection_stage != SELECTION_STAGE_GENERATED_IMAGE:
         raise ValueError(f"不支持的画面来源：{assignment.selection_stage}")
     if (
         shot.library_role != LIBRARY_ROLE_PROJECT_GENERATED

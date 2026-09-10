@@ -5,6 +5,11 @@ from app.shared.time import utc_now_iso
 
 LIBRARY_ROLE_PROJECT_GENERATED = "project_generated"
 LIBRARY_ROLE_LOCAL_LANDSCAPE = "local_landscape"
+LIBRARY_ROLE_LOCAL_SEMANTIC = "local_semantic"
+
+SELECTION_STAGE_GENERATED_IMAGE = "generated_image"
+SELECTION_STAGE_LOCAL_LANDSCAPE_MIX = "local_landscape_mix"
+SELECTION_STAGE_MANUAL_LOCAL_ASSET = "manual_local_asset"
 
 
 class MediaFile(SQLModel, table=True):
@@ -67,7 +72,7 @@ class SceneAssignment(SQLModel, table=True):
     pan_direction: str = "center"
     crop_anchor: str = "center"
     transition: str = "cut"
-    selection_stage: str = Field(default="generated_image", index=True)
+    selection_stage: str = Field(default=SELECTION_STAGE_GENERATED_IMAGE, index=True)
     created_at: str = Field(default_factory=utc_now_iso)
     updated_at: str = Field(default_factory=utc_now_iso)
 
@@ -97,3 +102,35 @@ class GeneratedImageVariant(SQLModel, table=True):
     media_file_id: str | None = Field(default=None, index=True)
     created_at: str = Field(default_factory=utc_now_iso)
     updated_at: str = Field(default_factory=utc_now_iso)
+
+
+class MediaKeyframe(SQLModel, table=True):
+    __tablename__ = "media_keyframes"
+
+    id: str = Field(primary_key=True)
+    media_shot_id: str = Field(index=True)
+    frame_index: int
+    timestamp_ms: int
+    path: str
+    created_at: str = Field(default_factory=utc_now_iso)
+
+
+class SceneCandidate(SQLModel, table=True):
+    __tablename__ = "scene_candidates"
+
+    id: str = Field(primary_key=True)
+    project_id: str = Field(index=True)
+    scene_id: str = Field(index=True)
+    media_shot_id: str = Field(index=True)
+    source: str = "local"
+    query: str = ""
+    semantic_score: float = 0.0
+    text_score: float = 0.0
+    tag_score: float = 0.0
+    technical_score: float = 0.0
+    total_score: float = 0.0
+    status: str = Field(default="LOW_RELEVANCE", index=True)
+    conflicts_json: str = "[]"
+    selection_stage: str = Field(default="local_semantic", index=True)
+    is_fallback: bool = False
+    created_at: str = Field(default_factory=utc_now_iso)

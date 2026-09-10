@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { AudioLines, CircleUserRound, FolderKanban, Merge, Mic2, Settings2 } from 'lucide-vue-next'
+import { AudioLines, CircleUserRound, FolderKanban, Layers3, Merge, Mic2, Settings2 } from 'lucide-vue-next'
 import AppFeedback from './components/common/AppFeedback.vue'
 import { getEngineHealth } from './api/client'
 
 const route = useRoute()
 const navigation = [
-  { label: '生产工作区', items: [{ to: '/projects', label: '项目', icon: FolderKanban }] },
+  { label: '生产工作区', items: [{ to: '/projects', label: '项目', icon: FolderKanban }, { to: '/batches', label: '批量生产', icon: Layers3 }] },
   { label: '独立工具', items: [
     { to: '/voice-generation', label: '配音生成', icon: Mic2 },
     { to: '/local-video-merge', label: '素材拼接', icon: Merge },

@@ -4,7 +4,9 @@ from app.models.local_video_merge import LocalVideoMergeTask
 from app.models.media import (
     GeneratedImageVariant,
     MediaFile,
+    MediaKeyframe,
     MediaShot,
+    SceneCandidate,
     SceneAssignment,
 )
 from app.models.narration import Segment, VoiceProfile
@@ -23,7 +25,9 @@ __all__ = [
     "GeneratedImageVariant",
     "LocalVideoMergeTask",
     "MediaFile",
+    "MediaKeyframe",
     "MediaShot",
+    "SceneCandidate",
     "Project",
     "Segment",
     "SceneAssignment",

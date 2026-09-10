@@ -169,5 +169,26 @@ def _register_builtin_providers() -> None:
     for provider in llm_providers:
         provider_registry.register(provider)
 
+    provider_registry.register(
+        ProviderMetadata(
+            id="image.local_sdxl",
+            category=ProviderCategory.IMAGE,
+            display_name="Local SDXL",
+            model_id="sdxl-single-file",
+            capabilities=frozenset(
+                {
+                    ProviderCapability.LOCAL_INFERENCE,
+                    ProviderCapability.NEGATIVE_PROMPT,
+                    ProviderCapability.SEED,
+                }
+            ),
+            configuration_fields=(
+                "image_generation_model_path",
+                "image_generation_config_dir",
+                "image_generation_device",
+            ),
+        )
+    )
+
 
 _register_builtin_providers()

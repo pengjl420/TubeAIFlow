@@ -3,10 +3,12 @@ import unittest
 from app.providers import (
     ProviderCapability,
     ProviderCategory,
+    ImageProviderRuntime,
     TTSProviderRuntime,
     provider_registry,
 )
 from app.services.narration import tts_service  # noqa: F401 - binds executable adapters
+from app.services.image_generation import image_generation_service  # noqa: F401
 
 
 class ProviderRegistryTests(unittest.TestCase):
@@ -39,6 +41,15 @@ class ProviderRegistryTests(unittest.TestCase):
                 provider_registry.runtime(provider.id, TTSProviderRuntime),
                 TTSProviderRuntime,
             )
+
+    def test_local_image_provider_has_executable_runtime_adapter(self) -> None:
+        image_generation_service.bind_builtin_provider_runtimes()
+        providers = provider_registry.list(ProviderCategory.IMAGE)
+        self.assertEqual([item.id for item in providers], ["image.local_sdxl"])
+        self.assertIsInstance(
+            provider_registry.runtime("image.local_sdxl", ImageProviderRuntime),
+            ImageProviderRuntime,
+        )
 
 
 if __name__ == "__main__":

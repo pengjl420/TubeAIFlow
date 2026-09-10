@@ -9,6 +9,10 @@ export interface Project {
   config?: {
     reference_audio_filename?: string
     voice_profile_name?: string
+    voice_profile_id?: string
+    reference_audio_text?: string
+    output_filename?: string
+    media_video_dir?: string
     tts_engine?: string
     include_video?: boolean
     video_mode?: VideoGenerationMode

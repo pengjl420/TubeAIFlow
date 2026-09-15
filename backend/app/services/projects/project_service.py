@@ -229,7 +229,7 @@ def get_storyboard_mode(project: Project) -> str:
 
 
 def normalize_video_output_format(value: str | None) -> str:
-    normalized = str(value or VIDEO_OUTPUT_MP4).strip().lower()
+    normalized = str(value or VIDEO_OUTPUT_PRPROJ).strip().lower()
     if normalized not in SUPPORTED_VIDEO_OUTPUT_FORMATS:
         raise ValueError(f"Unsupported video output format: {value}")
     return normalized
@@ -237,9 +237,10 @@ def normalize_video_output_format(value: str | None) -> str:
 
 def get_video_output_format(project: Project) -> str:
     configured = load_project_config(project).get("video_output_format")
-    # The simplified flow always delivers a rendered MP4.
+    # Project delivery is a linked, editable Premiere project for import into
+    # supported Jianying/CapCut desktop versions.
     if configured is None:
-        return VIDEO_OUTPUT_MP4
+        return VIDEO_OUTPUT_PRPROJ
     return normalize_video_output_format(configured)
 
 
@@ -626,6 +627,7 @@ def update_project_settings(
     storyboard_transition_enabled: bool = True,
     segmentation_mode: str | None = None,
     storyboard_mode: str | None = None,
+    visual_enrichment_mode: str = "auto",
 ) -> Project:
     project_name = name.strip()
     if not project_name:
@@ -655,11 +657,12 @@ def update_project_settings(
         raise ValueError("CosyVoice requires the reference audio transcript")
 
     resolved_video_mode = normalize_video_mode(video_mode, include_video)
-    # Video delivery is controlled solely by video_mode/include_video. Editable
-    # project files are explicit, project-level exports and never replace MP4.
-    resolved_video_output_format = VIDEO_OUTPUT_MP4
+    resolved_video_output_format = VIDEO_OUTPUT_PRPROJ
     resolved_segmentation_mode = normalize_segmentation_mode(segmentation_mode)
     resolved_storyboard_mode = normalize_storyboard_mode(storyboard_mode)
+    resolved_visual_enrichment_mode = str(visual_enrichment_mode or "auto").strip().lower()
+    if resolved_visual_enrichment_mode not in {"auto", "advanced", "basic"}:
+        raise ValueError("Unsupported visual enrichment mode")
     include_video = resolved_video_mode != VIDEO_MODE_NONE
     video_directory: Path | None = None
     if (
@@ -701,6 +704,7 @@ def update_project_settings(
     config["storyboard_transition_enabled"] = bool(storyboard_transition_enabled)
     config["segmentation_mode"] = resolved_segmentation_mode
     config["storyboard_mode"] = resolved_storyboard_mode
+    config["visual_enrichment_mode"] = resolved_visual_enrichment_mode
     if video_directory:
         config["media_video_dir"] = str(video_directory)
     else:
@@ -757,10 +761,14 @@ def update_video_workflow_settings(
     media_video_dir: str = "",
     storyboard_mode: str = STORYBOARD_MODE_AI,
     storyboard_transition_enabled: bool = True,
+    visual_enrichment_mode: str = "auto",
 ) -> Project:
     """Enable or adjust downstream video production without invalidating narration."""
     resolved_video_mode = normalize_video_mode(video_mode, video_mode != VIDEO_MODE_NONE)
     resolved_storyboard_mode = normalize_storyboard_mode(storyboard_mode)
+    resolved_visual_enrichment_mode = str(visual_enrichment_mode or "auto").strip().lower()
+    if resolved_visual_enrichment_mode not in {"auto", "advanced", "basic"}:
+        raise ValueError("Unsupported visual enrichment mode")
     video_directory: Path | None = None
     if media_video_dir.strip():
         video_directory = Path(media_video_dir).expanduser().resolve()
@@ -778,12 +786,14 @@ def update_video_workflow_settings(
         "media_video_dir": str(config.get("media_video_dir") or ""),
         "storyboard_mode": get_storyboard_mode(project),
         "storyboard_transition_enabled": config.get("storyboard_transition_enabled", True),
+        "visual_enrichment_mode": str(config.get("visual_enrichment_mode") or "auto"),
     }
     next_values = {
         "video_mode": resolved_video_mode,
         "media_video_dir": str(video_directory) if video_directory else "",
         "storyboard_mode": resolved_storyboard_mode,
         "storyboard_transition_enabled": storyboard_transition_enabled,
+        "visual_enrichment_mode": resolved_visual_enrichment_mode,
     }
     if previous_values != next_values:
         video_mode_changed = previous_values["video_mode"] != next_values["video_mode"]

@@ -19,8 +19,12 @@ class ProjectConfig(BaseModel):
     segmentation_mode: Literal["newline", "ai"] = "newline"
     storyboard_mode: Literal["ai", "segments"] = "ai"
     image_provider_id: str = "image.local_sdxl"
+    visual_enrichment_mode: Literal["auto", "advanced", "basic"] = "auto"
+    visual_enrichment_config_path: str = "config/production_5060ti.yaml"
     video_mode: Literal["none", "landscape", "ai_generated_images", "ai_landscape_mix"] = "none"
-    video_output_format: Literal["mp4", "fcpxml", "prproj", "editable_both"] = "mp4"
+    # Keep legacy values readable so existing project descriptors still migrate/load.
+    # New writes are normalized to prproj by project_service.
+    video_output_format: Literal["mp4", "fcpxml", "prproj", "editable_both"] = "prproj"
     include_video: bool = False
     output_filename: str | None = None
     project_directory_name: str | None = None

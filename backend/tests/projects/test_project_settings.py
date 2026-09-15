@@ -553,15 +553,15 @@ class ProjectSettingsTests(unittest.TestCase):
             project_service.VIDEO_MODE_LANDSCAPE,
         )
 
-    def test_output_defaults_to_mp4(self) -> None:
+    def test_output_defaults_to_prproj(self) -> None:
         legacy = Project(id="legacy", name="Legacy", config_json="{}")
         self.assertEqual(
             project_service.normalize_video_output_format(None),
-            project_service.VIDEO_OUTPUT_MP4,
+            project_service.VIDEO_OUTPUT_PRPROJ,
         )
         self.assertEqual(
             project_service.get_video_output_format(legacy),
-            project_service.VIDEO_OUTPUT_MP4,
+            project_service.VIDEO_OUTPUT_PRPROJ,
         )
 
     def test_storyboard_defaults_to_semantic_grouping(self) -> None:

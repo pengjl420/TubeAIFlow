@@ -12,15 +12,13 @@ from app.infrastructure.ffmpeg import ensure_ffmpeg_available
 from app.config import get_settings
 from app.infrastructure.project_layout import (
     get_final_audio_path,
+    get_final_prproj_path,
     get_final_srt_path,
-    get_final_video_path,
     get_output_stem,
     get_project_work_dir,
 )
 from app.services.narration import audio_service, srt_service, timeline_service, tts_service
-from app.services.projects import project_service
-from app.services.quality import qa_service
-from app.services.rendering import rough_cut_service
+from app.services.projects import project_service, prproj_export_service
 from app.workflows import video_synthesis
 from app.workflows.engine import WorkflowContext, WorkflowGraph, WorkflowStep
 from app.domain.states import ResourceClass
@@ -60,6 +58,8 @@ def run_project_generation(
     """Run one project's generation stages from its persisted checkpoint."""
     ensure_ffmpeg_available()
     stage = current_stage or "segmenting"
+    if stage == "video" or stage in video_synthesis.LEGACY_RENDER_STAGES:
+        stage = "project_export"
     supported_stages = {*_NARRATION_GRAPH.stages, "completed", *video_synthesis.STAGES}
     if stage not in supported_stages:
         raise ValueError(f"Unknown generation stage: {stage}")
@@ -153,18 +153,9 @@ def _subtitles_step(context: WorkflowContext) -> str:
     return _stage_after_narration(context.project, context.include_video)
 
 
-def _video_step(context: WorkflowContext) -> str:
-    try:
-        with task_control.controlled(context.project.id, "video"):
-            rough_cut_service.compose_video(context.session, context.project)
-    except task_control.TaskCancelledError:
-        raise
-    except (OSError, RuntimeError, ValueError) as exc:
-        try:
-            rough_cut_service.mark_video_progress_failed(context.project, str(exc))
-        except OSError:
-            pass
-        raise
+def _project_export_step(context: WorkflowContext) -> str:
+    with task_control.controlled(context.project.id, "project_export"):
+        prproj_export_service.export_project_prproj(context.session, context.project)
     return "completed"
 
 
@@ -197,11 +188,11 @@ _NARRATION_GRAPH = WorkflowGraph(
             output_artifacts=("subtitle_timeline",),
         ),
         WorkflowStep(
-            "video",
-            _video_step,
-            resource_class=ResourceClass.FFMPEG,
+            "project_export",
+            _project_export_step,
+            resource_class=ResourceClass.CPU,
             depends_on=("subtitles",),
-            output_artifacts=("final_video",),
+            output_artifacts=("prproj",),
         ),
     )
 )
@@ -214,7 +205,7 @@ def _stage_after_narration(project: Project, include_video: bool) -> str:
         else project_service.VIDEO_MODE_NONE
     )
     if video_mode == project_service.VIDEO_MODE_LANDSCAPE:
-        return "video"
+        return "project_export"
     if video_mode in {
         project_service.VIDEO_MODE_AI_GENERATED_IMAGES,
         project_service.VIDEO_MODE_AI_LANDSCAPE_MIX,
@@ -242,8 +233,9 @@ def _artifact_exists(session: Session, project: Project, name: str) -> bool:
         return get_final_audio_path(project, get_settings().workspace_dir).is_file()
     if name == "subtitle_timeline":
         return _narration_outputs_exist(session, project)
-    if name == "final_video":
-        return get_final_video_path(project, get_settings().workspace_dir).is_file()
+    if name == "prproj":
+        path = get_final_prproj_path(project, get_settings().workspace_dir)
+        return path.is_file() and path.stat().st_size > 0
     return False
 
 
@@ -281,8 +273,10 @@ def initial_stage(session: Session, project: Project, include_video: bool) -> st
         if _final_output_exists(project):
             return _stage_after_existing_output(project)
         return video_synthesis.initial_stage(session, project.id)
-    if next_stage == "video" and get_final_video_path(project, settings.workspace_dir).is_file():
-        return _stage_after_existing_output(project)
+    if next_stage == "project_export" and get_final_prproj_path(
+        project, settings.workspace_dir
+    ).is_file():
+        return "completed"
     return next_stage
 
 
@@ -308,9 +302,8 @@ def _narration_outputs_exist(session: Session, project: Project) -> bool:
 
 
 def _final_output_exists(project: Project) -> bool:
-    return get_final_video_path(project, get_settings().workspace_dir).is_file()
+    return get_final_prproj_path(project, get_settings().workspace_dir).is_file()
 
 
 def _stage_after_existing_output(project: Project) -> str:
-    report = qa_service.read_report(project)
-    return "completed" if report and report.get("passed") else "quality_check"
+    return "completed" if _final_output_exists(project) else "project_export"

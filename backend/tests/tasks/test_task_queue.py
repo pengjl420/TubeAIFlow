@@ -311,7 +311,7 @@ class TaskQueueTests(unittest.TestCase):
                 session,
                 project,
                 include_video=True,
-                current_stage="visual_track",
+                current_stage="project_export",
             )
 
             self.assertEqual(project.status, "video_in_progress")

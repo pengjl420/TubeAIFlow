@@ -43,13 +43,14 @@ class ProjectSettingsRequest(BaseModel):
     media_video_dir: str = ""
     include_video: bool = False
     video_mode: str | None = None
-    video_output_format: str | None = project_service.VIDEO_OUTPUT_MP4
+    video_output_format: str | None = project_service.VIDEO_OUTPUT_PRPROJ
     tts_engine: str = project_service.DEFAULT_TTS_ENGINE
     reference_audio_text: str = ""
     voice_profile_id: str = ""
     storyboard_transition_enabled: bool = True
     segmentation_mode: str = project_service.SEGMENTATION_MODE_NEWLINE
     storyboard_mode: str = project_service.STORYBOARD_MODE_AI
+    visual_enrichment_mode: str = "auto"
 
 
 class VideoWorkflowSettingsRequest(BaseModel):
@@ -57,6 +58,7 @@ class VideoWorkflowSettingsRequest(BaseModel):
     media_video_dir: str = ""
     storyboard_mode: str = project_service.STORYBOARD_MODE_AI
     storyboard_transition_enabled: bool = True
+    visual_enrichment_mode: str = "auto"
 
 
 class DirectoryPickerRequest(BaseModel):
@@ -86,13 +88,14 @@ def create_project(
     media_video_dir: str = Form(""),
     include_video: bool = Form(False),
     video_mode: str | None = Form(None),
-    video_output_format: str | None = Form(project_service.VIDEO_OUTPUT_MP4),
+    video_output_format: str | None = Form(project_service.VIDEO_OUTPUT_PRPROJ),
     tts_engine: str = Form(project_service.DEFAULT_TTS_ENGINE),
     reference_audio_text: str = Form(""),
     voice_profile_id: str = Form(""),
     storyboard_transition_enabled: bool = Form(True),
     segmentation_mode: str = Form(project_service.SEGMENTATION_MODE_NEWLINE),
     storyboard_mode: str = Form(project_service.STORYBOARD_MODE_AI),
+    visual_enrichment_mode: str = Form("auto"),
     session: Session = Depends(get_session),
 ) -> dict:
     if not name.strip():
@@ -124,6 +127,7 @@ def create_project(
             storyboard_transition_enabled,
             segmentation_mode,
             storyboard_mode,
+            visual_enrichment_mode,
         )
         if voice_profile_id.strip():
             return ok(project_service.get_project_response(session, project))
@@ -315,6 +319,7 @@ def save_project_settings(
             payload.storyboard_transition_enabled,
             payload.segmentation_mode,
             payload.storyboard_mode,
+            payload.visual_enrichment_mode,
         )
         return ok(project_service.get_project_response(session, updated))
     except (OSError, ValueError) as exc:
@@ -402,6 +407,7 @@ def save_video_workflow_settings(
             media_video_dir=payload.media_video_dir,
             storyboard_mode=payload.storyboard_mode,
             storyboard_transition_enabled=payload.storyboard_transition_enabled,
+            visual_enrichment_mode=payload.visual_enrichment_mode,
         )
         return ok(project_service.get_project_response(session, updated))
     except (OSError, ValueError) as exc:

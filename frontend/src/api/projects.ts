@@ -25,6 +25,7 @@ export interface ProjectSettingsInput {
   storyboardTransitionEnabled: boolean
   segmentationMode: SegmentationMode
   storyboardMode: StoryboardMode
+  visualEnrichmentMode: 'auto' | 'advanced' | 'basic'
 }
 
 export interface ProjectTask {
@@ -63,6 +64,8 @@ export interface ProjectOutputs {
   final_audio_exists: boolean
   final_srt_exists: boolean
   final_video_exists: boolean
+  final_prproj_path: string
+  final_prproj_exists: boolean
   files: ProjectOutput[]
 }
 
@@ -101,36 +104,6 @@ export interface LocalAssetCandidate {
   conflicts: string[]
 }
 
-export interface TimelineClip {
-  id: string
-  scene_id?: string
-  scene_index?: number
-  asset_path?: string | null
-  media_type?: string
-  text?: string
-  start_ms: number
-  end_ms: number
-  sequence_index?: number
-  display_duration_ms?: number | null
-  source_start_ms?: number | null
-  source_end_ms?: number | null
-  playback_speed?: number
-  motion_type?: string
-  zoom_start?: number
-  zoom_end?: number
-  pan_direction?: string
-  crop_anchor?: string
-  transition?: string
-}
-
-export interface TimelineData {
-  format_version: number
-  project_id: string
-  duration_ms: number
-  fps: number
-  tracks: Array<{ id: string; type: string; clips: TimelineClip[] }>
-}
-
 export async function listProjects(): Promise<Project[]> {
   return unwrap<Project[]>(await apiClient.get('/projects'))
 }
@@ -150,6 +123,7 @@ export async function createProject(input: CreateProjectInput): Promise<Project>
   form.append('media_video_dir', input.mediaVideoDir || '')
   form.append('segmentation_mode', input.segmentationMode || 'ai')
   form.append('storyboard_mode', input.storyboardMode || 'ai')
+  form.append('visual_enrichment_mode', 'auto')
   return unwrap<Project>(await apiClient.post('/projects', form))
 }
 
@@ -161,13 +135,14 @@ export async function updateProjectSettings(projectId: string, input: ProjectSet
     media_video_dir: input.mediaVideoDir,
     include_video: input.videoMode !== 'none',
     video_mode: input.videoMode,
-    video_output_format: 'mp4',
+    video_output_format: 'prproj',
     tts_engine: input.ttsEngine,
     reference_audio_text: input.referenceAudioText,
     voice_profile_id: input.voiceProfileId,
     storyboard_transition_enabled: input.storyboardTransitionEnabled,
     segmentation_mode: input.segmentationMode,
     storyboard_mode: input.storyboardMode,
+    visual_enrichment_mode: input.visualEnrichmentMode,
   }))
 }
 
@@ -177,6 +152,7 @@ export async function updateProjectVideoSettings(projectId: string, input: Proje
     media_video_dir: input.mediaVideoDir,
     storyboard_mode: input.storyboardMode,
     storyboard_transition_enabled: input.storyboardTransitionEnabled,
+    visual_enrichment_mode: input.visualEnrichmentMode,
   }))
 }
 
@@ -305,21 +281,6 @@ export async function enqueueScenePreviewJob(projectId: string, sceneId: string)
   return unwrap<ProjectTask>(await apiClient.post(`/projects/${projectId}/jobs/scenes/${encodeURIComponent(sceneId)}/preview`))
 }
 
-export async function enqueueTimelinePreviewJob(
-  projectId: string,
-  startMs: number,
-  durationMs: 30000 | 60000,
-): Promise<ProjectTask> {
-  return unwrap<ProjectTask>(await apiClient.post(`/projects/${projectId}/jobs/preview`, {
-    start_ms: startMs,
-    duration_ms: durationMs,
-  }))
-}
-
-export async function enqueueFinalRenderJob(projectId: string): Promise<ProjectTask> {
-  return unwrap<ProjectTask>(await apiClient.post(`/projects/${projectId}/jobs/final-render`))
-}
-
 export async function exportProjectFcpxml(projectId: string): Promise<Record<string, unknown>> {
   return unwrap<Record<string, unknown>>(await apiClient.post(`/projects/${projectId}/exports/fcpxml`))
 }
@@ -342,18 +303,6 @@ export async function resumeProjectJob(projectId: string, jobId: string): Promis
 
 export async function cancelProjectJob(projectId: string, jobId: string): Promise<ProjectTask> {
   return unwrap<ProjectTask>(await apiClient.post(`/projects/${projectId}/jobs/${jobId}/cancel`))
-}
-
-export async function getTimelineEditor(projectId: string): Promise<TimelineData> {
-  return unwrap<TimelineData>(await apiClient.get(`/projects/${projectId}/timeline/editor`))
-}
-
-export async function updateTimelineClip(
-  projectId: string,
-  clipId: string,
-  values: Partial<TimelineClip>,
-): Promise<TimelineData> {
-  return unwrap<TimelineData>(await apiClient.put(`/projects/${projectId}/timeline/clips/${clipId}`, values))
 }
 
 export function projectOutputUrl(projectId: string, path: string, download = false): string {

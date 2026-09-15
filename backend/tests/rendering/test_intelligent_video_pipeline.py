@@ -26,7 +26,7 @@ class GeneratedImageVideoPipelineTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Unsupported video generation mode"):
                 video_synthesis.run_video_synthesis(session, project, "storyboard", lambda _: None)
 
-    def test_generated_images_continue_directly_to_scene_render(self) -> None:
+    def test_generated_images_continue_directly_to_project_export(self) -> None:
         with Session(self.engine) as session:
             project = Project(
                 id="p1", name="Project", config_json='{"video_mode":"ai_generated_images"}'
@@ -40,21 +40,17 @@ class GeneratedImageVideoPipelineTests(unittest.TestCase):
             with (
                 patch.object(video_synthesis, "ensure_ffmpeg_available"),
                 patch.object(video_synthesis, "_artifact_exists", return_value=True),
+                patch.object(video_synthesis.advanced_visual_workflow, "enrich_project_visuals"),
                 patch.object(video_synthesis.image_generation_service, "generate_project_images"),
                 patch.object(video_synthesis.image_assignment_service, "assign_generated_images"),
-                patch.object(video_synthesis.scene_renderer, "render_all_scenes"),
-                patch.object(video_synthesis.visual_track_composer, "compose_visual_track"),
-                patch.object(video_synthesis.final_renderer, "compose_final_video"),
-                patch.object(
-                    video_synthesis.qa_service, "run_quality_check", return_value={"passed": True}
-                ),
+                patch.object(video_synthesis.prproj_export_service, "export_project_prproj"),
             ):
                 video_synthesis.run_video_synthesis(
                     session, project, "image_generation", changed.append
                 )
             self.assertEqual(
                 changed,
-                ["scene_render", "visual_track", "final_render", "quality_check", "completed"],
+                ["project_export", "completed"],
             )
 
 

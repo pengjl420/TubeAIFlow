@@ -2,14 +2,13 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute } from 'vue-router'
 import { CheckCircle2, CircleStop, Download, FileAudio, FileText, Folder, History, Info, Loader2, Lock, Play, RefreshCw, Save, Settings2, Video, X } from 'lucide-vue-next'
-import { cancelProjectTask, enqueueSceneStoryboardJob, exportProjectFcpxml, exportProjectPrproj, getProject, getProjectOutputs, getProjectScenes, getProjectScript, getProjectTask, getSceneRevisions, projectOutputUrl, restoreSceneRevision, saveProjectScript, startProjectWorkflow, updateProjectScene, updateProjectSettings, updateProjectVideoSettings, type ProjectOutputs, type ProjectSettingsInput, type ProjectTask } from '../../api/projects'
+import { cancelProjectTask, enqueueSceneStoryboardJob, exportProjectPrproj, getProject, getProjectOutputs, getProjectScenes, getProjectScript, getProjectTask, getSceneRevisions, projectOutputUrl, restoreSceneRevision, saveProjectScript, startProjectWorkflow, updateProjectScene, updateProjectSettings, updateProjectVideoSettings, type ProjectOutputs, type ProjectSettingsInput, type ProjectTask } from '../../api/projects'
 import { listVoices, type VoiceProfile } from '../../api/voices'
 import { selectDirectory } from '../../api/settings'
 import type { Project, VideoGenerationMode } from '../../types/project'
 import type { SceneRevision, VisualScene } from '../../types/storyboard'
 import { confirmAction, usePageFeedback } from '../../services/feedback'
 import SceneVisualWorkspace from '../../components/projects/SceneVisualWorkspace.vue'
-import TimelineWorkspace from '../../components/projects/TimelineWorkspace.vue'
 
 const route = useRoute()
 const projectId = computed(() => String(route.params.projectId))
@@ -45,7 +44,7 @@ const scriptCharacters = computed(() => script.value.trim().length)
 const estimatedMinutes = computed(() => Math.max(0, Math.round(scriptCharacters.value / 260)))
 const stages = [
   ['script', '脚本'], ['tts', '配音'], ['subtitles', '字幕'], ['storyboard', '分镜'],
-  ['image_generation', '视觉'], ['visual_track', '时间轴'], ['quality_check', '质量'], ['completed', '导出'],
+  ['image_generation', '视觉'], ['project_export', '工程导出'], ['completed', '完成'],
 ]
 const stageDetails: Record<string, { description: string, output: string }> = {
   script: { description: '导入并规范化完整逐字稿，作为后续所有阶段的唯一文本来源。', output: 'clean_script.txt' },
@@ -53,9 +52,8 @@ const stageDetails: Record<string, { description: string, output: string }> = {
   subtitles: { description: '将旁白时间与原稿对齐，生成可复核的字幕时间线。', output: 'subtitle/final.srt' },
   storyboard: { description: '根据语义和音频节奏规划 Scene、镜头类型与视觉意图。', output: 'scenes/storyboard.json' },
   image_generation: { description: '匹配本地素材或生成候选视觉，并保留 Provider 与 Prompt。', output: 'assets/generated' },
-  visual_track: { description: '将旁白、字幕和视觉素材组织到可渲染时间轴。', output: 'timeline.json' },
-  quality_check: { description: '检查重复画面、字幕、音频和视觉匹配风险。', output: 'quality/report.json' },
-  completed: { description: '完成最终渲染并汇总所有可交付产物。', output: 'renders/final' },
+  project_export: { description: '将旁白、字幕、Scene 与素材链接转换为可继续深度剪辑的真实 PRPROJ 工程。', output: '*.prproj' },
+  completed: { description: '交付 PRPROJ、WAV、SRT 与关联素材；不在 TubeAiFolw 内编辑时间线。', output: '*.prproj' },
 }
 const selectedStageDetail = computed(() => stageDetails[selectedStage.value])
 const projectEditable = computed(() => ['created', 'script_imported', 'segmented'].includes(project.value?.status || ''))
@@ -214,6 +212,9 @@ async function openProjectSettings() {
       storyboardTransitionEnabled: config.storyboard_transition_enabled !== false,
       segmentationMode: config.segmentation_mode === 'newline' ? 'newline' : 'ai',
       storyboardMode: config.storyboard_mode === 'segments' ? 'segments' : 'ai',
+      visualEnrichmentMode: ['advanced', 'basic'].includes(String(config.visual_enrichment_mode))
+        ? config.visual_enrichment_mode as 'advanced' | 'basic'
+        : 'auto',
     }
     showSettings.value = true
   } catch (reason) { error.value = reason instanceof Error ? reason.message : '读取项目设置失败' }
@@ -246,13 +247,12 @@ async function saveSettings() {
   finally { saving.value = false }
 }
 
-async function createEditableExport(format: 'fcpxml' | 'prproj') {
+async function createEditableExport() {
   operating.value = true
   try {
-    if (format === 'fcpxml') await exportProjectFcpxml(projectId.value)
-    else await exportProjectPrproj(projectId.value)
+    await exportProjectPrproj(projectId.value)
     await load(true)
-    message.value = format === 'fcpxml' ? 'FCPXML 已生成' : 'Premiere PRPROJ 已生成'
+    message.value = 'PRPROJ 剪辑工程已生成'
   } catch (reason) { error.value = reason instanceof Error ? reason.message : '生成可编辑工程失败' }
   finally { operating.value = false }
 }
@@ -310,14 +310,12 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', handleBeforeU
     <nav class="stage-bar" aria-label="项目生产阶段"><button v-for="([id, label], index) in stages" :key="id" type="button" :class="{ reached: stageReached(id), current: task?.stage === id, selected: selectedStage === id }" :aria-current="task?.stage === id ? 'step' : undefined" @click="selectedStage = id"><span><CheckCircle2 v-if="stageReached(id)" :size="14" /><b v-else>{{ index + 1 }}</b></span><small>{{ label }}</small></button></nav>
     <section class="stage-context" aria-live="polite"><Info :size="17" /><div><strong>{{ stages.find(item => item[0] === selectedStage)?.[1] }}</strong><span>{{ selectedStageDetail.description }}</span></div><small>预期产物：{{ selectedStageDetail.output }}</small></section>
 
-    <div class="workspace-grid" :class="{ 'visual-mode': selectedStage === 'image_generation' || selectedStage === 'visual_track' }">
+    <div class="workspace-grid" :class="{ 'visual-mode': selectedStage === 'image_generation' }">
       <SceneVisualWorkspace v-if="sceneDraft && selectedStage === 'image_generation'" :project-id="projectId" :scene="sceneDraft" />
-      <TimelineWorkspace v-if="sceneDraft && selectedStage === 'visual_track'" :project-id="projectId" :scene="sceneDraft" />
       <aside class="scene-sidebar"><h2>Scene <small v-if="scenes.length">{{ scenes.length }}</small></h2><div v-if="scenes.length" class="scene-list"><button v-for="scene in scenes" :key="scene.id" type="button" :class="{ selected: scene.id === selectedSceneId }" @click="selectScene(scene)"><span><b>{{ String(scene.scene_index).padStart(2, '0') }}</b><small>{{ formatTime(scene.start_ms) }}–{{ formatTime(scene.end_ms) }}</small></span><strong>{{ scene.storyboard?.visual_summary || scene.narration }}</strong><em>{{ scene.status === 'reviewed' ? '已复核' : scene.status === 'generated' ? '已生成' : '草稿' }}</em></button></div><div v-else class="scene-empty"><FileText :size="28" /><strong>{{ task && stageReached('storyboard') ? 'Scene 数据准备中' : '从脚本开始' }}</strong><span>{{ task && stageReached('storyboard') ? 'Storyboard 完成后将在这里显示 Scene。' : '保存脚本并运行工作流后，Scene 会在这里逐步生成。' }}</span></div><div class="input-summary"><span>脚本字符</span><strong>{{ scriptCharacters.toLocaleString() }}</strong><span>预计旁白</span><strong>约 {{ estimatedMinutes }} 分钟</strong></div></aside>
       <main v-if="selectedStage === 'storyboard' && sceneDraft?.storyboard" class="scene-editor"><div class="panel-head"><div><h1>Scene {{ sceneDraft.scene_index }}</h1><p>{{ formatTime(sceneDraft.start_ms) }}–{{ formatTime(sceneDraft.end_ms) }} · {{ ((sceneDraft.end_ms - sceneDraft.start_ms) / 1000).toFixed(1) }} 秒 · 版本 {{ sceneDraft.version }}</p></div><button :disabled="saving || active || !sceneDirty || !sceneDraft.narration.trim()" @click="saveScene"><Save :size="14" />{{ saving ? '保存中…' : sceneDirty ? '保存 Scene' : '已保存' }}</button></div><div class="lock-bar"><Lock :size="14" /><label><input v-model="sceneDraft.locked_text" type="checkbox" />锁定文本</label><label><input v-model="sceneDraft.locked_audio" type="checkbox" />锁定音频</label><label><input v-model="sceneDraft.locked_visual" type="checkbox" />锁定视觉</label><small>锁定内容不会被自动工作流覆盖</small></div><div class="scene-form"><label class="wide"><span>旁白文本</span><textarea v-model="sceneDraft.narration" rows="5" :disabled="selectedScene?.locked_text" /></label><label><span>视觉类型</span><input v-model="sceneDraft.storyboard.visual_type" :disabled="selectedScene?.locked_visual" /></label><label><span>推荐来源</span><select v-model="sceneDraft.storyboard.recommended_source" :disabled="selectedScene?.locked_visual"><option value="stock_video">Stock Video</option><option value="archive">Archive</option><option value="generated_image">AI Image</option><option value="generated_video">AI Video</option><option value="chart">Chart</option><option value="map">Map</option><option value="timeline">Timeline</option><option value="document">Document</option><option value="text_card">Text Card</option></select></label><label class="wide"><span>视觉摘要</span><textarea v-model="sceneDraft.storyboard.visual_summary" rows="3" :disabled="selectedScene?.locked_visual" /></label><label><span>场景分类</span><input v-model="sceneDraft.storyboard.scene_category" :disabled="selectedScene?.locked_visual" /></label><label><span>情绪</span><input v-model="sceneDraft.storyboard.mood" :disabled="selectedScene?.locked_visual" /></label><label class="wide"><span>素材搜索词</span><input v-model="sceneDraft.storyboard.primary_query" :disabled="selectedScene?.locked_visual" /></label><label class="wide"><span>图片 Prompt</span><textarea v-model="sceneDraft.storyboard.image_prompt" rows="5" :disabled="selectedScene?.locked_visual" /></label><label class="wide"><span>Negative Prompt</span><textarea v-model="sceneDraft.storyboard.negative_prompt" rows="3" :disabled="selectedScene?.locked_visual" /></label></div><div class="editor-footer"><span :class="{ dirty: sceneDirty }">{{ sceneDirty ? '有未保存修改' : 'Scene 已保存' }}</span><span>置信度 {{ Math.round((sceneDraft.confidence || 0) * 100) }}% · 事实风险 {{ sceneDraft.storyboard.fact_risk }}</span></div></main>
       <main v-else-if="selectedStage === 'storyboard'" class="scene-editor-empty"><FileText :size="34" /><h1>暂无可编辑 Scene</h1><p>先运行到 Storyboard 阶段，系统会根据旁白节奏生成 Scene。</p></main>
-      <main v-else-if="selectedStage === 'completed'" class="delivery-panel"><div><CheckCircle2 :size="34" /><h1>项目交付</h1><p>下载最终产物，或生成可继续剪辑的工程文件。</p></div><a v-if="outputs?.final_video_exists" :href="projectOutputUrl(projectId, outputs.final_video_path, true)"><Video :size="17" />下载最终 MP4</a><a v-if="outputs?.final_audio_exists" :href="projectOutputUrl(projectId, outputs.final_audio_path, true)"><FileAudio :size="17" />下载完整旁白</a><a v-if="outputs?.final_srt_exists" :href="projectOutputUrl(projectId, outputs.final_srt_path, true)"><FileText :size="17" />下载 SRT 字幕</a><button :disabled="operating" @click="createEditableExport('fcpxml')"><Download :size="17" />生成 FCPXML</button><button :disabled="operating" @click="createEditableExport('prproj')"><Download :size="17" />生成 Premiere PRPROJ</button></main>
-      <main v-else-if="selectedStage === 'quality_check'" class="scene-editor-empty"><FileText :size="34" /><h1>技术检查结果</h1><p>现阶段保留已有音视频、字幕与渲染完整性检查；报告可在右侧产物中打开。</p></main>
+      <main v-else-if="selectedStage === 'project_export' || selectedStage === 'completed'" class="delivery-panel"><div><CheckCircle2 :size="34" /><h1>剪辑工程交付</h1><p>PRPROJ 链接旁白、字幕和已选择素材，可导入支持 PR 工程导入的剪映专业版继续深度剪辑；移动项目后可能需要重新链接素材。</p></div><a v-if="outputs?.final_prproj_exists" :href="projectOutputUrl(projectId, outputs.final_prproj_path, true)"><Download :size="17" />下载 PRPROJ 工程</a><a v-if="outputs?.final_audio_exists" :href="projectOutputUrl(projectId, outputs.final_audio_path, true)"><FileAudio :size="17" />下载完整旁白</a><a v-if="outputs?.final_srt_exists" :href="projectOutputUrl(projectId, outputs.final_srt_path, true)"><FileText :size="17" />下载 SRT 字幕</a><button v-if="!outputs?.final_prproj_exists" :disabled="operating" @click="createEditableExport"><Download :size="17" />生成 PRPROJ 工程</button></main>
       <main v-else><div class="panel-head"><div><h1>脚本</h1><p>导入完整逐字稿。TTS 分段与字幕切分会保持解耦。</p></div><button :disabled="saving || !script.trim() || active || !scriptDirty" @click="saveScript">{{ saving ? '保存中…' : scriptDirty ? '保存脚本' : '已保存' }}</button></div><textarea v-model="script" :disabled="active" placeholder="在此粘贴 20～60 分钟长视频逐字稿…" /><div class="editor-footer"><span :class="{ dirty: scriptDirty }">{{ scriptDirty ? '有未保存修改' : '脚本已保存' }}</span><span>{{ scriptCharacters.toLocaleString() }} 字符 · 约 {{ estimatedMinutes }} 分钟旁白</span></div><div class="privacy">默认仅在本机处理。当前项目不会自动上传完整脚本到第三方服务。</div></main>
       <aside class="inspector"><template v-if="selectedStage === 'storyboard' && sceneDraft"><h2><History :size="13" />版本历史 <small>当前 v{{ sceneDraft.version }}</small></h2><div class="revision-list"><button v-for="revision in revisions" :key="revision.id" type="button" :disabled="operating" @click="restoreRevision(revision)"><span>版本 {{ revision.version }}</span><small>{{ new Date(revision.created_at).toLocaleString() }}</small></button><span v-if="!revisions.length">保存修改后会在这里保留历史版本</span></div></template><template v-else><h2>项目状态</h2><dl><dt>生命周期</dt><dd>{{ projectStatusLabel(project.status) }}</dd><dt>任务状态</dt><dd>{{ taskStatusLabel(task?.status) }}</dd><dt>当前阶段</dt><dd>{{ stages.find(item => item[0] === task?.stage)?.[1] || '尚未开始' }}</dd><dt>排队位置</dt><dd>{{ task?.queue_position || '—' }}</dd></dl><p v-if="task?.error_message" class="task-error">{{ task.error_message }}</p></template><h2>产物 <small v-if="outputs?.files.length">{{ outputs.files.length }}</small></h2><div class="artifacts"><a v-for="file in outputs?.files" :key="file.path" :href="projectOutputUrl(projectId, file.path)" target="_blank" rel="noopener"><FileAudio v-if="file.name.endsWith('.wav')" :size="14" /><Video v-else-if="file.name.endsWith('.mp4')" :size="14" /><FileText v-else :size="14" />{{ file.relative_path }}</a><span v-if="!outputs?.files.length">暂无输出文件</span></div></aside>
     </div>

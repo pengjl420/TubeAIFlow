@@ -10,12 +10,8 @@ from app.workflows.builtin import (
     SCENE_IMAGE_WORKFLOW_ID,
     SCENE_PREVIEW_WORKFLOW_ID,
     SCENE_STORYBOARD_WORKFLOW_ID,
-    TIMELINE_PREVIEW_WORKFLOW_ID,
-    FINAL_RENDER_WORKFLOW_ID,
     ASSET_SCAN_WORKFLOW_ID,
     QUALITY_CHECK_WORKFLOW_ID,
-    ROUGH_CUT_WORKFLOW_ID,
-    VISUAL_TRACK_WORKFLOW_ID,
     ensure_builtin_workflows_registered,
 )
 from app.workflows.registry import workflow_registry
@@ -33,17 +29,13 @@ class WorkflowArchitectureTests(unittest.TestCase):
                 SCENE_IMAGE_WORKFLOW_ID,
                 SCENE_PREVIEW_WORKFLOW_ID,
                 SCENE_STORYBOARD_WORKFLOW_ID,
-                TIMELINE_PREVIEW_WORKFLOW_ID,
-                FINAL_RENDER_WORKFLOW_ID,
                 ASSET_SCAN_WORKFLOW_ID,
                 QUALITY_CHECK_WORKFLOW_ID,
-                ROUGH_CUT_WORKFLOW_ID,
-                VISUAL_TRACK_WORKFLOW_ID,
             },
         )
         narration = workflow_registry.get(NARRATION_WORKFLOW_ID)
         self.assertIn("segmenting", narration.stages)
-        self.assertIn("quality_check", narration.video_stages)
+        self.assertIn("project_export", narration.video_stages)
         self.assertEqual(narration.resource_class("tts"), ResourceClass.GPU)
         self.assertEqual(narration.resource_class("audio_merge"), ResourceClass.FFMPEG)
 

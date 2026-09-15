@@ -13,12 +13,8 @@ VIDEO_WORKFLOW_ID = "video_synthesis"
 SCENE_IMAGE_WORKFLOW_ID = "scene_image_regeneration"
 SCENE_PREVIEW_WORKFLOW_ID = "scene_preview_render"
 SCENE_STORYBOARD_WORKFLOW_ID = "scene_storyboard_regeneration"
-TIMELINE_PREVIEW_WORKFLOW_ID = "timeline_preview_render"
-FINAL_RENDER_WORKFLOW_ID = "final_render"
 ASSET_SCAN_WORKFLOW_ID = "asset_library_scan"
 QUALITY_CHECK_WORKFLOW_ID = "quality_check"
-VISUAL_TRACK_WORKFLOW_ID = "visual_track_render"
-ROUGH_CUT_WORKFLOW_ID = "rough_cut_render"
 
 
 def ensure_builtin_workflows_registered() -> None:
@@ -36,11 +32,10 @@ def ensure_builtin_workflows_registered() -> None:
                         "tts",
                         "audio_merge",
                         "subtitles",
-                        "video",
                         *video_synthesis.STAGES,
                     }
                 ),
-                video_stages=frozenset({"video", *video_synthesis.STAGES}),
+                video_stages=frozenset(video_synthesis.STAGES),
                 produces_video=False,
                 run=_run_narration_workflow,
                 initial_stage=_initial_narration_stage,
@@ -105,34 +100,6 @@ def ensure_builtin_workflows_registered() -> None:
             )
         )
     registered = {item.id for item in workflow_registry.list()}
-    if TIMELINE_PREVIEW_WORKFLOW_ID not in registered:
-        from app.workflows import render_jobs
-
-        workflow_registry.register(
-            WorkflowRuntime(
-                id=TIMELINE_PREVIEW_WORKFLOW_ID,
-                stages=frozenset({"render"}),
-                video_stages=frozenset({"render"}),
-                produces_video=False,
-                run=render_jobs.run_timeline_preview_job,
-                initial_stage=lambda _session, _project, _include_video: "render",
-                resource_class=lambda _stage: ResourceClass.FFMPEG,
-            )
-        )
-    if FINAL_RENDER_WORKFLOW_ID not in registered:
-        from app.workflows import render_jobs
-
-        workflow_registry.register(
-            WorkflowRuntime(
-                id=FINAL_RENDER_WORKFLOW_ID,
-                stages=frozenset({"scene_render", "visual_track", "final_render"}),
-                video_stages=frozenset({"scene_render", "visual_track", "final_render"}),
-                produces_video=True,
-                run=render_jobs.run_final_render_job,
-                initial_stage=lambda _session, _project, _include_video: "scene_render",
-                resource_class=lambda _stage: ResourceClass.FFMPEG,
-            )
-        )
     if ASSET_SCAN_WORKFLOW_ID not in registered:
         from app.workflows import maintenance_jobs
 
@@ -158,35 +125,6 @@ def ensure_builtin_workflows_registered() -> None:
                 produces_video=False,
                 run=maintenance_jobs.run_quality_check_job,
                 initial_stage=lambda _session, _project, _include_video: "analyze",
-                resource_class=lambda _stage: ResourceClass.FFMPEG,
-            )
-        )
-    registered = {item.id for item in workflow_registry.list()}
-    if VISUAL_TRACK_WORKFLOW_ID not in registered:
-        from app.workflows import render_jobs
-
-        workflow_registry.register(
-            WorkflowRuntime(
-                id=VISUAL_TRACK_WORKFLOW_ID,
-                stages=frozenset({"render"}),
-                video_stages=frozenset({"render"}),
-                produces_video=True,
-                run=render_jobs.run_visual_track_job,
-                initial_stage=lambda _session, _project, _include_video: "render",
-                resource_class=lambda _stage: ResourceClass.FFMPEG,
-            )
-        )
-    if ROUGH_CUT_WORKFLOW_ID not in registered:
-        from app.workflows import render_jobs
-
-        workflow_registry.register(
-            WorkflowRuntime(
-                id=ROUGH_CUT_WORKFLOW_ID,
-                stages=frozenset({"render"}),
-                video_stages=frozenset({"render"}),
-                produces_video=True,
-                run=render_jobs.run_rough_cut_job,
-                initial_stage=lambda _session, _project, _include_video: "render",
                 resource_class=lambda _stage: ResourceClass.FFMPEG,
             )
         )

@@ -20,6 +20,7 @@ export interface Project {
     storyboard_transition_enabled?: boolean
     segmentation_mode?: SegmentationMode
     storyboard_mode?: StoryboardMode
+    visual_enrichment_mode?: 'auto' | 'advanced' | 'basic'
     [key: string]: unknown
   }
   created_at: string
@@ -32,6 +33,8 @@ export interface Project {
 }
 
 export type VideoGenerationMode = 'none' | 'landscape' | 'ai_generated_images' | 'ai_landscape_mix'
+// Legacy values remain readable for projects created before PRPROJ became the
+// only user-facing delivery format.
 export type VideoOutputFormat = 'mp4' | 'fcpxml' | 'prproj' | 'editable_both'
 export type SegmentationMode = 'newline' | 'ai'
 export type StoryboardMode = 'ai' | 'segments'

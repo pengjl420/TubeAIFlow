@@ -55,11 +55,25 @@ def _generate_project_images_local(session: Session, project: Project) -> dict:
             )
         ).all()
     }
-    return _generate(
-        session,
-        project,
-        [scene for scene in scenes if scene.id not in assigned_scene_ids],
-    )
+    advanced_scene_ids = {
+        item.scene_id
+        for item in session.exec(
+            select(GeneratedImageVariant).where(
+                GeneratedImageVariant.project_id == project.id,
+                GeneratedImageVariant.workflow_version == "advanced_visual_pipeline_v1",
+                GeneratedImageVariant.status == "completed",
+            )
+        ).all()
+        if Path(item.path).is_file()
+    }
+    pending_scenes = [
+        scene
+        for scene in scenes
+        if scene.id not in assigned_scene_ids and scene.id not in advanced_scene_ids
+    ]
+    if not pending_scenes:
+        return {"status": "completed", "generated": 0, "reused": len(advanced_scene_ids)}
+    return _generate(session, project, pending_scenes)
 
 
 def _regenerate_scene_images_local(
@@ -114,6 +128,17 @@ def regenerate_scene_images(
         scene_id,
         regeneration_id=regeneration_id,
     )
+
+
+def register_generated_variant(
+    session: Session,
+    project: Project,
+    variant: GeneratedImageVariant,
+    *,
+    provider: str = PROVIDER,
+) -> None:
+    """Register an image produced by another local Image Provider in the shared asset model."""
+    _register_generated_image(session, project, variant, provider=provider)
 
 
 def _generate(
@@ -424,20 +449,24 @@ def _valid_generated_image(path: Path, width: int, height: int) -> bool:
 
 
 def _register_generated_image(
-    session: Session, project: Project, variant: GeneratedImageVariant
+    session: Session,
+    project: Project,
+    variant: GeneratedImageVariant,
+    *,
+    provider: str = PROVIDER,
 ) -> None:
     path = Path(variant.path).resolve()
     file_hash = _sha256(path)
     media_file = session.exec(
         select(MediaFile).where(
-            MediaFile.provider == PROVIDER,
+            MediaFile.provider == provider,
             MediaFile.provider_asset_id == variant.id,
         )
     ).first()
     if media_file is None:
         for candidate in session.exec(
             select(MediaFile).where(
-                MediaFile.provider == PROVIDER,
+                MediaFile.provider == provider,
                 MediaFile.file_hash == file_hash,
             )
         ).all():
@@ -453,7 +482,7 @@ def _register_generated_image(
             width, height = image.size
         media_file = MediaFile(
             id=f"generated_media_{hashlib.sha1(variant.id.encode()).hexdigest()[:20]}",
-            provider=PROVIDER,
+            provider=provider,
             provider_asset_id=variant.id,
             path=str(path),
             filename=path.name,

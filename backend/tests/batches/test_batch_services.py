@@ -123,7 +123,6 @@ class GenerationCheckpointTests(unittest.TestCase):
             patch.object(narration_generation.audio_service, "merge_project_audio") as merge_audio,
             patch.object(narration_generation.timeline_service, "build_timeline") as build_timeline,
             patch.object(narration_generation.srt_service, "create_full_srt") as create_srt,
-            patch.object(narration_generation.rough_cut_service, "compose_video") as compose_video,
         ):
             narration_generation.run_project_generation(
                 session,
@@ -138,7 +137,6 @@ class GenerationCheckpointTests(unittest.TestCase):
         merge_audio.assert_called_once_with(session, project)
         build_timeline.assert_called_once_with(session, project)
         create_srt.assert_called_once()
-        compose_video.assert_not_called()
         self.assertEqual(stages, ["subtitles", "completed"])
 
     def test_workflow_generates_timeline_and_subtitles_after_audio_merge(self) -> None:
@@ -169,7 +167,9 @@ class GenerationCheckpointTests(unittest.TestCase):
         with (
             patch.object(narration_generation.timeline_service, "build_timeline"),
             patch.object(narration_generation.srt_service, "create_full_srt"),
-            patch.object(narration_generation.rough_cut_service, "compose_video") as compose_video,
+            patch.object(
+                narration_generation.prproj_export_service, "export_project_prproj"
+            ) as export_prproj,
             patch.object(
                 narration_generation.video_synthesis, "run_video_synthesis"
             ) as smart_video,
@@ -178,11 +178,11 @@ class GenerationCheckpointTests(unittest.TestCase):
                 session, project, "subtitles", True, stages.append
             )
 
-        compose_video.assert_called_once_with(session, project)
+        export_prproj.assert_called_once_with(session, project)
         smart_video.assert_not_called()
-        self.assertEqual(stages, ["video", "completed"])
+        self.assertEqual(stages, ["project_export", "completed"])
 
-    def test_landscape_legacy_fcpxml_setting_renders_mp4(self) -> None:
+    def test_landscape_legacy_fcpxml_setting_exports_prproj(self) -> None:
         session = MagicMock()
         project = Project(
             id="p1",
@@ -191,13 +191,15 @@ class GenerationCheckpointTests(unittest.TestCase):
         )
         stages: list[str] = []
         with (
-            patch.object(narration_generation.rough_cut_service, "compose_video") as compose_video,
+            patch.object(
+                narration_generation.prproj_export_service, "export_project_prproj"
+            ) as export_prproj,
         ):
             narration_generation.run_project_generation(
-                session, project, "video", True, stages.append
+                session, project, "project_export", True, stages.append
             )
 
-        compose_video.assert_called_once_with(session, project)
+        export_prproj.assert_called_once_with(session, project)
         self.assertEqual(stages, ["completed"])
 
     def test_audio_only_legacy_fcpxml_setting_does_not_export_video_or_project(self) -> None:
@@ -239,7 +241,6 @@ class GenerationCheckpointTests(unittest.TestCase):
         with (
             patch.object(narration_generation.timeline_service, "build_timeline"),
             patch.object(narration_generation.srt_service, "create_full_srt"),
-            patch.object(narration_generation.rough_cut_service, "compose_video") as compose_video,
             patch.object(
                 narration_generation.video_synthesis,
                 "run_video_synthesis",
@@ -250,7 +251,6 @@ class GenerationCheckpointTests(unittest.TestCase):
                 session, project, "subtitles", True, stages.append
             )
 
-        compose_video.assert_not_called()
         smart_video.assert_called_once()
         self.assertEqual(stages, ["storyboard", "completed"])
 

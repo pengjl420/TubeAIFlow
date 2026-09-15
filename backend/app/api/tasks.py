@@ -1,7 +1,6 @@
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from app.database import get_session
@@ -18,11 +17,6 @@ from app.workflows import narration_generation, video_synthesis
 
 
 router = APIRouter(tags=["tasks"])
-
-
-class TimelinePreviewJobRequest(BaseModel):
-    start_ms: int = Field(default=0, ge=0)
-    duration_ms: int = Field(default=30_000)
 
 
 def _enqueue_scene_job(
@@ -138,35 +132,6 @@ def enqueue_scene_preview_job(
     )
 
 
-@router.post("/projects/{project_id}/jobs/preview")
-def enqueue_timeline_preview_job(
-    project_id: str,
-    payload: TimelinePreviewJobRequest,
-    session: Session = Depends(get_session),
-) -> dict:
-    if payload.duration_ms not in {30_000, 60_000}:
-        raise HTTPException(status_code=400, detail={"error": "预览时长必须为 30 或 60 秒"})
-    return _enqueue_render_job(
-        session,
-        project_id,
-        workflow="timeline_preview_render",
-        job_type="timeline_preview_render",
-        stage="render",
-        request=payload.model_dump(),
-    )
-
-
-@router.post("/projects/{project_id}/jobs/final-render")
-def enqueue_final_render_job(project_id: str, session: Session = Depends(get_session)) -> dict:
-    return _enqueue_render_job(
-        session,
-        project_id,
-        workflow="final_render",
-        job_type="final_render",
-        stage="scene_render",
-    )
-
-
 @router.post("/projects/{project_id}/jobs/assets/scan")
 def enqueue_asset_scan_job(project_id: str, session: Session = Depends(get_session)) -> dict:
     return _enqueue_render_job(
@@ -186,28 +151,6 @@ def enqueue_quality_check_job(project_id: str, session: Session = Depends(get_se
         workflow="quality_check",
         job_type="quality_check",
         stage="analyze",
-    )
-
-
-@router.post("/projects/{project_id}/jobs/visual-track")
-def enqueue_visual_track_job(project_id: str, session: Session = Depends(get_session)) -> dict:
-    return _enqueue_render_job(
-        session,
-        project_id,
-        workflow="visual_track_render",
-        job_type="visual_track_render",
-        stage="render",
-    )
-
-
-@router.post("/projects/{project_id}/jobs/rough-cut")
-def enqueue_rough_cut_job(project_id: str, session: Session = Depends(get_session)) -> dict:
-    return _enqueue_render_job(
-        session,
-        project_id,
-        workflow="rough_cut_render",
-        job_type="rough_cut_render",
-        stage="render",
     )
 
 

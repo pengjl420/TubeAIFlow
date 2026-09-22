@@ -6,6 +6,8 @@
   "properties": {
     "project_id": {"type": "string", "minLength": 1},
     "duration_ms": {"type": "integer", "minimum": 1},
+    "strategy": {"type": "string", "minLength": 1},
+    "strategy_version": {"type": "string", "minLength": 1},
     "visuals": {
       "type": "array",
       "items": {
@@ -18,6 +20,7 @@
         "properties": {
           "visual_id": {"type": "string"},
           "scene_id": {"type": "string"},
+          "visual_beat_id": {"type": ["string", "null"]},
           "start_ms": {"type": "integer", "minimum": 0},
           "end_ms": {"type": "integer", "minimum": 1},
           "trigger_ms": {"type": "integer", "minimum": 0},
@@ -60,7 +63,7 @@
             "enum": [
               "fade_only", "kenburns_slow_push", "kenburns_slow_pull",
               "pan_left_to_right", "pan_right_to_left", "card_slide_left",
-              "card_slide_right", "card_fade_scale"
+              "card_slide_right", "card_fade_scale", "anime_master_kenburns"
             ]
           },
           "subtitle_safe_zone": {"type": "number", "minimum": 0, "maximum": 0.4}

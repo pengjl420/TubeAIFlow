@@ -1,5 +1,5 @@
 import { apiClient, unwrap } from './client'
-import type { Project, SegmentationMode, StoryboardMode, VideoGenerationMode } from '../types/project'
+import type { Project, SegmentationMode, StoryboardMode, VideoGenerationMode, VisualGenerationMode } from '../types/project'
 import type { SceneRevision, StoryboardContent, VisualScene } from '../types/storyboard'
 
 export interface CreateProjectInput {
@@ -26,6 +26,7 @@ export interface ProjectSettingsInput {
   segmentationMode: SegmentationMode
   storyboardMode: StoryboardMode
   visualEnrichmentMode: 'auto' | 'advanced' | 'basic'
+  visualGenerationMode: VisualGenerationMode
 }
 
 export interface ProjectTask {
@@ -67,6 +68,82 @@ export interface ProjectOutputs {
   final_prproj_path: string
   final_prproj_exists: boolean
   files: ProjectOutput[]
+}
+
+export interface QualityIssue {
+  type: string
+  severity: 'error' | 'warning'
+  message: string
+  suggestion?: string | null
+  scene_id?: string | null
+  subtitle_id?: string | null
+  subtitle_cue_index?: number
+  subtitle_start_ms?: number
+  file_path?: string | null
+}
+
+export interface QualityReport {
+  schema_version: number
+  report_id: string
+  project_id: string
+  created_at: string
+  passed: boolean
+  delivery_verified: boolean
+  premiere_conversion_verified: boolean
+  stale?: boolean
+  verification_status: 'failed' | 'manual_acceptance_required' | 'manually_accepted'
+  manual_acceptance_required: boolean
+  manual_acceptance?: {
+    editor: string
+    editor_version: string
+    checked_at: string
+    checked_by?: string | null
+    audio_ok: boolean
+    subtitles_ok: boolean
+    media_links_ok: boolean
+    notes: string
+  } | null
+  summary: { error_count: number; warning_count: number; scene_count: number }
+  issues: QualityIssue[]
+}
+
+export interface VisualStrategyMetadata {
+  id: string
+  version: string
+  display_name: string
+  description: string
+  compatible_video_modes: VideoGenerationMode[]
+  full_timeline_coverage: boolean
+  supports_multiple_beats_per_scene: boolean
+}
+
+export async function listVisualStrategies(): Promise<VisualStrategyMetadata[]> {
+  return unwrap<VisualStrategyMetadata[]>(await apiClient.get('/visual-strategies'))
+}
+
+export async function getProjectQualityReport(projectId: string): Promise<QualityReport> {
+  return unwrap<QualityReport>(await apiClient.get(`/projects/${projectId}/quality/report`))
+}
+
+export async function enqueueProjectQualityCheck(projectId: string): Promise<ProjectTask> {
+  return unwrap<ProjectTask>(await apiClient.post(`/projects/${projectId}/quality/check`))
+}
+
+export async function recordProjectManualAcceptance(
+  projectId: string,
+  input: {
+    editor: string
+    editor_version?: string
+    checked_by?: string
+    audio_ok: boolean
+    subtitles_ok: boolean
+    media_links_ok: boolean
+    notes?: string
+  },
+): Promise<QualityReport> {
+  return unwrap<QualityReport>(
+    await apiClient.post(`/projects/${projectId}/quality/manual-acceptance`, input),
+  )
 }
 
 export interface SceneImageVariant {
@@ -124,6 +201,7 @@ export async function createProject(input: CreateProjectInput): Promise<Project>
   form.append('segmentation_mode', input.segmentationMode || 'ai')
   form.append('storyboard_mode', input.storyboardMode || 'ai')
   form.append('visual_enrichment_mode', 'auto')
+  form.append('visual_generation_mode', 'curated')
   return unwrap<Project>(await apiClient.post('/projects', form))
 }
 
@@ -143,6 +221,7 @@ export async function updateProjectSettings(projectId: string, input: ProjectSet
     segmentation_mode: input.segmentationMode,
     storyboard_mode: input.storyboardMode,
     visual_enrichment_mode: input.visualEnrichmentMode,
+    visual_generation_mode: input.visualGenerationMode,
   }))
 }
 
@@ -153,6 +232,7 @@ export async function updateProjectVideoSettings(projectId: string, input: Proje
     storyboard_mode: input.storyboardMode,
     storyboard_transition_enabled: input.storyboardTransitionEnabled,
     visual_enrichment_mode: input.visualEnrichmentMode,
+    visual_generation_mode: input.visualGenerationMode,
   }))
 }
 

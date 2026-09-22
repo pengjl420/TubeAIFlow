@@ -9,6 +9,7 @@ from typing import Iterable
 from sqlmodel import Session
 
 from app.config import get_settings
+from app.infrastructure.atomic_files import write_json_atomic
 from app.infrastructure.project_layout import (
     ensure_project_dirs,
     get_final_prproj_path,
@@ -16,6 +17,8 @@ from app.infrastructure.project_layout import (
 )
 from app.models.project import Project
 from app.services.projects import fcpxml_export_service, premiere_xml_export_service
+from app.shared.time import utc_now_iso
+from app.services.quality.evidence import file_signature
 
 
 PREMIERE_ENV = "TUBEAI_PREMIERE_PRO_PATH"
@@ -129,11 +132,18 @@ def export_project_prproj(
 
     report = {
         **fcpxml_report,
+        "schema_version": 1,
+        "export_id": uuid.uuid4().hex,
+        "created_at": utc_now_iso(),
         "path": str(output_path),
         "format": "prproj",
         "source_fcpxml_path": str(fcpxml_path),
         "source_premiere_xml_path": str(premiere_xml_path),
         "premiere_executable": str(executable),
+        "premiere_result": _read_conversion_marker(marker_path),
+        "prproj_signature": file_signature(output_path, strong=True),
+        "source_fcpxml_signature": file_signature(fcpxml_path, strong=True),
+        "source_premiere_xml_signature": file_signature(premiere_xml_path, strong=True),
         "compatibility_notes": [
             "PRPROJ was created by Adobe Premiere Pro from Final Cut Pro 7 XML.",
             "Media is linked by absolute path; relink after moving source files.",
@@ -142,8 +152,16 @@ def export_project_prproj(
     }
     report_path = work_dir / "reports" / "prproj_export_report.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json_atomic(report_path, report)
     return report
+
+
+def _read_conversion_marker(path: Path) -> dict:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return {"success": False, "error": "Premiere conversion marker is unavailable"}
+    return payload if isinstance(payload, dict) else {"success": False, "error": "Invalid marker"}
 
 
 def _conversion_script(

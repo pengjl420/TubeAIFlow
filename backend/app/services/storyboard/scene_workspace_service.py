@@ -124,6 +124,7 @@ def invalidate_scene_outputs(project: Project, scene: VisualScene) -> None:
         base / "renders" / "visual_track.mp4",
         base / "reports" / "visual_track_report.json",
         base / "reports" / "quality_report.json",
+        base / "reports" / "qa.json",
         get_final_video_path(project, get_settings().workspace_dir),
     ):
         path.unlink(missing_ok=True)

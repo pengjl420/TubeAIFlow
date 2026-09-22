@@ -12,7 +12,7 @@ from sqlmodel import Session, SQLModel, create_engine
 from app.config import DATABASE_PATH
 
 
-LATEST_SCHEMA_VERSION = 22
+LATEST_SCHEMA_VERSION = 23
 logger = logging.getLogger(__name__)
 
 
@@ -495,6 +495,14 @@ def _apply_migrations() -> None:
         22: [
             "DROP INDEX IF EXISTS uq_media_files_hash",
             "CREATE INDEX IF NOT EXISTS ix_media_files_hash ON media_files (file_hash)",
+        ],
+        23: [
+            "ALTER TABLE generated_image_variants ADD COLUMN visual_beat_id VARCHAR",
+            "CREATE INDEX IF NOT EXISTS ix_generated_image_variants_visual_beat_id "
+            "ON generated_image_variants (visual_beat_id)",
+            "ALTER TABLE scene_assignments ADD COLUMN visual_beat_id VARCHAR",
+            "CREATE INDEX IF NOT EXISTS ix_scene_assignments_visual_beat_id "
+            "ON scene_assignments (visual_beat_id)",
         ],
     }
     with engine.begin() as connection:

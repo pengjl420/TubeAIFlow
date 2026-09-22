@@ -1,4 +1,5 @@
 import json
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -223,6 +224,12 @@ class FcpxmlExportTests(unittest.TestCase):
             self.assertEqual(Path(report["path"]), output_dir / "Story.prproj")
             self.assertEqual((output_dir / "Story.prproj").read_bytes(), b"native-prproj")
             self.assertEqual(report["format"], "prproj")
+            self.assertTrue(report["export_id"])
+            self.assertEqual(report["premiere_result"]["success"], True)
+            self.assertEqual(
+                report["prproj_signature"]["sha256"],
+                hashlib.sha256(b"native-prproj").hexdigest(),
+            )
             self.assertEqual(report["source_fcpxml_path"], str(fcpxml_path.resolve()))
             self.assertEqual(
                 report["source_premiere_xml_path"],

@@ -6,6 +6,7 @@ from app.services.visual_enrichment.selection import (
     temporal_nms,
     weighted_interval_selection,
 )
+from app.services.visual_enrichment.planning import build_anime_visual_plan
 
 
 def candidate(candidate_id: str, start: int, end: int, score: float) -> VisualCandidate:
@@ -60,3 +61,24 @@ class SelectionTests(unittest.TestCase):
             ]
         )
         self.assertEqual([item.candidate_id for item in selected], ["left", "right"])
+
+    def test_anime_plan_covers_every_candidate_without_curated_limits(self) -> None:
+        candidates = [
+            candidate("first", 0, 8_000, 0.2),
+            candidate("second", 8_000, 16_000, 0.3),
+            candidate("third", 16_000, 24_000, 0.4),
+        ]
+
+        plan = build_anime_visual_plan(
+            "project",
+            24_000,
+            candidates,
+            candidates_per_scene=1,
+            style_prompt="consistent original 2D style",
+        )
+
+        self.assertEqual(plan.strategy, "anime_full_coverage")
+        self.assertEqual([item.scene_id for item in plan.visuals], ["first", "second", "third"])
+        self.assertTrue(all(item.renderer.value == "flux2_klein_4b" for item in plan.visuals))
+        self.assertTrue(all(item.generation.candidates == 1 for item in plan.visuals))
+        self.assertTrue(all("consistent original 2D style" in item.prompt for item in plan.visuals))

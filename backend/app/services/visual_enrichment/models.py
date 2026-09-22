@@ -50,6 +50,7 @@ class Chapter(StrictModel):
 
 class SemanticScene(StrictModel):
     scene_id: str
+    parent_scene_id: str | None = None
     chapter_id: str
     start_ms: int = Field(ge=0)
     end_ms: int = Field(gt=0)
@@ -100,6 +101,7 @@ class Renderer(StrEnum):
 class VisualCandidate(StrictModel):
     candidate_id: str
     scene_id: str
+    parent_scene_id: str | None = None
     start_ms: int = Field(ge=0)
     end_ms: int = Field(gt=0)
     trigger_ms: int = Field(ge=0)
@@ -137,6 +139,7 @@ class GenerationSpec(StrictModel):
 class VisualPlanItem(StrictModel):
     visual_id: str
     scene_id: str
+    visual_beat_id: str | None = None
     start_ms: int = Field(ge=0)
     end_ms: int = Field(gt=0)
     trigger_ms: int = Field(ge=0)
@@ -161,6 +164,8 @@ class VisualPlanItem(StrictModel):
 class VisualPlan(StrictModel):
     project_id: str = Field(min_length=1)
     duration_ms: int = Field(gt=0)
+    strategy: str = Field(default="curated", min_length=1)
+    strategy_version: str = Field(default="1", min_length=1)
     visuals: list[VisualPlanItem]
 
 

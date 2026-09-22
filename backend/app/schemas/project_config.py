@@ -20,6 +20,7 @@ class ProjectConfig(BaseModel):
     storyboard_mode: Literal["ai", "segments"] = "ai"
     image_provider_id: str = "image.local_sdxl"
     visual_enrichment_mode: Literal["auto", "advanced", "basic"] = "auto"
+    visual_generation_mode: str = "curated"
     visual_enrichment_config_path: str = "config/production_5060ti.yaml"
     video_mode: Literal["none", "landscape", "ai_generated_images", "ai_landscape_mix"] = "none"
     # Keep legacy values readable so existing project descriptors still migrate/load.

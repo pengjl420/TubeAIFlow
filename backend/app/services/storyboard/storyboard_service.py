@@ -121,7 +121,7 @@ def generate_storyboard(
                 existing.narration = value["narration"]
             if not existing.locked_visual:
                 if existing.storyboard_json != content_json:
-                    _invalidate_scene_visual_records(session, existing.id)
+                    invalidate_scene_visual_records(session, existing.id)
                 existing.storyboard_json = content_json
                 existing.confidence = content.confidence
                 existing.status = "generated"
@@ -339,7 +339,7 @@ def regenerate_scene(
     scene.version += 1
     scene.updated_at = utc_now_iso()
     project.updated_at = scene.updated_at
-    _invalidate_scene_visual_records(session, scene.id)
+    invalidate_scene_visual_records(session, scene.id)
     session.add(scene)
     session.add(project)
     session.commit()
@@ -352,7 +352,7 @@ def regenerate_scene(
     return _serialize_scene(scene)
 
 
-def _invalidate_scene_visual_records(session: Session, scene_id: str) -> None:
+def invalidate_scene_visual_records(session: Session, scene_id: str) -> None:
     """Detach rendered choices and make candidates from an older brief unselectable."""
     session.exec(delete(SceneAssignment).where(SceneAssignment.scene_id == scene_id))
     variants = session.exec(
@@ -362,6 +362,10 @@ def _invalidate_scene_visual_records(session: Session, scene_id: str) -> None:
         variant.status = "stale"
         variant.updated_at = utc_now_iso()
         session.add(variant)
+
+
+# Backward-compatible private alias for existing integrations and tests.
+_invalidate_scene_visual_records = invalidate_scene_visual_records
 
 
 def _save_revision(

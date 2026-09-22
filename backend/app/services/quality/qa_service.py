@@ -1,4 +1,6 @@
 import json
+import hashlib
+import uuid
 from pathlib import Path
 
 from sqlmodel import Session, select
@@ -6,33 +8,31 @@ from sqlmodel import Session, select
 from app.config import get_settings
 from app.infrastructure.ffmpeg import (
     analyze_audio_quality,
-    detect_video_anomalies,
     probe_duration,
-    probe_media,
 )
 from app.infrastructure.atomic_files import write_json_atomic
 from app.infrastructure.project_layout import (
     get_final_audio_path,
+    get_final_prproj_path,
     get_final_srt_path,
-    get_final_video_path,
     get_project_work_dir,
 )
 from app.models.media import MediaFile, MediaShot, SceneAssignment
 from app.models.project import Project
 from app.models.storyboard import SubtitleCue, VisualScene
-from app.services.rendering.scene_renderer import scene_output_path
-from app.services.rendering.render_config import get_project_render_config
-from app.services.rendering.scene_quality_checker import expected_codec_name
-from app.services.rendering import timeline_composer
-from app.services.narration.subtitle_service import display_units, spoken_weight
+from app.services.narration.subtitle_service import display_units, parse_srt, spoken_weight
+from app.services.quality.models import DeliveryQualityReport, migrate_quality_report
+from app.services.quality.registry import QualityCheckContext, quality_checker_registry
+from app.services.quality.evidence import file_signature, signature_matches
+from app.shared.time import utc_now_iso
 
 
-MAX_DURATION_ERROR_SECONDS = 0.1
+MAX_DURATION_ERROR_SECONDS = 1.0
 
 
 def run_quality_check(session: Session, project: Project) -> dict:
     issues: list[dict] = []
-    render_config = get_project_render_config(project)
+    settings = get_settings()
     scenes = list(
         session.exec(
             select(VisualScene)
@@ -54,23 +54,21 @@ def run_quality_check(session: Session, project: Project) -> dict:
     for item in all_assignments:
         assignments.setdefault(item.scene_id, []).append(item)
     _check_timeline(scenes, issues)
-    audio_path = get_final_audio_path(project, get_settings().workspace_dir)
-    video_path = get_final_video_path(project, get_settings().workspace_dir)
-    visual_track_path = (
-        get_project_work_dir(project, get_settings().workspace_dir) / "renders" / "visual_track.mp4"
+    audio_path = get_final_audio_path(project, settings.workspace_dir)
+    srt_path = get_final_srt_path(project, settings.workspace_dir)
+    prproj_path = get_final_prproj_path(project, settings.workspace_dir)
+    conversion_path = (
+        get_project_work_dir(project, settings.workspace_dir)
+        / "reports"
+        / "prproj_export_report.json"
     )
     audio_duration = _duration_or_issue(audio_path, "audio_missing", "完整配音文件不存在", issues)
-    video_duration = _duration_or_issue(video_path, "video_missing", "最终视频不存在", issues)
-    if audio_duration is not None and video_duration is not None:
-        difference = abs(audio_duration - video_duration)
+    if scenes and audio_duration is not None:
+        difference = abs(scenes[-1].end_ms / 1000 - audio_duration)
         if difference > MAX_DURATION_ERROR_SECONDS:
-            _issue(
-                issues,
-                "duration_mismatch",
-                "error",
-                f"视频与配音时长相差 {difference:.3f} 秒",
-                suggestion="重新执行最终合成并检查场景首尾时间轴",
-            )
+            _issue(issues, "scene_audio_duration_mismatch", "error",
+                   f"Scene 时间轴与配音时长相差 {difference:.3f} 秒",
+                   suggestion="检查配音合并和 Scene 时间边界")
     if audio_duration is not None:
         for cue in cues:
             if cue.end_ms / 1000 > audio_duration + 0.001:
@@ -83,39 +81,31 @@ def run_quality_check(session: Session, project: Project) -> dict:
                     suggestion="重新生成字幕时间轴",
                 )
         _check_audio_analysis(audio_path, project.id, issues)
-    _check_subtitles(cues, issues, get_settings())
-    if not get_final_srt_path(project, get_settings().workspace_dir).is_file():
-        _issue(issues, "subtitle_missing", "error", "项目 SRT 字幕文件不存在")
-    if not visual_track_path.is_file():
-        _issue(issues, "visual_track_missing", "error", "纯视频轨道不存在")
-    else:
-        try:
-            visual_metadata = probe_media(visual_track_path)
-            if visual_metadata.get("audio_stream_count") != 0:
-                _issue(issues, "visual_track_has_audio", "error", "纯视频轨道包含意外音频流")
-            visual_sar = visual_metadata.get("sample_aspect_ratio")
-            if visual_sar and visual_sar not in {"1:1", "1/1"}:
-                _issue(
-                    issues,
-                    "visual_track_sar_mismatch",
-                    "error",
-                    f"纯视频轨道像素宽高比不是 1:1（实际为 {visual_sar}）",
-                )
-        except RuntimeError as exc:
-            _issue(issues, "visual_track_invalid", "error", str(exc))
+    _check_subtitles(cues, issues, settings)
+    if not cues:
+        _issue(issues, "subtitle_cues_missing", "error", "项目没有可交付的字幕时间线",
+               suggestion="重新生成字幕对齐与 SRT")
+    for path, issue_type, label in (
+        (srt_path, "subtitle_missing", "项目 SRT 字幕"),
+        (prproj_path, "prproj_missing", "真实 PRPROJ 工程"),
+    ):
+        if not path.is_file() or path.stat().st_size == 0:
+            _issue(issues, issue_type, "error", f"{label}文件不存在或为空",
+                   file_path=str(path))
+    _check_delivered_srt(srt_path, cues, issues)
+    premiere_conversion_verified = False
+    conversion_evidence_paths: list[Path] = []
+    if prproj_path.is_file():
+        premiere_conversion_verified = _check_conversion_record(
+            conversion_path, prproj_path, issues
+        )
+        conversion_evidence_paths = _conversion_evidence_paths(conversion_path)
 
+    covered_scene_count = 0
     for scene in scenes:
         scene_assignments = assignments.get(scene.id, [])
-        coverage = timeline_composer.scene_coverage(session, scene)
-        if not coverage["complete"]:
-            _issue(
-                issues,
-                "assignment_missing",
-                "error",
-                f"场景镜头轨道尚缺 {coverage['remaining_ms'] / 1000:.2f} 秒",
-                scene_id=scene.id,
-            )
-            continue
+        if _check_scene_assignments(scene, scene_assignments, issues):
+            covered_scene_count += 1
         for assignment in scene_assignments:
             shot = session.get(MediaShot, assignment.media_shot_id)
             media_file = session.get(MediaFile, shot.media_file_id) if shot else None
@@ -129,85 +119,99 @@ def run_quality_check(session: Session, project: Project) -> dict:
                     "素材来源信息不完整",
                     scene_id=scene.id,
                 )
-        rendered_path = scene_output_path(project, scene)
-        if not rendered_path.is_file():
-            _issue(issues, "scene_render_missing", "error", "场景中间视频不存在", scene_id=scene.id)
-            continue
-        try:
-            rendered_duration = probe_duration(rendered_path)
-        except RuntimeError as exc:
-            _issue(issues, "scene_render_invalid", "error", str(exc), scene_id=scene.id)
-            continue
-        expected = (scene.end_ms - scene.start_ms) / 1000
-        if abs(rendered_duration - expected) > 0.12:
-            _issue(
-                issues,
-                "scene_duration_mismatch",
-                "error",
-                f"场景视频时长与时间轴相差 {abs(rendered_duration - expected):.3f} 秒",
-                scene_id=scene.id,
-            )
+            elif not Path(media_file.path).is_file():
+                _issue(issues, "source_file_missing", "error", "关联素材文件不存在",
+                       scene_id=scene.id, file_path=media_file.path,
+                       suggestion="恢复素材原路径，或在剪辑软件中重新链接")
 
     _check_repetition(session, scenes, all_assignments, issues)
 
-    video_metadata = None
-    if video_path.is_file():
-        try:
-            video_metadata = probe_media(video_path)
-            expected_video = render_config.video
-            if (
-                video_metadata.get("width") != expected_video.width
-                or video_metadata.get("height") != expected_video.height
-            ):
-                _issue(
-                    issues,
-                    "resolution_mismatch",
-                    "error",
-                    f"最终视频不是 {expected_video.width}×{expected_video.height}",
-                )
-            video_sar = video_metadata.get("sample_aspect_ratio")
-            if video_sar and video_sar not in {"1:1", "1/1"}:
-                _issue(
-                    issues,
-                    "video_sar_mismatch",
-                    "error",
-                    f"最终视频像素宽高比不是 1:1（实际为 {video_sar}）",
-                )
-            expected_codec = expected_codec_name(expected_video.video_codec)
-            if video_metadata.get("codec_name") != expected_codec:
-                _issue(
-                    issues,
-                    "codec_mismatch",
-                    "warning",
-                    f"最终视频编码不是 {expected_codec}",
-                )
-        except RuntimeError as exc:
-            _issue(issues, "video_probe_failed", "error", str(exc))
-        _check_video_analysis(video_path, project.id, issues)
+    extension_context = QualityCheckContext(
+        session=session,
+        project=project,
+        scenes=tuple(scenes),
+        subtitles=tuple(cues),
+        assignments=tuple(all_assignments),
+    )
+    issues.extend(
+        item.model_dump(mode="json")
+        for item in quality_checker_registry.run(extension_context)
+    )
 
+    linked_paths: list[Path] = []
+    for assignment in all_assignments:
+        shot = session.get(MediaShot, assignment.media_shot_id)
+        media = session.get(MediaFile, shot.media_file_id) if shot else None
+        if media and media.path:
+            linked_paths.append(Path(media.path))
+    if prproj_path.is_file() and any(path.is_absolute() for path in linked_paths):
+        _issue(issues, "absolute_media_paths", "warning",
+               "工程使用绝对素材路径；移动项目后可能需要重新链接",
+               suggestion="移动项目后在目标剪辑软件中检查素材链接")
+
+    cues_by_id = {cue.id: (index, cue) for index, cue in enumerate(cues, start=1)}
+    for issue in issues:
+        cue_location = cues_by_id.get(issue["subtitle_id"])
+        if cue_location:
+            index, cue = cue_location
+            issue["subtitle_cue_index"] = index
+            issue["subtitle_start_ms"] = cue.start_ms
+
+    passed = not any(item["severity"] == "error" for item in issues)
     report = {
-        "passed": not any(item["severity"] == "error" for item in issues),
+        "schema_version": 1,
+        "report_id": uuid.uuid4().hex,
+        "project_id": project.id,
+        "created_at": utc_now_iso(),
+        "passed": passed,
+        "delivery_verified": passed and premiere_conversion_verified,
+        "premiere_conversion_verified": premiere_conversion_verified,
+        "verification_status": (
+            "manual_acceptance_required"
+            if passed and premiere_conversion_verified
+            else "failed"
+        ),
+        "manual_acceptance_required": True,
+        "stale": False,
         "summary": {
             "scene_count": len(scenes),
-            "assignment_count": sum(
-                timeline_composer.scene_coverage(session, scene)["complete"] for scene in scenes
-            ),
+            "assignment_count": covered_scene_count,
             "shot_assignment_count": len(all_assignments),
             "subtitle_count": len(cues),
             "error_count": sum(item["severity"] == "error" for item in issues),
             "warning_count": sum(item["severity"] == "warning" for item in issues),
             "audio_duration_seconds": audio_duration,
-            "video_duration_seconds": video_duration,
-            "video_metadata": video_metadata,
+            "prproj_path": str(prproj_path),
+            "audio_path": str(audio_path),
+            "srt_path": str(srt_path),
         },
         "issues": issues,
+        "file_signatures": {
+            str(path): _file_signature(
+                path,
+                strong=(
+                    path in {audio_path, srt_path, prproj_path, conversion_path}
+                    or path in conversion_evidence_paths
+                ),
+            )
+            for path in {
+                audio_path,
+                srt_path,
+                prproj_path,
+                conversion_path,
+                *conversion_evidence_paths,
+                *linked_paths,
+            }
+        },
+        "project_signature": _project_signature(session, project),
     }
+    report = DeliveryQualityReport.model_validate(report).model_dump(mode="json")
     path = _report_path(project)
     write_json_atomic(path, report)
     return report
 
 
-def read_report(project: Project) -> dict | None:
+def read_report(project: Project, session: Session | None = None) -> dict | None:
     path = _report_path(project)
     if not path.is_file():
         return None
@@ -215,7 +219,243 @@ def read_report(project: Project) -> dict | None:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    return data if isinstance(data, dict) else None
+    if not isinstance(data, dict):
+        return None
+    try:
+        data = DeliveryQualityReport.model_validate(
+            migrate_quality_report(data, project_id=project.id)
+        ).model_dump(mode="json")
+    except ValueError:
+        return None
+    signatures = data.get("file_signatures")
+    files_changed = not isinstance(signatures, dict) or any(
+        not signature_matches(Path(path), signature) for path, signature in signatures.items()
+    )
+    project_changed = session is not None and data.get("project_signature") != _project_signature(session, project)
+    if files_changed or project_changed:
+        data["passed"] = False
+        data["delivery_verified"] = False
+        data["verification_status"] = "failed"
+        data["manual_acceptance_required"] = True
+        data["stale"] = True
+        data.setdefault("issues", []).append({
+            "type": "quality_report_stale", "severity": "error", "scene_id": None,
+            "subtitle_id": None, "message": "交付文件或素材已变化，请重新运行质量检查",
+            "suggestion": "点击重新检查", "file_path": None,
+        })
+        data.setdefault("summary", {})["error_count"] = sum(
+            issue.get("severity") == "error" for issue in data["issues"]
+        )
+    return data
+
+
+def write_failed_report(project: Project, message: str) -> dict:
+    """Persist a QC execution failure without invalidating an already exported PRPROJ."""
+    report = {
+        "schema_version": 1,
+        "report_id": uuid.uuid4().hex,
+        "project_id": project.id,
+        "created_at": utc_now_iso(),
+        "passed": False,
+        "delivery_verified": False,
+        "premiere_conversion_verified": False,
+        "verification_status": "failed",
+        "manual_acceptance_required": True,
+        "stale": False,
+        "summary": {
+            "scene_count": 0,
+            "assignment_count": 0,
+            "shot_assignment_count": 0,
+            "subtitle_count": 0,
+            "error_count": 1,
+            "warning_count": 0,
+            "audio_duration_seconds": None,
+        },
+        "issues": [
+            {
+                "type": "quality_check_failed",
+                "severity": "error",
+                "scene_id": None,
+                "subtitle_id": None,
+                "message": f"交付质量检查执行失败：{message}",
+                "suggestion": "检查本地日志与 FFmpeg 配置后重新运行质量检查",
+                "file_path": None,
+            }
+        ],
+        "file_signatures": {},
+        "project_signature": None,
+    }
+    report = DeliveryQualityReport.model_validate(report).model_dump(mode="json")
+    write_json_atomic(_report_path(project), report)
+    return report
+
+
+def record_manual_acceptance(
+    session: Session,
+    project: Project,
+    *,
+    editor: str,
+    editor_version: str = "",
+    checked_by: str | None = None,
+    audio_ok: bool,
+    subtitles_ok: bool,
+    media_links_ok: bool,
+    notes: str = "",
+) -> dict:
+    report = read_report(project, session)
+    if report is None:
+        raise ValueError("请先运行交付质量检查")
+    if report.get("stale") or not report.get("delivery_verified"):
+        raise ValueError("交付报告未通过或已经过期，不能记录人工验收")
+    if not all((audio_ok, subtitles_ok, media_links_ok)):
+        raise ValueError("旁白、字幕和素材链接必须全部确认通过")
+    report["verification_status"] = "manually_accepted"
+    report["manual_acceptance_required"] = False
+    report["manual_acceptance"] = {
+        "editor": editor.strip(),
+        "editor_version": editor_version.strip(),
+        "checked_at": utc_now_iso(),
+        "checked_by": checked_by.strip() if checked_by else None,
+        "audio_ok": audio_ok,
+        "subtitles_ok": subtitles_ok,
+        "media_links_ok": media_links_ok,
+        "notes": notes.strip(),
+    }
+    report = DeliveryQualityReport.model_validate(report).model_dump(mode="json")
+    write_json_atomic(_report_path(project), report)
+    return report
+
+
+_file_signature = file_signature
+_signature_matches = signature_matches
+
+
+def _project_signature(session: Session, project: Project) -> str:
+    models = (VisualScene, SubtitleCue, SceneAssignment)
+    records = [
+        [item.model_dump() for item in session.exec(
+            select(model).where(model.project_id == project.id).order_by(model.id)
+        ).all()]
+        for model in models
+    ]
+    assignments = records[2]
+    shot_ids = sorted({assignment["media_shot_id"] for assignment in assignments})
+    shot_models = list(
+        session.exec(
+            select(MediaShot).where(MediaShot.id.in_(shot_ids)).order_by(MediaShot.id)
+        ).all()
+    ) if shot_ids else []
+    media_ids = sorted({shot.media_file_id for shot in shot_models})
+    media_models = list(
+        session.exec(
+            select(MediaFile).where(MediaFile.id.in_(media_ids)).order_by(MediaFile.id)
+        ).all()
+    ) if media_ids else []
+    shots = [shot.model_dump() for shot in shot_models]
+    media = [item.model_dump() for item in media_models]
+    payload = [project.output_dir, project.config_json, *records,
+               sorted(shots, key=lambda item: item["id"]),
+               media]
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+
+
+def _check_delivered_srt(srt_path: Path, cues: list[SubtitleCue], issues: list[dict]) -> None:
+    if not srt_path.is_file() or srt_path.stat().st_size == 0:
+        return
+    try:
+        delivered_cues = parse_srt(srt_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError) as exc:
+        _issue(issues, "subtitle_file_invalid", "error", f"SRT 无法读取或解析：{exc}",
+               file_path=str(srt_path))
+        return
+    if len(delivered_cues) != len(cues) or any(
+        abs(file_cue["start_ms"] - cue.start_ms) > 50
+        or abs(file_cue["end_ms"] - cue.end_ms) > 50
+        or " ".join(file_cue["text"].split()) != " ".join(cue.text.replace("\\N", " ").split())
+        for file_cue, cue in zip(delivered_cues, cues, strict=False)
+    ):
+        _issue(issues, "subtitle_file_outdated", "error",
+               "SRT 与项目字幕时间线不一致", file_path=str(srt_path),
+               suggestion="重新导出字幕文件")
+
+
+def _check_conversion_record(
+    report_path: Path, prproj_path: Path, issues: list[dict]
+) -> bool:
+    try:
+        conversion = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        conversion = None
+    signature = conversion.get("prproj_signature") if isinstance(conversion, dict) else None
+    marker = conversion.get("premiere_result") if isinstance(conversion, dict) else None
+    source_fcpxml_path = (
+        Path(str(conversion.get("source_fcpxml_path"))) if isinstance(conversion, dict)
+        and conversion.get("source_fcpxml_path") else None
+    )
+    source_premiere_xml_path = (
+        Path(str(conversion.get("source_premiere_xml_path"))) if isinstance(conversion, dict)
+        and conversion.get("source_premiere_xml_path") else None
+    )
+    sources_match = bool(
+        source_fcpxml_path
+        and source_premiere_xml_path
+        and _signature_matches(source_fcpxml_path, conversion.get("source_fcpxml_signature"))
+        and _signature_matches(
+            source_premiere_xml_path, conversion.get("source_premiere_xml_signature")
+        )
+    )
+    if not isinstance(conversion, dict) or conversion.get("format") != "prproj" or \
+            conversion.get("path") != str(prproj_path) or not conversion.get("export_id") or \
+            not conversion.get("created_at") or \
+            not conversion.get("premiere_executable") or not isinstance(marker, dict) or \
+            marker.get("success") is not True or not _signature_matches(prproj_path, signature) or \
+            not sources_match:
+        _issue(issues, "prproj_conversion_unverified", "error",
+               "缺少匹配的 Premiere Pro 转换记录，无法核实工程来源",
+               file_path=str(report_path))
+        return False
+    return True
+
+
+def _conversion_evidence_paths(report_path: Path) -> list[Path]:
+    try:
+        conversion = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    if not isinstance(conversion, dict):
+        return []
+    return [
+        Path(str(value))
+        for value in (
+            conversion.get("source_fcpxml_path"),
+            conversion.get("source_premiere_xml_path"),
+        )
+        if value
+    ]
+
+
+def _check_scene_assignments(
+    scene: VisualScene, assignments: list[SceneAssignment], issues: list[dict]
+) -> bool:
+    duration_ms = scene.end_ms - scene.start_ms
+    cursor_ms = 0
+    complete = bool(assignments) and duration_ms > 0
+    for assignment in sorted(assignments, key=lambda item: item.sequence_index):
+        start_ms = assignment.scene_offset_start_ms
+        end_ms = assignment.scene_offset_end_ms
+        if end_ms is None or start_ms != cursor_ms or end_ms <= start_ms or end_ms > duration_ms:
+            _issue(issues, "assignment_invalid", "error",
+                   "Scene 镜头位置有空洞、重叠或无效时间范围",
+                   scene_id=scene.id, suggestion="重新分配或调整此 Scene 的素材")
+            complete = False
+        if end_ms is not None:
+            cursor_ms = end_ms
+    if cursor_ms < duration_ms:
+        _issue(issues, "assignment_missing", "error",
+               f"场景镜头轨道尚缺 {(duration_ms - cursor_ms) / 1000:.2f} 秒",
+               scene_id=scene.id)
+        complete = False
+    return complete and cursor_ms == duration_ms
 
 
 def _check_timeline(scenes: list[VisualScene], issues: list[dict]) -> None:
@@ -322,28 +562,6 @@ def _check_audio_analysis(audio_path: Path, project_id: str, issues: list[dict])
             )
 
 
-def _check_video_analysis(video_path: Path, project_id: str, issues: list[dict]) -> None:
-    try:
-        analysis = detect_video_anomalies(video_path, project_id)
-    except RuntimeError as exc:
-        _issue(issues, "video_analysis_failed", "warning", str(exc))
-        return
-    for interval in analysis.get("black_intervals", []):
-        _issue(
-            issues,
-            "sustained_black_frame",
-            "warning",
-            f"检测到 {float(interval['duration']):.1f} 秒持续黑帧",
-        )
-    for interval in analysis.get("freeze_intervals", []):
-        _issue(
-            issues,
-            "sustained_freeze_frame",
-            "warning",
-            f"检测到 {float(interval['duration']):.1f} 秒冻结画面",
-        )
-
-
 def _check_repetition(
     session: Session,
     scenes: list[VisualScene],
@@ -404,6 +622,7 @@ def _issue(
     scene_id: str | None = None,
     subtitle_id: str | None = None,
     suggestion: str | None = None,
+    file_path: str | None = None,
 ) -> None:
     issues.append(
         {
@@ -413,6 +632,7 @@ def _issue(
             "subtitle_id": subtitle_id,
             "message": message,
             "suggestion": suggestion,
+            "file_path": file_path,
         }
     )
 

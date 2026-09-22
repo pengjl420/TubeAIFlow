@@ -26,6 +26,7 @@ STAGES = {
     "storyboard",
     "image_generation",
     "project_export",
+    "delivery_quality_check",
     "completed",
 }
 LEGACY_RENDER_STAGES = {"scene_render", "visual_track", "final_render", "quality_check"}
@@ -82,6 +83,14 @@ def _image_generation_step(context: WorkflowContext) -> str:
 def _project_export_step(context: WorkflowContext) -> str:
     with task_control.controlled(context.project.id, "project_export"):
         prproj_export_service.export_project_prproj(context.session, context.project)
+    return "delivery_quality_check"
+
+
+def _delivery_quality_check_step(context: WorkflowContext) -> str:
+    from app.services.quality import qa_service
+
+    with task_control.controlled(context.project.id, "delivery_quality_check"):
+        qa_service.run_quality_check(context.session, context.project)
     return "completed"
 
 
@@ -112,6 +121,14 @@ _VIDEO_GRAPH = WorkflowGraph(
             input_artifacts=("scene_assets",),
             output_artifacts=("prproj",),
         ),
+        WorkflowStep(
+            "delivery_quality_check",
+            _delivery_quality_check_step,
+            resource_class=ResourceClass.FFMPEG,
+            depends_on=("project_export",),
+            input_artifacts=("prproj",),
+            output_artifacts=("quality_report",),
+        ),
     )
 )
 
@@ -127,6 +144,9 @@ def initial_stage(session: Session, project_id: str) -> str:
         return "storyboard"
     if any(not _scene_has_assignment(session, scene.id) for scene in scenes):
         return "image_generation"
+    prproj_path = get_final_prproj_path(project, get_settings().workspace_dir)
+    if prproj_path.is_file() and prproj_path.stat().st_size > 0:
+        return "delivery_quality_check"
     return "project_export"
 
 
@@ -182,4 +202,8 @@ def _artifact_exists(session: Session, project: Project, name: str) -> bool:
     if name == "prproj":
         path = get_final_prproj_path(project, settings.workspace_dir)
         return path.is_file() and path.stat().st_size > 0
+    if name == "quality_report":
+        from app.services.quality import qa_service
+
+        return qa_service.read_report(project, session) is not None
     return False

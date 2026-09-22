@@ -62,6 +62,7 @@ def build_candidates(
             VisualCandidate(
                 candidate_id=f"candidate_{index:04d}",
                 scene_id=scene.scene_id,
+                parent_scene_id=scene.parent_scene_id,
                 start_ms=scene.start_ms,
                 end_ms=scene.end_ms,
                 trigger_ms=scene.start_ms,

@@ -36,6 +36,18 @@ segmentation:
   min_scene_sec: 5
   max_scene_sec: 30
 
+visual_generation:
+  mode: curated
+
+anime:
+  target_master_scene_sec: [8, 15]
+  min_master_scene_sec: 5
+  max_master_scene_sec: 15
+  derived_shot_change_sec: [3, 6]
+  candidates_per_scene: 1
+  style_prompt: "Original non-photorealistic 2D animated documentary illustration, clean expressive line art, controlled cel shading, consistent character proportions and facial design, cohesive navy teal and warm amber color palette, soft cinematic lighting, detailed but uncluttered background, professional widescreen composition. Preserve the same art direction across every scene."
+  negative_prompt: "photorealistic, 3D render, live action, inconsistent character design, random costume changes, watermark, logo, random text, copyrighted character, imitation of a named living artist"
+
 selection:
   candidate_threshold: 0.62
   target_visuals_per_minute: 1.8

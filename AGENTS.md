@@ -29,7 +29,7 @@
 
 ---
 
-# 0. 当前实现状态快照（2026-09-13）
+# 0. 当前实现状态快照（2026-09-20）
 
 > 本节记录已经通过代码与测试核验的实现现状，供后续 Coding Agent 优先读取。
 >
@@ -49,13 +49,21 @@ SQLite + Project Directory + FFmpeg + Local AI
 
 当前仍是开发期 Web 壳，通过 BAT / PowerShell 启动并打开浏览器；尚未接入 Tauri 或 Electron Desktop Shell。
 
-2026-09-13 验证基线：
+2026-09-16 验证基线：
 
-- Backend：`311 passed`
-- Frontend：`3` 个测试文件、`5 passed`
+- Backend：`327 passed`
+- Frontend：`3` 个测试文件、`7 passed`
 - Frontend：`npm run build` 成功
 - 已有 20 / 30 / 60 分钟规模的分段、Scene 边界和帧数精度测试
-- 尚无真实本地模型 + GPU + Premiere Pro 完成 20~60 分钟项目并生成可导入 PRPROJ 的全链路 Golden Test
+- 已有 `scripts/verify_long_form_delivery.py` 对真实项目产物、交付 QC 和 Premiere 转换记录做可重复的自动核验；尚无真实本地模型 + GPU + Premiere Pro + 目标剪映版本完成 20~60 分钟项目的全链路 Golden Test
+
+真实项目完成后，可运行：
+
+```powershell
+backend\.venv\Scripts\python.exe scripts\verify_long_form_delivery.py --qa-report "<项目工作目录>\reports\qa.json" --export-report "<项目工作目录>\reports\prproj_export_report.json"
+```
+
+默认检查 20~30 分钟旁白、QC 通过、PRPROJ / WAV / SRT 非空、文件在 QC 后是否变化和 Premiere 转换记录。脚本不连接项目数据库；Scene 或素材分配变化应在 Project Workspace 重新检查。仍须在 Premiere Pro 和目标剪映版本中实际打开工程，检查音频、字幕、素材链接与重链接；验收脚本不能自动证明兼容性。
 
 ## 0.2 已实现的核心生产流程
 
@@ -93,6 +101,7 @@ Scene Preview 与基础质量检查
 - 原子写入、项目产物清单和不含 Secret 的 `project.json`
 - 项目删除时移动到 Windows 回收站
 - 全局 SQLite Schema Migration、迁移前备份、失败恢复
+- Schema v23 为生成图片与 SceneAssignment 增加稳定 `visual_beat_id`，旧项目可原地迁移
 
 注意：当前权威数据库仍是全局 SQLite；AGENTS.md 规划的每项目 `project.db` 尚未实现。
 
@@ -193,6 +202,9 @@ Scene Preview 与基础质量检查
 - `advanced`：高级视觉管线失败时让持久化 Job 明确失败
 - `basic`：只使用基础 SDXL 管线
 - 高级 Visual Plan 会回写正式 VisualScene Storyboard；Qwen3-VL 通过的 FLUX 图片会注册为 GeneratedImageVariant、MediaFile 和 MediaShot
+- 新增独立 `anime_full_coverage` 画面生成策略：逐字稿按 8~15 秒语义主场景全片覆盖，跳过重点视觉模式的候选阈值、10 秒抑制和每分钟数量上限；统一注入原创二维动漫 Style Prompt，并为后续 3~6 秒取景/运动变化保留 Motion Prompt。高级管线不可用时，未锁定 Scene 仍使用相同动漫风格回退到本地 SDXL。
+- 视觉生成策略已经统一到可注册的 Strategy Registry；后端提供策略能力元数据，前端按视频模式动态显示兼容策略。动漫策略保留正式 VisualScene 作为父级，对超长 Scene 按字幕边界派生稳定 Visual Beat，并生成 Scene 内连续多镜头 Assignment。
+- 动漫 Style Prompt 在生成时动态组合，不永久覆盖基础 Storyboard；视觉策略切换会失效未锁定 Scene 的旧图片变体，高级管线固定复用每 Scene 的 `variant_index=0` 槽位，避免历史图片误复用和唯一索引冲突。
 
 部分实现：`MediaKeyframe` 表已存在，但本地视频的关键帧提取、镜头切分和 AI Caption 尚未完成；本地素材候选匹配仍需继续统一到 BGE-M3 Embedding。
 
@@ -241,22 +253,27 @@ Scene Preview 与基础质量检查
 现有能力：
 
 - Qwen3-VL 对高级管线生成图片的语义与瑕疵筛选
-- 旧渲染链路中的音频、视频、SRT、Visual Track 和 Scene Render 技术检查服务
+- 工程交付型 QA Job / API：检查 PRPROJ、WAV、SRT 文件及 SRT 与字幕时间线一致性、Scene 时间轴与素材覆盖、关联素材文件存在性和绝对路径重链接风险
+- 主工作流在 PRPROJ 导出后进入独立 `delivery_quality_check` Step；Project Workspace 显示错误、提醒、文件路径和处理建议，支持定位 Scene、显示 SRT 全局条目序号与时间、手动复检
+- 交付 QC 只读检查已保存的镜头范围，不重排或写回 SceneAssignment；读取报告时检查交付文件、素材和项目编排是否变化，过期报告不再显示为通过
+- PRPROJ 转换报告记录导出 ID、Premiere 执行结果及 PRPROJ / 源 XML SHA-256；交付 QC 会核对证据链，且 QC 执行异常不会抹去已经成功生成的 PRPROJ
+- QC 报告使用版本化强类型契约，区分自动技术验证与人工验收；通过 API 可记录 Premiere / 目标剪辑软件的人工打开验收，文件或项目编排变化后会自动失效
+- 旧渲染链路中的视频和 Scene Render 技术检查服务仍作为兼容代码保留，不再是主交付 QC 的必需项
 - 素材来源元数据完整性
 - 重复素材
 - 字幕重叠、持续时间、字符数和 CPS
-- 视频分辨率、Codec、Sample Aspect Ratio
-- 黑帧、冻结帧
+- 旧渲染链路中的视频分辨率、Codec、Sample Aspect Ratio、黑帧和冻结帧检查代码
 - 音频响度、削波和过长静音
 - 原子写入质量报告
 
 部分实现或待迁移：
 
-- 旧 QA 服务仍以 MP4 / Visual Track 为中心，尚未改造成 PRPROJ、WAV、SRT、素材存在性和重链接风险的工程交付检查
+- 当前 QC 仅检查文件与数据库编排的一致性，尚未通过重新打开 PRPROJ 验证 Premiere / 剪映实际轨道和链接状态
+- QC 问题面板可定位 Scene，并显示字幕在 SRT 中的条目序号与时间；尚无 Cue 级编辑界面
 - 尚无 Overall Score、Visual Diversity、Scene Matching 等统一维度分数
 - 尚无 Visual 与 Text 的语义相关度检查
 - 尚无连续同类画面、同人物、同构图、AI 视觉比例等高级内容检查
-- Project Workspace 目前只显示基础说明，尚无可定位和操作的 QC 问题面板
+- 尚无正式的长视频实机 Golden Test 结果；自动核验脚本不能替代 Premiere / 目标剪映的人工导入验收
 
 ### Batch 与兼容工具
 
@@ -320,7 +337,7 @@ Scene Preview 与基础质量检查
 2. 全局 SQLite 仍是权威数据库，项目工程尚未拥有版本化 `project.db`。
 3. Project、Scene 和 Asset 的部分核心字段仍保存在 `config_json`、`storyboard_json`、`metadata_json` 中。
 4. Frontend 自动化测试只有 5 项，Project Workspace、Batch、Settings、Scene 和工程导出缺少 UI / E2E 测试。
-5. 现有长视频测试是结构和算法测试，不代表真实 20~60 分钟生产验收。
+5. 现有长视频测试和交付核验脚本不能代表真实 20~60 分钟本地模型生产及目标剪辑软件导入验收。
 6. Error Code 已有基础，但部分服务仍直接返回异常文本，尚未完成全覆盖。
 7. 高级视觉模型的下载、启动和串行 GPU 调度主要依赖脚本，尚未形成统一 Model Manager 和 UI。
 

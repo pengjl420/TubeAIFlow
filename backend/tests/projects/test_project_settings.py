@@ -453,6 +453,158 @@ class ProjectSettingsTests(unittest.TestCase):
         self.assertTrue(config["include_video"])
         self.assertEqual(config["video_mode"], "ai_generated_images")
 
+    def test_anime_generation_mode_is_limited_to_full_ai_image_projects(self) -> None:
+        project = Project(
+            id="project-id",
+            name="Narration ready",
+            status="narration_ready",
+            config_json='{"include_video":false}',
+        )
+
+        anime = project_service.update_video_workflow_settings(
+            FakeSession(),
+            project,
+            video_mode="ai_generated_images",
+            visual_generation_mode="anime_full_coverage",
+        )
+        self.assertEqual(
+            json.loads(anime.config_json)["visual_generation_mode"],
+            "anime_full_coverage",
+        )
+
+        with self.assertRaisesRegex(ValueError, "incompatible"):
+            project_service.update_video_workflow_settings(
+                FakeSession(),
+                project,
+                video_mode="ai_landscape_mix",
+                media_video_dir=".",
+                visual_generation_mode="anime_full_coverage",
+            )
+
+    def test_visual_generation_mode_change_invalidates_existing_assignments(self) -> None:
+        from app.workflows.video_synthesis import initial_stage
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            settings = SimpleNamespace(workspace_dir=root / "workspace")
+            project = Project(
+                id="project-id",
+                name="Completed project",
+                output_dir=str(root / "output"),
+                status="completed",
+                config_json=json.dumps(
+                    {
+                        "include_video": True,
+                        "video_mode": "ai_generated_images",
+                        "storyboard_mode": "ai",
+                        "visual_enrichment_mode": "auto",
+                        "visual_generation_mode": "curated",
+                    }
+                ),
+            )
+            scene = VisualScene(
+                id="scene-id",
+                project_id=project.id,
+                scene_index=1,
+                start_ms=0,
+                end_ms=8_000,
+                narration="Narration",
+                storyboard_json=json.dumps({"visual_summary": "Existing storyboard"}),
+            )
+            assignment = SceneAssignment(
+                id="assignment-id",
+                project_id=project.id,
+                scene_id=scene.id,
+                media_shot_id="shot-id",
+                scene_offset_start_ms=0,
+                scene_offset_end_ms=8_000,
+            )
+            variant = GeneratedImageVariant(
+                id="old-advanced-variant",
+                project_id=project.id,
+                scene_id=scene.id,
+                variant_index=0,
+                path=str(root / "old.png"),
+                prompt="old curated prompt",
+                model_path="flux",
+                input_signature="old-signature",
+                seed=1,
+                width=1344,
+                height=768,
+                steps=0,
+                guidance_scale=0,
+                status="completed",
+                workflow_version="advanced_visual_pipeline_v1",
+            )
+            locked_scene = VisualScene(
+                id="locked-scene-id",
+                project_id=project.id,
+                scene_index=2,
+                start_ms=8_000,
+                end_ms=16_000,
+                narration="Locked narration",
+                storyboard_json=json.dumps({"visual_summary": "Locked storyboard"}),
+                locked_visual=True,
+            )
+            locked_assignment = SceneAssignment(
+                id="locked-assignment-id",
+                project_id=project.id,
+                scene_id=locked_scene.id,
+                media_shot_id="locked-shot-id",
+                scene_offset_start_ms=0,
+                scene_offset_end_ms=8_000,
+            )
+            locked_variant = GeneratedImageVariant(
+                id="locked-advanced-variant",
+                project_id=project.id,
+                scene_id=locked_scene.id,
+                variant_index=0,
+                path=str(root / "locked.png"),
+                prompt="locked prompt",
+                model_path="flux",
+                input_signature="locked-signature",
+                seed=2,
+                width=1344,
+                height=768,
+                steps=0,
+                guidance_scale=0,
+                status="completed",
+                workflow_version="advanced_visual_pipeline_v1",
+            )
+            engine = create_engine("sqlite://")
+            SQLModel.metadata.create_all(engine)
+            with Session(engine) as session, patch.object(
+                project_service, "get_settings", return_value=settings
+            ), patch.object(project_service, "write_project_descriptor"):
+                session.add_all([
+                    project,
+                    scene,
+                    assignment,
+                    variant,
+                    locked_scene,
+                    locked_assignment,
+                    locked_variant,
+                ])
+                session.commit()
+
+                project_service.update_video_workflow_settings(
+                    session,
+                    project,
+                    video_mode="ai_generated_images",
+                    storyboard_mode="ai",
+                    visual_enrichment_mode="auto",
+                    visual_generation_mode="anime_full_coverage",
+                )
+
+                remaining_assignments = session.exec(select(SceneAssignment)).all()
+                self.assertEqual([item.id for item in remaining_assignments], [locked_assignment.id])
+                session.refresh(variant)
+                self.assertEqual(variant.status, "stale")
+                session.refresh(locked_variant)
+                self.assertEqual(locked_variant.status, "completed")
+                self.assertEqual(initial_stage(session, project.id), "image_generation")
+            engine.dispose()
+
     def test_video_setting_change_invalidates_only_downstream_video_state(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

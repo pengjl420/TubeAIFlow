@@ -28,6 +28,7 @@ from app.models.project import Project
 from app.models.storyboard import VisualScene
 from app.providers import ImageBatchRequest, ImageProviderRuntime, provider_registry
 from app.schemas.storyboard import StoryboardContent
+from app.services.visual_enrichment.visual_strategy import compose_image_prompts
 from app.shared.time import utc_now_iso
 
 
@@ -69,7 +70,9 @@ def _generate_project_images_local(session: Session, project: Project) -> dict:
     pending_scenes = [
         scene
         for scene in scenes
-        if scene.id not in assigned_scene_ids and scene.id not in advanced_scene_ids
+        if not scene.locked_visual
+        and scene.id not in assigned_scene_ids
+        and scene.id not in advanced_scene_ids
     ]
     if not pending_scenes:
         return {"status": "completed", "generated": 0, "reused": len(advanced_scene_ids)}
@@ -171,7 +174,9 @@ def _generate(
         if not scene.storyboard_json:
             raise ValueError(f"场景 {scene.scene_index} 尚未生成 Storyboard")
         storyboard = StoryboardContent.model_validate_json(scene.storyboard_json)
-        prompt, negative_prompt = _prompts(storyboard, settings.image_generation_negative_prompt)
+        prompt, negative_prompt = compose_image_prompts(
+            project, storyboard, settings.image_generation_negative_prompt
+        )
         scene_dir = generated_dir / f"scene_{scene.scene_index:04d}"
         attempt_key = (
             hashlib.sha1(regeneration_id.encode()).hexdigest()[:16]
@@ -328,31 +333,6 @@ def _generate(
         "generated_count": len(jobs),
         "variants": [item.model_dump() for item in variants],
     }
-
-
-def _prompts(storyboard: StoryboardContent, configured_negative: str) -> tuple[str, str]:
-    if storyboard.image_prompt:
-        negative = ", ".join(
-            item for item in (configured_negative, storyboard.negative_prompt) if item
-        )
-        return storyboard.image_prompt, negative
-    parts = [
-        storyboard.visual_summary,
-        f"documentary cinematic {storyboard.visual_type}",
-        f"{storyboard.shot_preference} shot",
-        f"{storyboard.mood} mood",
-    ]
-    if storyboard.time_period:
-        parts.append(f"historically accurate {storyboard.time_period}")
-    if storyboard.locations:
-        parts.append("location: " + ", ".join(storyboard.locations))
-    if storyboard.must_include:
-        parts.append("must visibly include " + ", ".join(storyboard.must_include))
-    parts.append(
-        "photorealistic, natural lighting, coherent anatomy, 16:9 composition, no visible text"
-    )
-    negative = ", ".join([configured_negative, *storyboard.avoid])
-    return ", ".join(part for part in parts if part), negative
 
 
 def _run_batch(
@@ -524,6 +504,34 @@ def _register_generated_image(
         ).first()
         if shot is None:
             raise RuntimeError("生成图片素材缺少 MediaShot")
+        with Image.open(path) as image:
+            width, height = image.size
+        media_file.path = str(path)
+        media_file.filename = path.name
+        media_file.file_hash = file_hash
+        media_file.size_bytes = path.stat().st_size
+        media_file.width = width
+        media_file.height = height
+        media_file.status = "ready"
+        media_file.updated_at = utc_now_iso()
+        media_file.metadata_json = json.dumps(
+            {
+                "project_id": project.id,
+                "scene_id": variant.scene_id,
+                "variant_id": variant.id,
+                "prompt": variant.prompt,
+                "negative_prompt": variant.negative_prompt,
+                "model": variant.model_name,
+                "seed": variant.seed,
+                "ai_generated": True,
+            },
+            ensure_ascii=False,
+        )
+        shot.description = variant.prompt
+        shot.thumbnail_path = str(path)
+        shot.status = "ready"
+        shot.updated_at = utc_now_iso()
+        session.add_all([media_file, shot])
 
     variant.media_file_id = media_file.id
     variant.updated_at = utc_now_iso()

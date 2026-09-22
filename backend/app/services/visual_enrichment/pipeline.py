@@ -16,7 +16,7 @@ from app.services.visual_enrichment.models import (
     VisualCandidate,
     VisualPlan,
 )
-from app.services.visual_enrichment.planning import build_overlay_timeline, build_visual_plan
+from app.services.visual_enrichment.planning import build_overlay_timeline
 from app.services.visual_enrichment.providers import (
     BgeM3OnnxEmbeddingProvider,
     ComfyUIImageProvider,
@@ -27,7 +27,8 @@ from app.services.visual_enrichment.providers import (
     MockVisionProvider,
     Qwen3VLVisionProvider,
 )
-from app.services.visual_enrichment.selection import build_candidates, select_candidates
+from app.services.visual_enrichment.selection import build_candidates
+from app.services.visual_enrichment.visual_strategy import visual_strategy_registry
 from app.services.visual_enrichment.semantic import build_chapters, segment_scenes
 from app.services.visual_enrichment.storage import ArtifactStore, GenerationHistory, sha256_bytes
 
@@ -45,10 +46,20 @@ class VisualEnrichmentPipeline:
         resume: bool = False,
         force: bool = False,
         dry_run: bool = False,
+        visual_generation_mode: str | None = None,
+        anime_scenes: list[SemanticScene] | None = None,
     ):
         self.project_dir = project_dir.resolve()
         self.project_id = self.project_dir.name
         self.config = self._load_config(config_path)
+        configured_mode = str(
+            visual_generation_mode
+            or self.config.get("visual_generation", {}).get("mode", "curated")
+        ).strip().lower()
+        self.visual_generation_mode = visual_strategy_registry.get(
+            configured_mode
+        ).metadata.id
+        self.anime_scenes = list(anime_scenes or [])
         self.resume = resume or bool(self.config.get("runtime", {}).get("resume", False))
         self.force = force
         self.dry_run = dry_run
@@ -103,10 +114,13 @@ class VisualEnrichmentPipeline:
     def run_semantic(self) -> dict[str, str]:
         timeline = self._load_timeline()
         config = self.config
+        segmentation_cfg = self._segmentation_config()
         input_hash = self._hash_payload(
             [item.model_dump(mode="json") for item in timeline],
             config.get("semantic", {}),
-            config.get("segmentation", {}),
+            segmentation_cfg,
+            self.visual_generation_mode,
+            [scene.model_dump(mode="json") for scene in self.anime_scenes],
             self.llm.name,
             getattr(self.llm, "model", "deterministic-mock-v1"),
         )
@@ -120,18 +134,21 @@ class VisualEnrichmentPipeline:
             scenes = self._read_model_list(scene_relative, SemanticScene)
         else:
             semantic_cfg = config.get("semantic", {})
-            segmentation_cfg = config.get("segmentation", {})
             chapters = build_chapters(
                 timeline,
                 self.llm,
                 tuple(semantic_cfg.get("chunk_minutes", [2, 4])),
             )
-            scenes = segment_scenes(
-                timeline,
-                chapters,
-                target_scene_sec=tuple(segmentation_cfg.get("target_scene_sec", [8, 18])),
-                min_scene_sec=int(segmentation_cfg.get("min_scene_sec", 5)),
-                max_scene_sec=int(segmentation_cfg.get("max_scene_sec", 30)),
+            scenes = (
+                self.anime_scenes
+                if self.visual_generation_mode == "anime_full_coverage" and self.anime_scenes
+                else segment_scenes(
+                    timeline,
+                    chapters,
+                    target_scene_sec=tuple(segmentation_cfg.get("target_scene_sec", [8, 18])),
+                    min_scene_sec=int(segmentation_cfg.get("min_scene_sec", 5)),
+                    max_scene_sec=int(segmentation_cfg.get("max_scene_sec", 30)),
+                )
             )
             self._write_model_list(chapter_relative, chapters, input_hash)
             self._write_model_list(scene_relative, scenes, input_hash)
@@ -171,29 +188,19 @@ class VisualEnrichmentPipeline:
             [item.model_dump(mode="json") for item in candidates],
             selection,
             self.config.get("image", {}),
+            self.config.get("anime", {}),
+            self.visual_generation_mode,
         )
         relative = "work/04_plan/visual_plan.json"
         if self._can_resume(relative, input_hash):
             plan = VisualPlan.model_validate(self._read_json(relative))
         else:
-            selected = select_candidates(
-                candidates,
+            strategy = visual_strategy_registry.get(self.visual_generation_mode)
+            plan = strategy.build_plan(
+                project_id=self.project_id,
                 duration_ms=duration_ms,
-                threshold=float(selection.get("candidate_threshold", 0.62)),
-                min_gap_sec=float(selection.get("min_generated_visual_gap_sec", 10)),
-                hard_max_per_minute=float(selection.get("hard_max_visuals_per_minute", 4)),
-            )
-            image_cfg = self.config.get("image", {})
-            video_cfg = self.config.get("video", {})
-            plan = build_visual_plan(
-                self.project_id,
-                duration_ms,
-                selected,
-                width=int(image_cfg.get("width", 1344)),
-                height=int(image_cfg.get("height", 768)),
-                subtitle_safe_zone=float(video_cfg.get("subtitle_safe_zone", 0.18)),
-                candidates_normal=int(image_cfg.get("candidates_normal", 2)),
-                candidates_high=int(image_cfg.get("candidates_high", 3)),
+                candidates=candidates,
+                config=self.config,
                 provider=self.llm,
             )
             self.artifacts.write_json(relative, plan)
@@ -337,6 +344,20 @@ class VisualEnrichmentPipeline:
                 self.run_semantic()
             self.run_plan()
         return VisualPlan.model_validate(self._read_json(relative))
+
+    def _segmentation_config(self) -> dict:
+        base = dict(self.config.get("segmentation", {}))
+        if self.visual_generation_mode != "anime_full_coverage":
+            return base
+        anime = self.config.get("anime", {})
+        base.update(
+            {
+                "target_scene_sec": anime.get("target_master_scene_sec", [8, 15]),
+                "min_scene_sec": anime.get("min_master_scene_sec", 5),
+                "max_scene_sec": anime.get("max_master_scene_sec", 15),
+            }
+        )
+        return base
 
     def _input_path(self, name: str) -> Path:
         path = self.project_dir / "input" / name

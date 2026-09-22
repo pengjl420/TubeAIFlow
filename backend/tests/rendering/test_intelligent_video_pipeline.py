@@ -44,13 +44,14 @@ class GeneratedImageVideoPipelineTests(unittest.TestCase):
                 patch.object(video_synthesis.image_generation_service, "generate_project_images"),
                 patch.object(video_synthesis.image_assignment_service, "assign_generated_images"),
                 patch.object(video_synthesis.prproj_export_service, "export_project_prproj"),
+                patch("app.services.quality.qa_service.run_quality_check"),
             ):
                 video_synthesis.run_video_synthesis(
                     session, project, "image_generation", changed.append
                 )
             self.assertEqual(
                 changed,
-                ["project_export", "completed"],
+                ["project_export", "delivery_quality_check", "completed"],
             )
 
 

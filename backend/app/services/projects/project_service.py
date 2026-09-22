@@ -628,6 +628,7 @@ def update_project_settings(
     segmentation_mode: str | None = None,
     storyboard_mode: str | None = None,
     visual_enrichment_mode: str = "auto",
+    visual_generation_mode: str | None = None,
 ) -> Project:
     project_name = name.strip()
     if not project_name:
@@ -656,6 +657,7 @@ def update_project_settings(
     if normalized_tts_engine == "cosyvoice" and not normalized_reference_audio_text:
         raise ValueError("CosyVoice requires the reference audio transcript")
 
+    config = load_project_config(project)
     resolved_video_mode = normalize_video_mode(video_mode, include_video)
     resolved_video_output_format = VIDEO_OUTPUT_PRPROJ
     resolved_segmentation_mode = normalize_segmentation_mode(segmentation_mode)
@@ -663,6 +665,14 @@ def update_project_settings(
     resolved_visual_enrichment_mode = str(visual_enrichment_mode or "auto").strip().lower()
     if resolved_visual_enrichment_mode not in {"auto", "advanced", "basic"}:
         raise ValueError("Unsupported visual enrichment mode")
+    from app.services.visual_enrichment.visual_strategy import visual_strategy_registry
+
+    requested_strategy = visual_generation_mode
+    if requested_strategy is None:
+        requested_strategy = str(config.get("visual_generation_mode") or "curated")
+    resolved_visual_generation_mode = visual_strategy_registry.resolve_for_video_mode(
+        requested_strategy, resolved_video_mode
+    )
     include_video = resolved_video_mode != VIDEO_MODE_NONE
     video_directory: Path | None = None
     if (
@@ -678,7 +688,6 @@ def update_project_settings(
     output_directory = Path(output_dir).expanduser().resolve()
     output_directory.mkdir(parents=True, exist_ok=True)
 
-    config = load_project_config(project)
     previous_tts_engine = str(config.get("tts_engine") or DEFAULT_TTS_ENGINE).strip().lower()
     previous_reference_audio_text = str(config.get("reference_audio_text") or "").strip()
     previous_cosyvoice_speed = float(config.get("cosyvoice_speed", 1.0))
@@ -705,6 +714,7 @@ def update_project_settings(
     config["segmentation_mode"] = resolved_segmentation_mode
     config["storyboard_mode"] = resolved_storyboard_mode
     config["visual_enrichment_mode"] = resolved_visual_enrichment_mode
+    config["visual_generation_mode"] = resolved_visual_generation_mode
     if video_directory:
         config["media_video_dir"] = str(video_directory)
     else:
@@ -762,13 +772,23 @@ def update_video_workflow_settings(
     storyboard_mode: str = STORYBOARD_MODE_AI,
     storyboard_transition_enabled: bool = True,
     visual_enrichment_mode: str = "auto",
+    visual_generation_mode: str | None = None,
 ) -> Project:
     """Enable or adjust downstream video production without invalidating narration."""
+    config = load_project_config(project)
     resolved_video_mode = normalize_video_mode(video_mode, video_mode != VIDEO_MODE_NONE)
     resolved_storyboard_mode = normalize_storyboard_mode(storyboard_mode)
     resolved_visual_enrichment_mode = str(visual_enrichment_mode or "auto").strip().lower()
     if resolved_visual_enrichment_mode not in {"auto", "advanced", "basic"}:
         raise ValueError("Unsupported visual enrichment mode")
+    from app.services.visual_enrichment.visual_strategy import visual_strategy_registry
+
+    requested_strategy = visual_generation_mode
+    if requested_strategy is None:
+        requested_strategy = str(config.get("visual_generation_mode") or "curated")
+    resolved_visual_generation_mode = visual_strategy_registry.resolve_for_video_mode(
+        requested_strategy, resolved_video_mode
+    )
     video_directory: Path | None = None
     if media_video_dir.strip():
         video_directory = Path(media_video_dir).expanduser().resolve()
@@ -780,13 +800,13 @@ def update_video_workflow_settings(
     ):
         raise ValueError("Video material directory is required for the selected video mode")
 
-    config = load_project_config(project)
     previous_values = {
         "video_mode": get_project_video_mode(project),
         "media_video_dir": str(config.get("media_video_dir") or ""),
         "storyboard_mode": get_storyboard_mode(project),
         "storyboard_transition_enabled": config.get("storyboard_transition_enabled", True),
         "visual_enrichment_mode": str(config.get("visual_enrichment_mode") or "auto"),
+        "visual_generation_mode": str(config.get("visual_generation_mode") or "curated"),
     }
     next_values = {
         "video_mode": resolved_video_mode,
@@ -794,6 +814,7 @@ def update_video_workflow_settings(
         "storyboard_mode": resolved_storyboard_mode,
         "storyboard_transition_enabled": storyboard_transition_enabled,
         "visual_enrichment_mode": resolved_visual_enrichment_mode,
+        "visual_generation_mode": resolved_visual_generation_mode,
     }
     if previous_values != next_values:
         video_mode_changed = previous_values["video_mode"] != next_values["video_mode"]
@@ -801,13 +822,22 @@ def update_video_workflow_settings(
             previous_values["media_video_dir"] != next_values["media_video_dir"]
         )
         storyboard_changed = previous_values["storyboard_mode"] != next_values["storyboard_mode"]
+        generation_strategy_changed = (
+            previous_values["visual_enrichment_mode"]
+            != next_values["visual_enrichment_mode"]
+            or previous_values["visual_generation_mode"]
+            != next_values["visual_generation_mode"]
+        )
         _invalidate_video_workflow(
             session,
             project,
             storyboard_changed=storyboard_changed,
+            generated_visuals_changed=(
+                video_mode_changed or storyboard_changed or generation_strategy_changed
+            ),
             assignment_policy=(
                 "all"
-                if video_mode_changed or storyboard_changed
+                if video_mode_changed or storyboard_changed or generation_strategy_changed
                 else "local"
                 if media_directory_changed
                 else "none"
@@ -833,10 +863,11 @@ def _invalidate_video_workflow(
     project: Project,
     *,
     storyboard_changed: bool,
+    generated_visuals_changed: bool,
     assignment_policy: str,
 ) -> None:
     """Invalidate video-only state while preserving narration audio and subtitles."""
-    from app.services.storyboard import scene_workspace_service
+    from app.services.storyboard import scene_workspace_service, storyboard_service
 
     scenes = list(
         session.exec(
@@ -848,6 +879,9 @@ def _invalidate_video_workflow(
     if assignment_policy != "none" or storyboard_changed:
         session.exec(delete(SceneCandidate).where(SceneCandidate.project_id == project.id))
     unlocked_scene_ids = [scene.id for scene in scenes if not scene.locked_visual]
+    if generated_visuals_changed:
+        for scene_id in unlocked_scene_ids:
+            storyboard_service.invalidate_scene_visual_records(session, scene_id)
     if unlocked_scene_ids and assignment_policy != "none":
         criteria = [
             SceneAssignment.project_id == project.id,
@@ -879,6 +913,7 @@ def _invalidate_video_workflow(
         work_dir / "renders" / "visual_track.mp4",
         work_dir / "reports" / "visual_track_report.json",
         work_dir / "reports" / "quality_report.json",
+        work_dir / "reports" / "qa.json",
         work_dir / "timeline" / "timeline.json",
         get_final_video_path(project, settings.workspace_dir),
         get_final_fcpxml_path(project, settings.workspace_dir),

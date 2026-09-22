@@ -65,3 +65,84 @@ class PipelineTests(unittest.TestCase):
             before = canonical_path.stat().st_mtime_ns
             VisualEnrichmentPipeline(project, dry_run=True, resume=True).run()
             self.assertEqual(canonical_path.stat().st_mtime_ns, before)
+
+    def test_anime_pipeline_plan_uses_all_semantic_scenes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "anime"
+            input_dir = project / "input"
+            input_dir.mkdir(parents=True)
+            input_dir.joinpath("transcript.txt").write_text(
+                "第一幕介绍人物。第二幕发生转折。第三幕给出结论。", encoding="utf-8"
+            )
+            input_dir.joinpath("subtitles.srt").write_text(
+                "1\n00:00:00,000 --> 00:00:06,000\n第一幕介绍人物。\n\n"
+                "2\n00:00:06,000 --> 00:00:12,000\n第二幕发生转折。\n\n"
+                "3\n00:00:12,000 --> 00:00:18,000\n第三幕给出结论。\n",
+                encoding="utf-8",
+            )
+            pipeline = VisualEnrichmentPipeline(
+                project,
+                dry_run=True,
+                visual_generation_mode="anime_full_coverage",
+            )
+            try:
+                pipeline.run_ingest()
+                pipeline.run_semantic()
+                pipeline.run_plan()
+                scenes = json.loads(
+                    (project / "work/02_semantic/scenes.json").read_text(encoding="utf-8")
+                )
+                plan = VisualPlan.model_validate_json(
+                    (project / "work/04_plan/visual_plan.json").read_text(encoding="utf-8")
+                )
+            finally:
+                pipeline.close()
+
+            self.assertEqual(plan.strategy, "anime_full_coverage")
+            self.assertEqual(len(plan.visuals), len(scenes))
+
+    def test_anime_pipeline_prefers_formal_project_scenes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "anime-formal"
+            input_dir = project / "input"
+            input_dir.mkdir(parents=True)
+            input_dir.joinpath("transcript.txt").write_text("第一幕。第二幕。", encoding="utf-8")
+            input_dir.joinpath("subtitles.srt").write_text(
+                "1\n00:00:00,000 --> 00:00:08,000\n第一幕。\n\n"
+                "2\n00:00:08,000 --> 00:00:16,000\n第二幕。\n",
+                encoding="utf-8",
+            )
+            formal_scenes = [
+                SemanticScene(
+                    scene_id="project:scene_0001",
+                    chapter_id="project_storyboard",
+                    start_ms=0,
+                    end_ms=16_000,
+                    segment_ids=["cue-1", "cue-2"],
+                    narration="第一幕。第二幕。",
+                    boundary_strength=0.8,
+                    visualizability=0.8,
+                    importance=0.8,
+                    novelty=0.8,
+                    factual_density=0.5,
+                    rhetorical_salience=0.7,
+                    emotion_shift=0.5,
+                )
+            ]
+            pipeline = VisualEnrichmentPipeline(
+                project,
+                dry_run=True,
+                visual_generation_mode="anime_full_coverage",
+                anime_scenes=formal_scenes,
+            )
+            try:
+                pipeline.run_ingest()
+                pipeline.run_semantic()
+                pipeline.run_plan()
+                plan = VisualPlan.model_validate_json(
+                    (project / "work/04_plan/visual_plan.json").read_text(encoding="utf-8")
+                )
+            finally:
+                pipeline.close()
+
+            self.assertEqual([item.scene_id for item in plan.visuals], ["project:scene_0001"])

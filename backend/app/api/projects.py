@@ -51,6 +51,7 @@ class ProjectSettingsRequest(BaseModel):
     segmentation_mode: str = project_service.SEGMENTATION_MODE_NEWLINE
     storyboard_mode: str = project_service.STORYBOARD_MODE_AI
     visual_enrichment_mode: str = "auto"
+    visual_generation_mode: str | None = None
 
 
 class VideoWorkflowSettingsRequest(BaseModel):
@@ -59,6 +60,7 @@ class VideoWorkflowSettingsRequest(BaseModel):
     storyboard_mode: str = project_service.STORYBOARD_MODE_AI
     storyboard_transition_enabled: bool = True
     visual_enrichment_mode: str = "auto"
+    visual_generation_mode: str | None = None
 
 
 class DirectoryPickerRequest(BaseModel):
@@ -79,6 +81,13 @@ def list_projects(session: Session = Depends(get_session)) -> dict:
     return ok(project_service.list_projects(session))
 
 
+@router.get("/visual-strategies")
+def list_visual_strategies() -> dict:
+    from app.services.visual_enrichment.visual_strategy import visual_strategy_registry
+
+    return ok([item.as_dict() for item in visual_strategy_registry.list()])
+
+
 @router.post("/projects")
 def create_project(
     name: str = Form(...),
@@ -96,6 +105,7 @@ def create_project(
     segmentation_mode: str = Form(project_service.SEGMENTATION_MODE_NEWLINE),
     storyboard_mode: str = Form(project_service.STORYBOARD_MODE_AI),
     visual_enrichment_mode: str = Form("auto"),
+    visual_generation_mode: str = Form("curated"),
     session: Session = Depends(get_session),
 ) -> dict:
     if not name.strip():
@@ -128,6 +138,7 @@ def create_project(
             segmentation_mode,
             storyboard_mode,
             visual_enrichment_mode,
+            visual_generation_mode,
         )
         if voice_profile_id.strip():
             return ok(project_service.get_project_response(session, project))
@@ -320,6 +331,7 @@ def save_project_settings(
             payload.segmentation_mode,
             payload.storyboard_mode,
             payload.visual_enrichment_mode,
+            payload.visual_generation_mode,
         )
         return ok(project_service.get_project_response(session, updated))
     except (OSError, ValueError) as exc:
@@ -408,6 +420,7 @@ def save_video_workflow_settings(
             storyboard_mode=payload.storyboard_mode,
             storyboard_transition_enabled=payload.storyboard_transition_enabled,
             visual_enrichment_mode=payload.visual_enrichment_mode,
+            visual_generation_mode=payload.visual_generation_mode,
         )
         return ok(project_service.get_project_response(session, updated))
     except (OSError, ValueError) as exc:

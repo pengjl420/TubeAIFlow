@@ -21,6 +21,7 @@ export interface Project {
     segmentation_mode?: SegmentationMode
     storyboard_mode?: StoryboardMode
     visual_enrichment_mode?: 'auto' | 'advanced' | 'basic'
+    visual_generation_mode?: VisualGenerationMode
     [key: string]: unknown
   }
   created_at: string
@@ -38,3 +39,4 @@ export type VideoGenerationMode = 'none' | 'landscape' | 'ai_generated_images' |
 export type VideoOutputFormat = 'mp4' | 'fcpxml' | 'prproj' | 'editable_both'
 export type SegmentationMode = 'newline' | 'ai'
 export type StoryboardMode = 'ai' | 'segments'
+export type VisualGenerationMode = string

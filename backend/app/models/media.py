@@ -57,6 +57,7 @@ class SceneAssignment(SQLModel, table=True):
     id: str = Field(primary_key=True)
     project_id: str = Field(index=True)
     scene_id: str = Field(index=True)
+    visual_beat_id: str | None = Field(default=None, index=True)
     media_shot_id: str = Field(index=True)
     sequence_index: int = Field(default=1, index=True)
     scene_offset_start_ms: int = 0
@@ -83,6 +84,7 @@ class GeneratedImageVariant(SQLModel, table=True):
     id: str = Field(primary_key=True)
     project_id: str = Field(index=True)
     scene_id: str = Field(index=True)
+    visual_beat_id: str | None = Field(default=None, index=True)
     variant_index: int
     path: str
     prompt: str

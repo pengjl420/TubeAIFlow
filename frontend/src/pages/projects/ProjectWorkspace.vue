@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute } from 'vue-router'
-import { CheckCircle2, CircleStop, Download, FileAudio, FileText, Folder, History, Info, Loader2, Lock, Play, RefreshCw, Save, Settings2, Video, X } from 'lucide-vue-next'
+import { AlertTriangle, CheckCircle2, ChevronRight, CircleStop, Download, FileAudio, FileText, Folder, History, Info, Loader2, Lock, Play, RefreshCw, Save, Settings2, ShieldCheck, Video, X } from 'lucide-vue-next'
 import { cancelProjectTask, enqueueProjectQualityCheck, enqueueSceneStoryboardJob, exportProjectPrproj, getProject, getProjectOutputs, getProjectQualityReport, getProjectScenes, getProjectScript, getProjectTask, getSceneRevisions, listVisualStrategies, projectOutputUrl, recordProjectManualAcceptance, restoreSceneRevision, saveProjectScript, startProjectWorkflow, updateProjectScene, updateProjectSettings, updateProjectVideoSettings, type ProjectOutputs, type ProjectSettingsInput, type ProjectTask, type QualityIssue, type QualityReport, type VisualStrategyMetadata } from '../../api/projects'
 import { listVoices, type VoiceProfile } from '../../api/voices'
 import { selectDirectory } from '../../api/settings'
@@ -79,6 +79,7 @@ const stageDetails: Record<string, { description: string, output: string }> = {
   completed: { description: '交付 PRPROJ、WAV、SRT 与关联素材；不在 TubeAiFolw 内编辑时间线。', output: '*.prproj' },
 }
 const selectedStageDetail = computed(() => stageDetails[selectedStage.value])
+const selectedStageIndex = computed(() => stages.findIndex(item => item[0] === selectedStage.value))
 const recoverableSegmentationFailure = computed(() => Boolean(
   project.value?.status === 'failed'
   && task.value?.status === 'failed'
@@ -398,18 +399,25 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', handleBeforeU
 
 <template>
   <section v-if="project" class="workspace-page">
-    <header class="taf-sticky-heading"><div><RouterLink to="/projects">项目</RouterLink><span>/</span><strong>{{ project.name }}</strong><p>{{ project.output_dir }}</p></div><div class="actions"><button v-if="videoSettingsEditable" class="secondary" @click="openProjectSettings"><Settings2 :size="15" />项目设置</button><button class="secondary" @click="load()"><RefreshCw :size="15" />刷新</button><button v-if="selectedStage === 'storyboard' && sceneDraft" class="secondary" :disabled="operating || active || sceneDirty || sceneDraft.locked_visual" @click="regenerateScene"><RefreshCw :size="15" />重做 Scene</button><button v-if="active" class="danger" :disabled="operating" @click="cancelWorkflow"><CircleStop :size="16" />停止</button><button v-else :disabled="operating || !project.script_clean_path" @click="runWorkflow"><Play :size="16" />{{ project.status === 'failed' ? '使用当前配置重新运行' : project.status === 'narration_ready' && project.config?.include_video ? '继续生成视频' : '运行工作流' }}</button></div></header>
+    <header class="workspace-header taf-sticky-heading">
+      <div class="project-heading">
+        <div class="breadcrumb"><RouterLink to="/projects">项目</RouterLink><ChevronRight :size="13" /><span>{{ project.name }}</span></div>
+        <div class="project-title"><h1>{{ project.name }}</h1><span :class="['project-status', project.status === 'failed' ? 'failed' : active ? 'running' : '']">{{ projectStatusLabel(project.status) }}</span></div>
+        <p :title="project.output_dir"><Folder :size="13" />{{ project.output_dir }}</p>
+      </div>
+      <div class="actions"><button v-if="videoSettingsEditable" class="secondary" @click="openProjectSettings"><Settings2 :size="15" />项目设置</button><button class="secondary icon-action" title="刷新项目" aria-label="刷新项目" @click="load()"><RefreshCw :size="15" /></button><button v-if="selectedStage === 'storyboard' && sceneDraft" class="secondary" :disabled="operating || active || sceneDirty || sceneDraft.locked_visual" @click="regenerateScene"><RefreshCw :size="15" />重做 Scene</button><button v-if="active" class="danger" :disabled="operating" @click="cancelWorkflow"><CircleStop :size="16" />停止任务</button><button v-else class="primary-action" :disabled="operating || !project.script_clean_path" @click="runWorkflow"><Play :size="16" />{{ project.status === 'failed' ? '重新运行' : project.status === 'narration_ready' && project.config?.include_video ? '继续生成视频' : '运行工作流' }}</button></div>
+    </header>
     <Teleport to="body"><div v-if="showSettings && settingsDraft" class="project-settings-backdrop" @mousedown.self="showSettings = false"><form class="project-settings-dialog" @submit.prevent="saveSettings"><header><div><Settings2 :size="20" /><div><h2>项目生产配置</h2><p>{{ recoverableSegmentationFailure ? '分段失败后可修改配置；重新运行会创建新任务并保留原失败记录。' : projectEditable ? '生成开始后，旁白与输出基础配置将锁定。' : '旁白已完成；当前只允许调整后续视频配置。' }}</p></div></div><button type="button" aria-label="关闭" @click="showSettings = false"><X :size="18" /></button></header><div class="project-settings-grid"><label><span>项目名称</span><input v-model="settingsDraft.name" required :disabled="!projectEditable" /></label><label><span>输出文件名</span><input v-model="settingsDraft.outputFilename" required :disabled="!projectEditable" /></label><label class="wide"><span>输出目录</span><div><input v-model="settingsDraft.outputDir" required :disabled="!projectEditable" /><button v-if="projectEditable" type="button" @click="chooseSettingsDirectory('output')"><Folder :size="14" />浏览</button></div></label><label><span>默认音色</span><select v-model="settingsDraft.voiceProfileId" required :disabled="!projectEditable"><option v-for="voice in voices" :key="voice.id" :value="voice.id">{{ voice.name }} · {{ voice.tts_engine }}</option></select></label><label><span>TTS 分段</span><select v-model="settingsDraft.segmentationMode" :disabled="!projectEditable"><option value="ai">AI 语义分段</option><option value="newline">按换行分段</option></select></label><label><span>视频生产模式</span><select v-model="settingsDraft.videoMode"><option value="ai_generated_images">AI 分镜图片</option><option value="ai_landscape_mix">AI 图片 + 本地横屏素材</option><option value="landscape">仅本地横屏素材</option><option value="none">仅配音与字幕</option></select></label><label><span>分镜方式</span><select v-model="settingsDraft.storyboardMode" :disabled="settingsDraft.videoMode === 'none'"><option value="ai">AI 语义分镜</option><option value="segments">沿用 TTS 分段</option></select></label><label v-if="compatibleVisualStrategies.length"><span>画面生成方式</span><select v-model="settingsDraft.visualGenerationMode"><option v-for="strategy in compatibleVisualStrategies" :key="strategy.id" :value="strategy.id">{{ strategy.display_name }}</option></select><small>{{ compatibleVisualStrategies.find(item => item.id === settingsDraft.visualGenerationMode)?.description }}</small></label><label v-if="settingsNeedMedia" class="wide"><span>横屏素材目录</span><div><input v-model="settingsDraft.mediaVideoDir" required /><button type="button" @click="chooseSettingsDirectory('media')"><Folder :size="14" />浏览</button></div></label><label class="check wide"><input v-model="settingsDraft.storyboardTransitionEnabled" type="checkbox" />启用基础转场</label></div><footer><button type="button" @click="showSettings = false">取消</button><button class="primary" type="submit" :disabled="saving || !settingsDraft.name.trim() || !settingsDraft.outputDir.trim() || !settingsDraft.voiceProfileId || (settingsNeedMedia && !settingsDraft.mediaVideoDir.trim())">{{ saving ? '保存中…' : '保存配置' }}</button></footer></form></div></Teleport>
 
-    <nav class="stage-bar" aria-label="项目生产阶段"><button v-for="([id, label], index) in stages" :key="id" type="button" :class="{ reached: stageReached(id), current: task?.stage === id, selected: selectedStage === id }" :aria-current="task?.stage === id ? 'step' : undefined" @click="selectedStage = id"><span><CheckCircle2 v-if="stageReached(id)" :size="14" /><b v-else>{{ index + 1 }}</b></span><small>{{ label }}</small></button></nav>
-    <section class="stage-context" aria-live="polite"><Info :size="17" /><div><strong>{{ stages.find(item => item[0] === selectedStage)?.[1] }}</strong><span>{{ selectedStageDetail.description }}</span></div><small>预期产物：{{ selectedStageDetail.output }}</small></section>
+    <nav class="stage-bar" aria-label="项目生产阶段"><button v-for="([id, label], index) in stages" :key="id" type="button" :class="{ reached: stageReached(id), current: task?.stage === id, selected: selectedStage === id }" :aria-current="task?.stage === id ? 'step' : undefined" @click="selectedStage = id"><span><CheckCircle2 v-if="stageReached(id)" :size="14" /><b v-else>{{ index + 1 }}</b></span><small>{{ label }}</small><i v-if="index < stages.length - 1" /></button></nav>
+    <section class="stage-context" aria-live="polite"><div class="stage-context-icon"><Info :size="17" /></div><div><strong>第 {{ selectedStageIndex + 1 }} 步 · {{ stages.find(item => item[0] === selectedStage)?.[1] }}</strong><span>{{ selectedStageDetail.description }}</span></div><small><span>预期产物</span>{{ selectedStageDetail.output }}</small></section>
 
     <div class="workspace-grid" :class="{ 'visual-mode': selectedStage === 'image_generation' }">
       <SceneVisualWorkspace v-if="sceneDraft && selectedStage === 'image_generation'" :project-id="projectId" :scene="sceneDraft" />
-      <aside class="scene-sidebar"><h2>Scene <small v-if="scenes.length">{{ scenes.length }}</small></h2><div v-if="scenes.length" class="scene-list"><button v-for="scene in scenes" :key="scene.id" type="button" :class="{ selected: scene.id === selectedSceneId }" @click="selectScene(scene)"><span><b>{{ String(scene.scene_index).padStart(2, '0') }}</b><small>{{ formatTime(scene.start_ms) }}–{{ formatTime(scene.end_ms) }}</small></span><strong>{{ scene.storyboard?.visual_summary || scene.narration }}</strong><em>{{ scene.status === 'reviewed' ? '已复核' : scene.status === 'generated' ? '已生成' : '草稿' }}</em></button></div><div v-else class="scene-empty"><FileText :size="28" /><strong>{{ task && stageReached('storyboard') ? 'Scene 数据准备中' : '从脚本开始' }}</strong><span>{{ task && stageReached('storyboard') ? 'Storyboard 完成后将在这里显示 Scene。' : '保存脚本并运行工作流后，Scene 会在这里逐步生成。' }}</span></div><div class="input-summary"><span>脚本字符</span><strong>{{ scriptCharacters.toLocaleString() }}</strong><span>预计旁白</span><strong>约 {{ estimatedMinutes }} 分钟</strong></div></aside>
-      <main v-if="selectedStage === 'storyboard' && sceneDraft?.storyboard" class="scene-editor"><div class="panel-head"><div><h1>Scene {{ sceneDraft.scene_index }}</h1><p>{{ formatTime(sceneDraft.start_ms) }}–{{ formatTime(sceneDraft.end_ms) }} · {{ ((sceneDraft.end_ms - sceneDraft.start_ms) / 1000).toFixed(1) }} 秒 · 版本 {{ sceneDraft.version }}</p></div><button :disabled="saving || active || !sceneDirty || !sceneDraft.narration.trim()" @click="saveScene"><Save :size="14" />{{ saving ? '保存中…' : sceneDirty ? '保存 Scene' : '已保存' }}</button></div><div class="lock-bar"><Lock :size="14" /><label><input v-model="sceneDraft.locked_text" type="checkbox" />锁定文本</label><label><input v-model="sceneDraft.locked_audio" type="checkbox" />锁定音频</label><label><input v-model="sceneDraft.locked_visual" type="checkbox" />锁定视觉</label><small>锁定内容不会被自动工作流覆盖</small></div><div class="scene-form"><label class="wide"><span>旁白文本</span><textarea v-model="sceneDraft.narration" rows="5" :disabled="selectedScene?.locked_text" /></label><label><span>视觉类型</span><input v-model="sceneDraft.storyboard.visual_type" :disabled="selectedScene?.locked_visual" /></label><label><span>推荐来源</span><select v-model="sceneDraft.storyboard.recommended_source" :disabled="selectedScene?.locked_visual"><option value="stock_video">Stock Video</option><option value="archive">Archive</option><option value="generated_image">AI Image</option><option value="generated_video">AI Video</option><option value="chart">Chart</option><option value="map">Map</option><option value="timeline">Timeline</option><option value="document">Document</option><option value="text_card">Text Card</option></select></label><label class="wide"><span>视觉摘要</span><textarea v-model="sceneDraft.storyboard.visual_summary" rows="3" :disabled="selectedScene?.locked_visual" /></label><label><span>场景分类</span><input v-model="sceneDraft.storyboard.scene_category" :disabled="selectedScene?.locked_visual" /></label><label><span>情绪</span><input v-model="sceneDraft.storyboard.mood" :disabled="selectedScene?.locked_visual" /></label><label class="wide"><span>素材搜索词</span><input v-model="sceneDraft.storyboard.primary_query" :disabled="selectedScene?.locked_visual" /></label><label class="wide"><span>图片 Prompt</span><textarea v-model="sceneDraft.storyboard.image_prompt" rows="5" :disabled="selectedScene?.locked_visual" /></label><label class="wide"><span>Negative Prompt</span><textarea v-model="sceneDraft.storyboard.negative_prompt" rows="3" :disabled="selectedScene?.locked_visual" /></label></div><div class="editor-footer"><span :class="{ dirty: sceneDirty }">{{ sceneDirty ? '有未保存修改' : 'Scene 已保存' }}</span><span>置信度 {{ Math.round((sceneDraft.confidence || 0) * 100) }}% · 事实风险 {{ sceneDraft.storyboard.fact_risk }}</span></div></main>
-      <main v-else-if="selectedStage === 'storyboard'" class="scene-editor-empty"><FileText :size="34" /><h1>暂无可编辑 Scene</h1><p>先运行到 Storyboard 阶段，系统会根据旁白节奏生成 Scene。</p></main>
-      <main v-else-if="selectedStage === 'project_export' || selectedStage === 'delivery_quality_check' || selectedStage === 'completed'" class="delivery-panel">
+      <aside class="scene-sidebar"><div class="aside-heading"><div><span>场景导航</span><h2>Scene</h2></div><small v-if="scenes.length">{{ scenes.length }} 个</small></div><div v-if="scenes.length" class="scene-list"><button v-for="scene in scenes" :key="scene.id" type="button" :class="{ selected: scene.id === selectedSceneId }" @click="selectScene(scene)"><span><b>{{ String(scene.scene_index).padStart(2, '0') }}</b><small>{{ formatTime(scene.start_ms) }}–{{ formatTime(scene.end_ms) }}</small></span><strong>{{ scene.storyboard?.visual_summary || scene.narration }}</strong><em>{{ scene.status === 'reviewed' ? '已复核' : scene.status === 'generated' ? '已生成' : '草稿' }}</em></button></div><div v-else class="scene-empty"><span class="empty-icon"><FileText :size="25" /></span><strong>{{ task && stageReached('storyboard') ? 'Scene 数据准备中' : '从脚本开始' }}</strong><span>{{ task && stageReached('storyboard') ? 'Storyboard 完成后将在这里显示 Scene。' : '保存脚本并运行工作流后，Scene 会在这里逐步生成。' }}</span></div><div class="input-summary"><span>脚本字符<strong>{{ scriptCharacters.toLocaleString() }}</strong></span><span>预计旁白<strong>约 {{ estimatedMinutes }} 分钟</strong></span></div></aside>
+      <section v-if="selectedStage === 'storyboard' && sceneDraft?.storyboard" class="workspace-main scene-editor"><div class="panel-head"><div><span class="panel-eyebrow">STORYBOARD EDITOR</span><h1>Scene {{ sceneDraft.scene_index }}</h1><p>{{ formatTime(sceneDraft.start_ms) }}–{{ formatTime(sceneDraft.end_ms) }} · {{ ((sceneDraft.end_ms - sceneDraft.start_ms) / 1000).toFixed(1) }} 秒 · 版本 {{ sceneDraft.version }}</p></div><button :disabled="saving || active || !sceneDirty || !sceneDraft.narration.trim()" @click="saveScene"><Save :size="14" />{{ saving ? '保存中…' : sceneDirty ? '保存 Scene' : '已保存' }}</button></div><div class="lock-bar"><Lock :size="14" /><label><input v-model="sceneDraft.locked_text" type="checkbox" />锁定文本</label><label><input v-model="sceneDraft.locked_audio" type="checkbox" />锁定音频</label><label><input v-model="sceneDraft.locked_visual" type="checkbox" />锁定视觉</label><small>锁定内容不会被自动工作流覆盖</small></div><div class="scene-form"><label class="wide"><span>旁白文本</span><textarea v-model="sceneDraft.narration" rows="5" :disabled="selectedScene?.locked_text" /></label><label><span>视觉类型</span><input v-model="sceneDraft.storyboard.visual_type" :disabled="selectedScene?.locked_visual" /></label><label><span>推荐来源</span><select v-model="sceneDraft.storyboard.recommended_source" :disabled="selectedScene?.locked_visual"><option value="stock_video">Stock Video</option><option value="archive">Archive</option><option value="generated_image">AI Image</option><option value="generated_video">AI Video</option><option value="chart">Chart</option><option value="map">Map</option><option value="timeline">Timeline</option><option value="document">Document</option><option value="text_card">Text Card</option></select></label><label class="wide"><span>视觉摘要</span><textarea v-model="sceneDraft.storyboard.visual_summary" rows="3" :disabled="selectedScene?.locked_visual" /></label><label><span>场景分类</span><input v-model="sceneDraft.storyboard.scene_category" :disabled="selectedScene?.locked_visual" /></label><label><span>情绪</span><input v-model="sceneDraft.storyboard.mood" :disabled="selectedScene?.locked_visual" /></label><label class="wide"><span>素材搜索词</span><input v-model="sceneDraft.storyboard.primary_query" :disabled="selectedScene?.locked_visual" /></label><label class="wide"><span>图片 Prompt</span><textarea v-model="sceneDraft.storyboard.image_prompt" rows="5" :disabled="selectedScene?.locked_visual" /></label><label class="wide"><span>Negative Prompt</span><textarea v-model="sceneDraft.storyboard.negative_prompt" rows="3" :disabled="selectedScene?.locked_visual" /></label></div><div class="editor-footer"><span :class="{ dirty: sceneDirty }">{{ sceneDirty ? '有未保存修改' : 'Scene 已保存' }}</span><span>置信度 {{ Math.round((sceneDraft.confidence || 0) * 100) }}% · 事实风险 {{ sceneDraft.storyboard.fact_risk }}</span></div></section>
+      <section v-else-if="selectedStage === 'storyboard'" class="workspace-main scene-editor-empty"><FileText :size="34" /><h1>暂无可编辑 Scene</h1><p>先运行到 Storyboard 阶段，系统会根据旁白节奏生成 Scene。</p></section>
+      <section v-else-if="selectedStage === 'project_export' || selectedStage === 'delivery_quality_check' || selectedStage === 'completed'" class="workspace-main delivery-panel">
         <div><CheckCircle2 :size="34" /><h1>剪辑工程交付</h1><p>PRPROJ 链接旁白、字幕和已选择素材，可导入支持 PR 工程导入的剪映专业版继续深度剪辑；移动项目后可能需要重新链接素材。</p></div>
         <a v-if="outputs?.final_prproj_exists" :href="projectOutputUrl(projectId, outputs.final_prproj_path, true)"><Download :size="17" />下载 PRPROJ 工程</a>
         <a v-if="outputs?.final_audio_exists" :href="projectOutputUrl(projectId, outputs.final_audio_path, true)"><FileAudio :size="17" />下载完整旁白</a>
@@ -422,9 +430,9 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', handleBeforeU
           <p v-else-if="qualityReport">未发现交付问题。</p>
           <button v-if="qualityReport?.delivery_verified && qualityReport.manual_acceptance_required && !qualityReport.stale" :disabled="operating" @click="confirmManualAcceptance">记录 Premiere / 剪映人工打开验收</button>
         </section>
-      </main>
-      <main v-else><div class="panel-head"><div><h1>脚本</h1><p>导入完整逐字稿。TTS 分段与字幕切分会保持解耦。</p></div><button :disabled="saving || !script.trim() || active || !scriptDirty" @click="saveScript">{{ saving ? '保存中…' : scriptDirty ? '保存脚本' : '已保存' }}</button></div><textarea v-model="script" :disabled="active" placeholder="在此粘贴 20～60 分钟长视频逐字稿…" /><div class="editor-footer"><span :class="{ dirty: scriptDirty }">{{ scriptDirty ? '有未保存修改' : '脚本已保存' }}</span><span>{{ scriptCharacters.toLocaleString() }} 字符 · 约 {{ estimatedMinutes }} 分钟旁白</span></div><div class="privacy">默认仅在本机处理。当前项目不会自动上传完整脚本到第三方服务。</div></main>
-      <aside class="inspector"><template v-if="selectedStage === 'storyboard' && sceneDraft"><h2><History :size="13" />版本历史 <small>当前 v{{ sceneDraft.version }}</small></h2><div class="revision-list"><button v-for="revision in revisions" :key="revision.id" type="button" :disabled="operating" @click="restoreRevision(revision)"><span>版本 {{ revision.version }}</span><small>{{ new Date(revision.created_at).toLocaleString() }}</small></button><span v-if="!revisions.length">保存修改后会在这里保留历史版本</span></div></template><template v-else><h2>项目状态</h2><dl><dt>生命周期</dt><dd>{{ projectStatusLabel(project.status) }}</dd><dt>任务状态</dt><dd>{{ taskStatusLabel(task?.status) }}</dd><dt>当前阶段</dt><dd>{{ stages.find(item => item[0] === task?.stage)?.[1] || '尚未开始' }}</dd><dt>排队位置</dt><dd>{{ task?.queue_position || '—' }}</dd></dl><p v-if="task?.error_message" class="task-error">{{ task.error_message }}</p><p v-if="taskRecoveryHint" class="task-error">{{ taskRecoveryHint }}</p></template><h2>产物 <small v-if="outputs?.files.length">{{ outputs.files.length }}</small></h2><div class="artifacts"><a v-for="file in outputs?.files" :key="file.path" :href="projectOutputUrl(projectId, file.path)" target="_blank" rel="noopener"><FileAudio v-if="file.name.endsWith('.wav')" :size="14" /><Video v-else-if="file.name.endsWith('.mp4')" :size="14" /><FileText v-else :size="14" />{{ file.relative_path }}</a><span v-if="!outputs?.files.length">暂无输出文件</span></div></aside>
+      </section>
+      <section v-else class="workspace-main script-editor"><div class="panel-head"><div><span class="panel-eyebrow">SOURCE SCRIPT</span><h1>脚本编辑器</h1><p>这里是后续配音、字幕和分镜的唯一文本来源。</p></div><button :disabled="saving || !script.trim() || active || !scriptDirty" @click="saveScript"><Save :size="14" />{{ saving ? '保存中…' : scriptDirty ? '保存脚本' : '已保存' }}</button></div><div class="editor-shell"><textarea v-model="script" :disabled="active" spellcheck="false" placeholder="在此粘贴 20～60 分钟长视频逐字稿…" /><div class="editor-footer"><span :class="{ dirty: scriptDirty }"><CheckCircle2 v-if="!scriptDirty" :size="13" />{{ scriptDirty ? '有未保存修改' : '所有修改已保存' }}</span><span>{{ scriptCharacters.toLocaleString() }} 字符 · 约 {{ estimatedMinutes }} 分钟旁白</span></div></div><div class="privacy"><ShieldCheck :size="15" /><span><strong>本地优先处理</strong>完整脚本不会自动上传；仅在所选 Provider 必须时发送必要内容。</span></div></section>
+      <aside class="inspector"><template v-if="selectedStage === 'storyboard' && sceneDraft"><div class="aside-heading"><div><span>SCENE</span><h2><History :size="14" />版本历史</h2></div><small>v{{ sceneDraft.version }}</small></div><div class="revision-list"><button v-for="revision in revisions" :key="revision.id" type="button" :disabled="operating" @click="restoreRevision(revision)"><span>版本 {{ revision.version }}</span><small>{{ new Date(revision.created_at).toLocaleString() }}</small></button><span v-if="!revisions.length">保存修改后会在这里保留历史版本</span></div></template><template v-else><div class="aside-heading"><div><span>WORKFLOW</span><h2>项目状态</h2></div><i :class="project.status === 'failed' ? 'failed' : active ? 'running' : ''" /></div><dl><dt>生命周期</dt><dd>{{ projectStatusLabel(project.status) }}</dd><dt>任务状态</dt><dd>{{ taskStatusLabel(task?.status) }}</dd><dt>当前阶段</dt><dd>{{ stages.find(item => item[0] === task?.stage)?.[1] || '尚未开始' }}</dd><dt>排队位置</dt><dd>{{ task?.queue_position || '—' }}</dd></dl><div v-if="task?.error_message" class="task-error"><AlertTriangle :size="16" /><div><strong>任务执行失败</strong><p>{{ task.error_message }}</p></div></div><div v-if="taskRecoveryHint" class="recovery-card"><strong>建议处理方式</strong><p>{{ taskRecoveryHint }}</p><button v-if="videoSettingsEditable" type="button" @click="openProjectSettings"><Settings2 :size="13" />调整项目设置</button></div></template><div class="artifact-heading"><h2>项目产物</h2><small v-if="outputs?.files.length">{{ outputs.files.length }} 个文件</small></div><div class="artifacts"><a v-for="file in outputs?.files" :key="file.path" :href="projectOutputUrl(projectId, file.path)" target="_blank" rel="noopener"><span><FileAudio v-if="file.name.endsWith('.wav')" :size="14" /><Video v-else-if="file.name.endsWith('.mp4')" :size="14" /><FileText v-else :size="14" /></span><b>{{ file.relative_path }}</b><ChevronRight :size="13" /></a><div v-if="!outputs?.files.length" class="artifact-empty"><FileText :size="20" /><span>运行工作流后，产物会显示在这里</span></div></div></aside>
     </div>
     <footer class="job-strip"><Loader2 v-if="active" class="spin" :size="16" /><CheckCircle2 v-else :size="16" /><strong>{{ active ? `正在执行：${task?.stage}` : '本地 Engine 已就绪' }}</strong><span>所有耗时步骤通过持久化任务运行，关闭页面不会中断任务。</span></footer>
   </section>
@@ -444,4 +452,216 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', handleBeforeU
 <style scoped>
 .lock-bar{align-items:center;background:#f7f9fc;border:1px solid #e4e9f1;border-radius:8px;display:flex;font-size:11px;gap:12px;margin-bottom:12px;padding:9px}.lock-bar label{align-items:center;display:flex;gap:5px}.lock-bar small{color:#8490a3;margin-left:auto}.scene-form input:disabled,.scene-form select:disabled,.scene-form textarea:disabled{background:#f2f4f7;color:#8b95a5}.revision-list{display:grid;gap:6px;max-height:210px;overflow:auto}.revision-list>button{background:#f7f9fc;border:1px solid #e2e7ef;border-radius:7px;display:grid;gap:2px;padding:8px;text-align:left}.revision-list>button:hover{border-color:#9fc0f6}.revision-list span{font-size:10px}.revision-list small{color:#8792a4;font-size:9px}.revision-list>span{color:#929cad;line-height:1.5}.inspector h2{align-items:center;display:flex;gap:5px}.inspector h2 small{margin-left:auto}@media(max-width:700px){.lock-bar{align-items:flex-start;flex-wrap:wrap}.lock-bar small{flex-basis:100%;margin-left:0}}
 .workspace-grid.visual-mode>.scene-sidebar{grid-column:1}.workspace-grid.visual-mode>.visual-workspace{grid-column:2}.workspace-grid.visual-mode>main:not(.visual-workspace){display:none}.workspace-grid.visual-mode>.inspector{grid-column:3}@media(max-width:1050px){.workspace-grid.visual-mode>.scene-sidebar,.workspace-grid.visual-mode>.visual-workspace,.workspace-grid.visual-mode>.inspector{grid-column:1}}
+</style>
+
+<style scoped>
+.workspace-page {
+  --workspace-blue: #1167e8;
+  --workspace-blue-soft: #edf5ff;
+  --workspace-border: #dfe6ef;
+  --workspace-muted: #718096;
+  color: #172033;
+  min-width: 0;
+}
+
+.workspace-page > .workspace-header {
+  align-items: center;
+  display: flex;
+  gap: 24px;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+.workspace-page .project-heading {
+  display: block;
+  min-width: 0;
+}
+
+.breadcrumb {
+  align-items: center;
+  color: #8994a6;
+  display: flex;
+  font-size: 11px;
+  gap: 3px;
+  margin-bottom: 7px;
+}
+
+.breadcrumb a { color: var(--workspace-blue); font-weight: 700; }
+.project-title { align-items: center; display: flex; gap: 10px; }
+.project-title h1 { font-size: 23px; letter-spacing: -.025em; margin: 0; }
+.project-status { background: #edf1f5; border-radius: 999px; color: #59677b; font-size: 10px; font-weight: 750; padding: 4px 8px; }
+.project-status.failed { background: #fff0f1; color: #d13d49; }
+.project-status.running { background: #e8f2ff; color: var(--workspace-blue); }
+.workspace-page .project-heading > p {
+  align-items: center;
+  color: #7d899b;
+  display: flex;
+  font-size: 11px;
+  gap: 5px;
+  margin: 7px 0 0;
+  max-width: 620px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actions { flex: none; gap: 8px; }
+.actions button, .panel-head button {
+  border: 1px solid transparent;
+  border-radius: 9px;
+  min-height: 40px;
+  padding: 8px 14px;
+  transition: background .16s ease, border-color .16s ease, box-shadow .16s ease, transform .16s ease;
+}
+.actions button:hover:not(:disabled), .panel-head button:hover:not(:disabled) { transform: translateY(-1px); }
+.actions .secondary { border-color: #d9e2ee; box-shadow: 0 1px 2px #17203308; }
+.actions .secondary:hover:not(:disabled) { background: #f7faff; border-color: #b8cbe7; }
+.actions .icon-action { justify-content: center; padding: 0; width: 40px; }
+.actions .primary-action { background: var(--workspace-blue); box-shadow: 0 5px 14px #1167e82b; }
+.actions .primary-action:hover:not(:disabled) { background: #0b5ed7; box-shadow: 0 7px 18px #1167e838; }
+.actions button:disabled, .panel-head button:disabled { cursor: not-allowed; opacity: .48; }
+
+.stage-bar {
+  border-color: var(--workspace-border);
+  border-radius: 13px;
+  box-shadow: 0 3px 14px #263a5908;
+  margin-bottom: 10px;
+  padding: 7px;
+}
+.stage-bar button { gap: 8px; justify-content: flex-start; min-height: 48px; padding: 7px 9px; }
+.stage-bar button > i { background: #dfe5ed; height: 1px; margin-left: auto; width: 22%; }
+.stage-bar button:not(:last-child):after { display: none; }
+.stage-bar button.selected { background: var(--workspace-blue-soft); box-shadow: inset 0 0 0 1px #bfd7ff; color: var(--workspace-blue); }
+.stage-bar button:hover:not(.selected) { background: #f7f9fc; color: #5a687d; }
+.stage-bar span { flex: none; height: 27px; width: 27px; }
+.stage-bar small { font-size: 11px; font-weight: 650; white-space: nowrap; }
+.stage-bar .current span { box-shadow: 0 0 0 4px #1167e814; }
+.stage-bar .reached > i { background: #a9dec9; }
+
+.stage-context {
+  background: linear-gradient(90deg, #f4f8ff 0%, #f9fbfe 100%);
+  border-color: #dbe7f7;
+  border-radius: 10px;
+  gap: 11px;
+  margin-bottom: 14px;
+  padding: 10px 13px;
+}
+.stage-context-icon { align-items: center; background: #e2eeff; border-radius: 8px; color: var(--workspace-blue); display: flex; height: 32px; justify-content: center; width: 32px; }
+.stage-context strong { font-size: 12px; }
+.stage-context > small { align-items: flex-end; color: #52637b; display: flex; flex-direction: column; font-size: 10px; gap: 2px; }
+.stage-context > small span { color: #97a2b2; font-size: 9px; text-transform: uppercase; }
+
+.workspace-grid {
+  align-items: stretch;
+  gap: 14px;
+  grid-template-columns: minmax(210px, 232px) minmax(0, 1fr) minmax(250px, 278px);
+  min-height: 560px;
+}
+.workspace-grid > aside, .workspace-grid > .workspace-main, .workspace-grid > .visual-workspace {
+  background: #fff;
+  border: 1px solid var(--workspace-border);
+  border-radius: 13px;
+  box-shadow: 0 5px 22px #263a5908;
+  min-width: 0;
+  padding: 17px;
+}
+.workspace-grid > .workspace-main { display: block; width: 100%; }
+
+.aside-heading { align-items: center; display: flex; justify-content: space-between; margin-bottom: 17px; }
+.aside-heading > div { display: grid; gap: 2px; }
+.aside-heading > div > span, .panel-eyebrow { color: #96a1b2; font-size: 8px; font-weight: 800; letter-spacing: .12em; }
+.aside-heading h2 { align-items: center; display: flex; font-size: 15px; gap: 6px; margin: 0; }
+.aside-heading > small { background: #f0f4f8; border-radius: 999px; color: #68758a; font-size: 9px; padding: 4px 7px; }
+.aside-heading > i { background: #11a978; border: 3px solid #dcf7ed; border-radius: 50%; height: 10px; width: 10px; }
+.aside-heading > i.failed { background: #df4652; border-color: #ffe0e3; }
+.aside-heading > i.running { background: var(--workspace-blue); border-color: #dceaff; }
+
+.scene-empty { min-height: 300px; padding: 50px 12px; }
+.empty-icon { align-items: center; background: #edf3fb; border-radius: 12px; color: #7185a3; display: flex; height: 50px; justify-content: center; margin-bottom: 4px; width: 50px; }
+.scene-empty strong { color: #34445c; font-size: 14px; }
+.scene-empty > span:last-child { max-width: 170px; }
+.input-summary { display: grid; gap: 8px; grid-template-columns: 1fr; margin-top: auto; }
+.input-summary > span { align-items: center; display: flex; justify-content: space-between; }
+.input-summary strong { color: #26354b; font-size: 11px; }
+
+.panel-head { border-bottom: 1px solid #edf1f5; margin: 0 -17px 16px; padding: 0 17px 15px; }
+.panel-head h1 { font-size: 21px; letter-spacing: -.02em; margin-top: 3px; }
+.panel-head p { font-size: 11px; margin-bottom: 0; }
+.panel-head button { background: var(--workspace-blue); box-shadow: 0 4px 12px #1167e824; }
+.panel-head button:disabled { background: #e8eef6; border-color: #dfe6ef; box-shadow: none; color: #8290a3; }
+
+.script-editor { display: flex !important; flex-direction: column; }
+.editor-shell { border: 1px solid #dce4ee; border-radius: 10px; display: flex; flex: 1; flex-direction: column; min-height: 430px; overflow: hidden; transition: border-color .15s, box-shadow .15s; }
+.editor-shell:focus-within { border-color: #76a8f0; box-shadow: 0 0 0 3px #1167e812; }
+.workspace-grid > .script-editor textarea {
+  border: 0;
+  border-radius: 0;
+  flex: 1;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.85;
+  min-height: 380px;
+  outline: 0;
+  padding: 18px 20px;
+  resize: vertical;
+  width: 100%;
+}
+.editor-shell .editor-footer { background: #f8fafc; border-top: 1px solid #e7ecf2; min-height: 38px; padding: 8px 12px; }
+.editor-footer span:first-child { align-items: center; display: flex; gap: 5px; }
+.privacy { align-items: center; background: #f3f8f6; color: #527267; display: flex; gap: 9px; line-height: 1.4; margin-top: 12px; padding: 10px 12px; }
+.privacy svg { color: #0a9b6c; flex: none; }
+.privacy strong { color: #27735b; display: block; font-size: 10px; }
+
+.inspector dl { border-bottom: 1px solid #edf1f5; gap: 11px; margin: 0 0 14px; padding-bottom: 15px; }
+.inspector dt { font-size: 10px; }
+.inspector dd { color: #2d3b50; font-size: 11px; text-align: right; }
+.task-error { align-items: flex-start; background: #fff3f3; border: 1px solid #ffdadd; border-radius: 9px; color: #c83845; display: flex; gap: 8px; margin: 0 0 9px; padding: 10px; }
+.task-error svg { flex: none; margin-top: 1px; }
+.task-error strong { color: #b82e3b; display: block; font-size: 10px; margin-bottom: 4px; }
+.task-error p { line-height: 1.5; margin: 0; overflow-wrap: anywhere; }
+.recovery-card { background: #fff9ed; border: 1px solid #f5dfad; border-radius: 9px; color: #7d642f; font-size: 10px; margin-bottom: 14px; padding: 10px; }
+.recovery-card strong { color: #68501f; }
+.recovery-card p { line-height: 1.55; margin: 5px 0 8px; }
+.recovery-card button { align-items: center; background: #fff; border: 1px solid #e8ca86; border-radius: 6px; color: #7b5a16; display: flex; font-size: 9px; gap: 4px; padding: 6px 8px; }
+.artifact-heading { align-items: center; display: flex; justify-content: space-between; margin: 17px 0 10px; }
+.artifact-heading h2 { font-size: 13px; margin: 0; }
+.artifact-heading small { color: #8b96a6; font-size: 9px; }
+.artifacts { gap: 5px; }
+.artifacts a { border-radius: 7px; color: #445b79; display: grid; grid-template-columns: 28px minmax(0,1fr) auto; padding: 6px; }
+.artifacts a:hover { background: #f5f8fc; color: var(--workspace-blue); }
+.artifacts a > span { align-items: center; background: #edf3fb; border-radius: 6px; display: flex; height: 28px; justify-content: center; width: 28px; }
+.artifacts a b { align-self: center; font-size: 10px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.artifact-empty { align-items: center; background: #f8fafc; border: 1px dashed #dce4ee; border-radius: 8px; color: #98a2b1; display: flex; flex-direction: column; font-size: 10px; gap: 7px; line-height: 1.5; padding: 18px 10px; text-align: center; }
+
+.job-strip { background: #1b293d; border: 1px solid #2b3b52; border-radius: 10px; box-shadow: 0 6px 18px #1720331a; margin-top: 14px; min-height: 43px; padding: 11px 15px; }
+.job-strip > svg { color: #41d4a1; }
+
+.workspace-grid.visual-mode > .workspace-main:not(.visual-workspace) { display: none !important; }
+
+@media (max-width: 1280px) {
+  .workspace-grid { grid-template-columns: 210px minmax(0,1fr) 240px; }
+  .stage-bar button { padding-inline: 6px; }
+  .stage-bar button > i { width: 12%; }
+}
+
+@media (max-width: 1050px) {
+  .workspace-grid { grid-template-columns: 1fr; }
+  .workspace-grid > aside, .workspace-grid > .workspace-main, .workspace-grid > .visual-workspace { min-height: auto; }
+  .scene-empty { min-height: 180px; }
+  .stage-bar { display: flex; overflow-x: auto; }
+  .stage-bar button { flex: 0 0 116px; }
+  .stage-bar button > i { display: none; }
+}
+
+@media (max-width: 700px) {
+  .workspace-page > .workspace-header { align-items: stretch; display: grid; }
+  .project-title h1 { font-size: 20px; }
+  .actions { display: grid; grid-template-columns: 1fr 40px; }
+  .actions button { justify-content: center; }
+  .actions .primary-action, .actions .danger { grid-column: 1 / -1; grid-row: 2; }
+  .stage-context > div:nth-child(2) span { display: none; }
+  .stage-context > small { display: none; }
+  .workspace-grid > aside, .workspace-grid > .workspace-main { padding: 14px; }
+  .panel-head { margin-inline: -14px; padding-inline: 14px; }
+}
 </style>

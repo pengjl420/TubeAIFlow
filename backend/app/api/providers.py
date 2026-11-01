@@ -82,7 +82,11 @@ def list_providers(category: ProviderCategory | None = Query(default=None)) -> d
             {
                 **item.model_dump(mode="json"),
                 "available": (
-                    bool(settings.deepseek_api_key.strip()) if item.id == "llm.deepseek" else True
+                    bool(settings.deepseek_api_key.strip())
+                    if item.id == "llm.deepseek"
+                    else bool(settings.seedream_api_key.strip())
+                    if item.id == "image.seedream_5"
+                    else True
                 ),
                 "legacy_id": item.legacy_id,
             }
@@ -100,7 +104,19 @@ def get_provider(provider_id: str) -> dict:
             status_code=404,
             detail={"error": str(exc), "code": "PROVIDER_NOT_FOUND"},
         ) from exc
+    settings = get_settings()
+    available = (
+        bool(settings.deepseek_api_key.strip())
+        if item.id == "llm.deepseek"
+        else bool(settings.seedream_api_key.strip())
+        if item.id == "image.seedream_5"
+        else True
+    )
     return {
         "success": True,
-        "data": {**item.model_dump(mode="json"), "available": True, "legacy_id": item.legacy_id},
+        "data": {
+            **item.model_dump(mode="json"),
+            "available": available,
+            "legacy_id": item.legacy_id,
+        },
     }

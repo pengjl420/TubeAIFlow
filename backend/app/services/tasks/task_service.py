@@ -180,6 +180,50 @@ def resume_failed_task(session: Session, task: TaskRun, *, current_stage: str) -
     session.refresh(task)
 
 
+def restart_failed_task_with_current_config(
+    session: Session,
+    task: TaskRun,
+    project: Project,
+) -> TaskRun:
+    """Create a fresh audited run instead of reusing a failed run's stale snapshot."""
+    if task.status != "failed":
+        raise ValueError("当前任务不处于失败状态")
+    if task.batch_id or task.batch_item_id:
+        raise ValueError("批次任务必须从批次工作区重试")
+
+    new_task = enqueue_project_task(
+        session,
+        project,
+        include_video=task.include_video,
+        workflow=task.workflow,
+        current_stage=task.current_stage or "segmenting",
+        reuse_active=False,
+        commit=False,
+        job_type=task.job_type,
+        scene_id=task.scene_id,
+        max_retries=task.max_retries,
+        request=load_json_object(task.request_json),
+    )
+    checkpoint = load_json_object(task.checkpoint_json)
+    history = checkpoint.get("stage_history")
+    if not isinstance(history, list):
+        history = []
+    history.append(
+        {
+            "event": "restarted_with_current_config",
+            "stage": new_task.current_stage,
+            "at": utc_now_iso(),
+            "new_task_id": new_task.id,
+        }
+    )
+    checkpoint["stage_history"] = history[-100:]
+    task.checkpoint_json = dump_json(checkpoint)
+    session.add(task)
+    session.commit()
+    session.refresh(new_task)
+    return new_task
+
+
 def _is_video_task(workflow: str, current_stage: str) -> bool:
     try:
         return current_stage in get_workflow_runtime(workflow).video_stages

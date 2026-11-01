@@ -311,7 +311,16 @@ def save_project_settings(
     project = project_service.get_project(session, project_id)
     if not project:
         fail("Project not found", 404)
-    if not project_service.is_project_editable(project):
+    from app.services.tasks import task_service
+
+    latest_task = task_service.get_project_status_task(session, project_id)
+    recoverable_segmentation_failure = bool(
+        project.status == "failed"
+        and latest_task
+        and latest_task.status == "failed"
+        and latest_task.current_stage == "segmenting"
+    )
+    if not project_service.is_project_editable(project) and not recoverable_segmentation_failure:
         fail("只有未开始生成的项目可以修改", 409)
     try:
         updated = project_service.update_project_settings(

@@ -122,6 +122,10 @@ class Settings(BaseModel):
         "text, watermark, logo, caption, signature, deformed anatomy, extra fingers, "
         "duplicate people, low resolution, blurry, oversaturated"
     )
+    image_generation_provider_id: Literal["image.seedream_5", "image.local_sdxl"] = (
+        "image.seedream_5"
+    )
+    seedream_api_key: str = ""
     qwen_tts_root: Path | None = None
     qwen_tts_python: Path | None = None
     qwen_tts_model_dir: Path | None = None

@@ -303,13 +303,17 @@ def start_project_workflow(project_id: str, session: Session = Depends(get_sessi
         session, project_id, "narration_generation"
     )
     if latest and latest.status == "failed":
-        task_service.resume_failed_task(
-            session,
-            latest,
-            current_stage=latest.current_stage or "segmenting",
-        )
+        if latest.batch_id or latest.batch_item_id:
+            task_service.resume_failed_task(
+                session,
+                latest,
+                current_stage=latest.current_stage or "segmenting",
+            )
+            task = latest
+        else:
+            task = task_service.restart_failed_task_with_current_config(session, latest, project)
         task_worker.wake_worker()
-        return {"success": True, "data": task_service.serialize_task(session, latest)}
+        return {"success": True, "data": task_service.serialize_task(session, task)}
     try:
         initial_stage = narration_generation.initial_stage(
             session,

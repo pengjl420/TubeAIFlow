@@ -51,14 +51,20 @@ class SettingsModelTests(unittest.TestCase):
         )
 
     def test_public_settings_never_expose_secret_values(self) -> None:
-        configured = Settings(deepseek_api_key="secret", workspace_dir=Path("workspace"))
+        configured = Settings(
+            deepseek_api_key="secret",
+            seedream_api_key="ark-secret",
+            workspace_dir=Path("workspace"),
+        )
         with patch(
             "app.services.settings.system_settings_service.get_settings", return_value=configured
         ):
             public = get_public_settings()
-        self.assertEqual(SECRET_FIELDS, {"deepseek_api_key"})
+        self.assertEqual(SECRET_FIELDS, {"deepseek_api_key", "seedream_api_key"})
         self.assertEqual(public["deepseek_api_key"], "")
         self.assertTrue(public["deepseek_api_key_configured"])
+        self.assertEqual(public["seedream_api_key"], "")
+        self.assertTrue(public["seedream_api_key_configured"])
 
     def test_legacy_deepseek_model_is_migrated(self) -> None:
         self.assertEqual(

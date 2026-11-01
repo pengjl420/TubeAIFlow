@@ -50,9 +50,16 @@ class ProviderRegistryTests(unittest.TestCase):
     def test_local_image_provider_has_executable_runtime_adapter(self) -> None:
         image_generation_service.bind_builtin_provider_runtimes()
         providers = provider_registry.list(ProviderCategory.IMAGE)
-        self.assertEqual([item.id for item in providers], ["image.local_sdxl"])
+        self.assertEqual(
+            [item.id for item in providers],
+            ["image.local_sdxl", "image.seedream_5"],
+        )
         self.assertIsInstance(
             provider_registry.runtime("image.local_sdxl", ImageProviderRuntime),
+            ImageProviderRuntime,
+        )
+        self.assertIsInstance(
+            provider_registry.runtime("image.seedream_5", ImageProviderRuntime),
             ImageProviderRuntime,
         )
 

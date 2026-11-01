@@ -285,7 +285,10 @@ def delete_project(session: Session, project: Project) -> dict:
         ).all():
             session.delete(shot)
         media_file = session.get(MediaFile, media_id)
-        if media_file and media_file.provider == "local_image_generation":
+        if media_file and media_file.provider in {
+            "local_image_generation",
+            "image.seedream_5",
+        }:
             session.delete(media_file)
     for revision in session.exec(
         select(SceneRevision).where(SceneRevision.project_id == project.id)
@@ -438,7 +441,7 @@ def _invalidate_script_outputs(session: Session, project: Project) -> None:
     for media_id in generated_media_ids:
         session.exec(delete(MediaShot).where(MediaShot.media_file_id == media_id))
         media = session.get(MediaFile, media_id)
-        if media and media.provider == "local_image_generation":
+        if media and media.provider in {"local_image_generation", "image.seedream_5"}:
             session.delete(media)
 
     settings = get_settings()

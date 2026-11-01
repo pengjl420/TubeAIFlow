@@ -6,6 +6,12 @@ from app.config import Settings, get_settings
 from app.infrastructure import process_runner as task_control
 
 
+class ProviderOutputTruncatedError(RuntimeError):
+    """The provider reached its output budget before completing the response."""
+
+    code = "PROVIDER_OUTPUT_TRUNCATED"
+
+
 class DeepSeekClient:
     def __init__(self, settings: Settings | None = None, project_id: str | None = None) -> None:
         self.settings = settings or get_settings()
@@ -58,7 +64,7 @@ class DeepSeekClient:
                 data = response.json()
                 choice = data["choices"][0]
                 if choice.get("finish_reason") == "length":
-                    raise RuntimeError("DeepSeek 输出被 max_tokens 截断")
+                    raise ProviderOutputTruncatedError("DeepSeek 输出被 max_tokens 截断")
                 content = choice["message"].get("content")
                 if not isinstance(content, str) or not content.strip():
                     raise RuntimeError("DeepSeek 返回了空内容")
@@ -68,8 +74,19 @@ class DeepSeekClient:
                 return parsed
             except task_control.TaskCancelledError:
                 raise
+            except ProviderOutputTruncatedError:
+                # Retrying the same deterministic oversized request cannot make
+                # it fit within the provider's output budget.
+                raise
+            except httpx.HTTPStatusError as exc:
+                status_code = exc.response.status_code
+                if status_code not in {408, 409, 425, 429} and status_code < 500:
+                    raise RuntimeError(
+                        f"DeepSeek 请求失败：HTTP {status_code}，请检查模型与凭据配置"
+                    ) from exc
+                last_error = exc
             except (
-                httpx.HTTPError,
+                httpx.RequestError,
                 OSError,
                 KeyError,
                 IndexError,

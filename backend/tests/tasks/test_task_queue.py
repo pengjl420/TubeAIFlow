@@ -465,6 +465,78 @@ class TaskQueueTests(unittest.TestCase):
             self.assertEqual(checkpoint["current_stage"], "audio_merge")
             self.assertEqual(checkpoint["stage_history"][-1]["event"], "resumed")
 
+    def test_failed_task_restart_uses_current_project_config_and_preserves_history(self) -> None:
+        with Session(self.engine) as session:
+            project = Project(
+                id="project-restart",
+                name="Project",
+                status="failed",
+                config_json='{"segmentation_mode":"newline","include_video":false}',
+            )
+            failed = TaskRun(
+                id="failed-task",
+                project_id=project.id,
+                status="failed",
+                current_stage="segmenting",
+                queue_sequence=1,
+                config_snapshot_json=(
+                    '{"format_version":1,"project":{"segmentation_mode":"ai"},"settings":{}}'
+                ),
+            )
+            session.add(project)
+            session.add(failed)
+            session.commit()
+
+            restarted = task_service.restart_failed_task_with_current_config(
+                session, failed, project
+            )
+
+            self.assertNotEqual(restarted.id, failed.id)
+            self.assertEqual(restarted.status, "queued")
+            snapshot = json.loads(restarted.config_snapshot_json)
+            self.assertEqual(snapshot["project"]["segmentation_mode"], "newline")
+            session.refresh(failed)
+            self.assertEqual(failed.status, "failed")
+            history = json.loads(failed.checkpoint_json)["stage_history"]
+            self.assertEqual(history[-1]["event"], "restarted_with_current_config")
+            self.assertEqual(history[-1]["new_task_id"], restarted.id)
+
+    def test_start_workflow_replaces_failed_non_batch_run_with_current_snapshot(self) -> None:
+        with Session(self.engine) as session:
+            project = Project(
+                id="project-api-restart",
+                name="Project",
+                status="failed",
+                script_clean_path="saved.txt",
+                config_json=(
+                    '{"output_filename":"project","segmentation_mode":"newline",'
+                    '"include_video":false}'
+                ),
+            )
+            failed = TaskRun(
+                id="failed-api-task",
+                project_id=project.id,
+                status="failed",
+                current_stage="segmenting",
+                queue_sequence=1,
+                config_snapshot_json=(
+                    '{"format_version":1,"project":{"segmentation_mode":"ai"},"settings":{}}'
+                ),
+            )
+            session.add(project)
+            session.add(failed)
+            session.commit()
+
+            with patch.object(tasks.task_worker, "wake_worker") as wake_worker:
+                response = tasks.start_project_workflow(project.id, session)
+
+            restarted = session.get(TaskRun, response["data"]["id"])
+            self.assertIsNotNone(restarted)
+            self.assertNotEqual(restarted.id, failed.id)
+            snapshot = json.loads(restarted.config_snapshot_json)
+            self.assertEqual(snapshot["project"]["segmentation_mode"], "newline")
+            wake_worker.assert_called_once_with()
+
 
 class DatabaseMigrationTests(unittest.TestCase):
     def test_existing_database_adds_task_table_once(self) -> None:
@@ -484,8 +556,7 @@ class DatabaseMigrationTests(unittest.TestCase):
                     index["name"] for index in inspect(engine).get_indexes("media_files")
                 }
                 assignment_columns = {
-                    column["name"]
-                    for column in inspect(engine).get_columns("scene_assignments")
+                    column["name"] for column in inspect(engine).get_columns("scene_assignments")
                 }
                 variant_columns = {
                     column["name"]

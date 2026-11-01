@@ -33,8 +33,11 @@ class ImageProviderRuntime(ProviderRuntime):
     """Executable image adapter isolated from workflow and persistence models."""
 
     generate_batch: GenerateImageBatch
+    local: bool = True
 
     def health_check(self, request: ImageBatchRequest) -> ProviderHealth:
+        if not self.local:
+            return ProviderHealth(available=True)
         missing = [
             str(path)
             for path in (request.python_path, request.model_path, request.config_dir)
@@ -48,9 +51,9 @@ class ImageProviderRuntime(ProviderRuntime):
         return ProviderHealth(available=True)
 
     def estimate_cost(self, request: ImageBatchRequest) -> ProviderCostEstimate:
-        """Current image adapter is local; do not invent GPU electricity cost."""
+        """Expose billing ownership without inventing a volatile per-image price."""
         return ProviderCostEstimate(
-            billing=ProviderBillingMode.LOCAL,
+            billing=ProviderBillingMode.LOCAL if self.local else ProviderBillingMode.EXTERNAL,
             estimated_usd=0,
             usage={"images": len(request.jobs)},
         )

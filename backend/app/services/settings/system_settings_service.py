@@ -10,7 +10,7 @@ from app.models.settings import SystemSetting
 from app.shared.time import utc_now_iso
 
 
-SECRET_FIELDS = {"deepseek_api_key"}
+SECRET_FIELDS = {"deepseek_api_key", "seedream_api_key"}
 SECRET_SUFFIXES = ("_api_key", "_token", "_secret", "_password")
 
 

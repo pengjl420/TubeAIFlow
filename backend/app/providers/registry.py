@@ -182,6 +182,18 @@ def _register_builtin_providers() -> None:
             ),
         )
     )
+    provider_registry.register(
+        ProviderMetadata(
+            id="image.seedream_5",
+            category=ProviderCategory.IMAGE,
+            display_name="Doubao Seedream 5.0",
+            model_id="doubao-seedream-5-0-260128",
+            model_version="5.0",
+            local=False,
+            capabilities=frozenset(),
+            configuration_fields=("seedream_api_key",),
+        )
+    )
 
 
 _register_builtin_providers()

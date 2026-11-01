@@ -65,6 +65,22 @@ def enrich_project_visuals(session: Session, project: Project) -> dict:
                 "strategy_scene_count": strategy_scene_count,
             },
         )
+    image_provider_id = str(
+        config.get("image_provider_id")
+        or getattr(get_settings(), "image_generation_provider_id", "image.local_sdxl")
+    )
+    if image_provider_id == "image.seedream_5":
+        return _write_status(
+            project,
+            {
+                "status": "skipped",
+                "mode": mode,
+                "visual_generation_mode": visual_generation_mode,
+                "strategy_scene_count": strategy_scene_count,
+                "reason": "seedream_is_active_image_provider",
+                "image_provider_id": image_provider_id,
+            },
+        )
     if (
         visual_generation_mode == "anime_full_coverage"
         and strategy_scene_count == 0

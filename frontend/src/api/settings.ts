@@ -71,6 +71,9 @@ export interface SystemSettings {
   image_generation_candidates_per_scene: number
   image_generation_cpu_offload: boolean
   image_generation_negative_prompt: string
+  image_generation_provider_id: 'image.seedream_5' | 'image.local_sdxl'
+  seedream_api_key: string
+  seedream_api_key_configured: boolean
   qwen_tts_root: string | null
   qwen_tts_python: string | null
   qwen_tts_model_dir: string | null

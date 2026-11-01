@@ -115,10 +115,12 @@ Scene Preview 与基础质量检查
 - CPU / GPU / API / FFMPEG / NETWORK Resource Class 与并发限制
 - Queue Sequence、Task Lease、Heartbeat，避免 Worker 重复领取
 - Pause、Resume、Cancel、Retry、Checkpoint、配置快照
+- 失败的非批次项目重新运行时会创建使用当前配置快照的新 TaskRun，并保留原失败任务审计记录；分段阶段失败后允许修改项目与分段配置
 - 应用启动后恢复中断任务
 - Scene 级 Storyboard、图片生成和 Preview Job
 - 项目级素材扫描、Scene Preview、Visual Enrichment 和 PRPROJ Project Export Job
 - 稳定的部分 Error Code 与统一 API 错误响应
+- LLM 输出长度截断使用 `PROVIDER_OUTPUT_TRUNCATED`，确定性截断不会重复请求同一 Provider
 
 ### Script Engine
 
@@ -128,6 +130,8 @@ Scene Preview 与基础质量检查
 - 文本清洗、换行分段、AI 语义分段
 - 超长 TTS 段落自动拆分，当前单段上限为 180 字符
 - AI 分段后校验文本完整性，防止 LLM 改写或遗漏原稿
+- AI 分段对长稿按段落/句子边界建立不超过 4000 字符的有界窗口，逐窗与全稿校验文本完整性；单窗输出截断时仅回退该窗的确定性分段
+- TTS 分段结果不再生成重复的 Visual Description；中英文分别使用字符数与词数导向的分段提示
 - 分段级 Visual Hint
 - 长脚本的有界上下文处理
 
@@ -202,7 +206,7 @@ Scene Preview 与基础质量检查
 - `advanced`：高级视觉管线失败时让持久化 Job 明确失败
 - `basic`：只使用基础 SDXL 管线
 - 高级 Visual Plan 会回写正式 VisualScene Storyboard；Qwen3-VL 通过的 FLUX 图片会注册为 GeneratedImageVariant、MediaFile 和 MediaShot
-- 新增独立 `anime_full_coverage` 画面生成策略：逐字稿按 8~15 秒语义主场景全片覆盖，跳过重点视觉模式的候选阈值、10 秒抑制和每分钟数量上限；统一注入原创二维动漫 Style Prompt，并为后续 3~6 秒取景/运动变化保留 Motion Prompt。高级管线不可用时，未锁定 Scene 仍使用相同动漫风格回退到本地 SDXL。
+- 新增独立 `anime_full_coverage` 画面生成策略：逐字稿按 8~15 秒语义主场景全片覆盖，跳过重点视觉模式的候选阈值、10 秒抑制和每分钟数量上限；统一注入原创二维动漫 Style Prompt，并为后续 3~6 秒取景/运动变化保留 Motion Prompt。高级管线不可用时，未锁定 Scene 使用当前注册的图片 Provider 继续生成。
 - 视觉生成策略已经统一到可注册的 Strategy Registry；后端提供策略能力元数据，前端按视频模式动态显示兼容策略。动漫策略保留正式 VisualScene 作为父级，对超长 Scene 按字幕边界派生稳定 Visual Beat，并生成 Scene 内连续多镜头 Assignment。
 - 动漫 Style Prompt 在生成时动态组合，不永久覆盖基础 Storyboard；视觉策略切换会失效未锁定 Scene 的旧图片变体，高级管线固定复用每 Scene 的 `variant_index=0` 槽位，避免历史图片误复用和唯一索引冲突。
 
@@ -213,6 +217,9 @@ Scene Preview 与基础质量检查
 已实现：
 
 - Provider Registry 中的本地 SDXL Image Provider
+- Provider Registry 中的 Doubao Seedream 5.0 火山方舟 Image Provider；固定使用 `doubao-seedream-5-0-260128`、`2848x1600`、PNG、Base64 返回、无明水印、300 秒超时和 2 次重试，通过 BYOK 调用并原子落盘；用户只需配置 API Key
+- Seedream API Key 使用 Windows DPAPI Secret Store，任务配置、项目文件和日志不保存明文密钥
+- Seedream 作为默认图片 Provider 时跳过 FLUX / ComfyUI 图片生成阶段，确保正式分镜图片统一由 Seedream 生成；本地 SDXL 保留为显式回退
 - Prompt、Negative Prompt、Seed、Width、Height、Steps、Guidance Scale
 - 每 Scene 多候选图片
 - GeneratedImageVariant、输入签名、模型信息、耗时和错误记录
@@ -222,7 +229,7 @@ Scene Preview 与基础质量检查
 
 已实现补充：FLUX / ComfyUI 已通过高级视觉桥接进入正式项目 Workflow，并由 Qwen3-VL 做生成结果筛选。
 
-明确范围：图片生成只支持本地 Provider。OpenAI Image、Gemini Image 等 Cloud Image Provider、Upscale Provider 和图片费用统计不属于产品计划。Reference Image、ControlNet、LoRA 仍是可选的本地后续能力。
+明确范围：云端图片生成仅正式支持 Doubao Seedream 5.0 BYOK；OpenAI Image、Gemini Image 等其他 Cloud Image Provider、Upscale Provider 和图片费用统计不属于当前计划。Reference Image、ControlNet、LoRA 仍是可选的本地后续能力。
 
 ### 剪辑工程编排与 PRPROJ 导出
 
@@ -358,7 +365,7 @@ Scene Preview 与基础质量检查
 
 1. Script Engine 只接收 TXT / Markdown 完整逐字稿；不开发 Word、PDF、Podcast、已有音频统一导入器，也不开发章节编辑或章节审核界面。
 2. 保留 BGE-M3、Local Qwen、FLUX / ComfyUI、Qwen3-VL 高级视觉管线，并持续把它统一进项目 Workflow、Provider、Artifact 和 Job 体系。
-3. Image Generation 只做本地 Provider；不开发 OpenAI Image、Gemini Image 等 Cloud Image Provider，不开发 Upscale Provider，不统计图片生成费用。
+3. Image Generation 默认使用 Doubao Seedream 5.0 火山方舟 BYOK，并保留本地 SDXL 回退；不开发 OpenAI Image、Gemini Image 等其他 Cloud Image Provider，不开发 Upscale Provider，不统计图片生成费用。（2026-11-01 更新）
 4. TubeAiFolw 不提供 Timeline 内容编辑。SceneAssignment 等时间信息只能作为自动编排和工程导出的内部数据。
 5. 主交付物是带旁白、字幕和素材链接的真实 `.prproj` 工程，供支持 PR 工程导入的剪映专业版继续深度剪辑；同时保留 WAV、SRT 和素材回退文件。
 6. 真实 PRPROJ 必须由 Adobe Premiere Pro 转换生成；禁止把 XML 或 JSON 简单改名为 `.prproj`。
@@ -1469,8 +1476,9 @@ class ImageProvider:
     async def generate(self, request): ...
 ```
 
-只支持本地 Provider：
+正式支持的 Provider：
 
+- Doubao Seedream 5.0（默认，火山方舟 BYOK）
 - FLUX
 - SDXL
 - ComfyUI Workflow

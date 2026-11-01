@@ -18,7 +18,7 @@ class ProjectConfig(BaseModel):
     tts_engine: str = Field(default="index_tts", min_length=1)
     segmentation_mode: Literal["newline", "ai"] = "newline"
     storyboard_mode: Literal["ai", "segments"] = "ai"
-    image_provider_id: str = "image.local_sdxl"
+    image_provider_id: str = "image.seedream_5"
     visual_enrichment_mode: Literal["auto", "advanced", "basic"] = "auto"
     visual_generation_mode: str = "curated"
     visual_enrichment_config_path: str = "config/production_5060ti.yaml"

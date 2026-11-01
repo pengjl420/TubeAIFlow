@@ -1,3 +1,3 @@
-from app.integrations.llm.deepseek import DeepSeekClient
+from app.integrations.llm.deepseek import DeepSeekClient, ProviderOutputTruncatedError
 
-__all__ = ["DeepSeekClient"]
+__all__ = ["DeepSeekClient", "ProviderOutputTruncatedError"]

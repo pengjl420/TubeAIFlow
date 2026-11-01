@@ -2,12 +2,44 @@ import threading
 import unittest
 from unittest.mock import Mock, patch
 
+import httpx
+
 from app.config import Settings
 from app.infrastructure import process_runner
-from app.integrations.llm.deepseek import DeepSeekClient
+from app.integrations.llm.deepseek import DeepSeekClient, ProviderOutputTruncatedError
 
 
 class DeepSeekCancellationTests(unittest.TestCase):
+    def test_output_truncation_is_typed_and_not_retried(self) -> None:
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "choices": [{"finish_reason": "length", "message": {"content": "{}"}}]
+        }
+        http_client = Mock()
+        http_client.post.return_value = response
+        client = DeepSeekClient(Settings(deepseek_api_key="test-key", deepseek_retry_count=3))
+
+        with patch("app.integrations.llm.deepseek.httpx.Client", return_value=http_client):
+            with self.assertRaises(ProviderOutputTruncatedError) as raised:
+                client.chat_json("system", "user")
+
+        self.assertEqual(raised.exception.code, "PROVIDER_OUTPUT_TRUNCATED")
+        self.assertEqual(http_client.post.call_count, 1)
+
+    def test_non_transient_http_error_is_not_retried(self) -> None:
+        request = httpx.Request("POST", "https://api.deepseek.com/chat/completions")
+        response = httpx.Response(401, request=request)
+        http_client = Mock()
+        http_client.post.return_value = response
+        client = DeepSeekClient(Settings(deepseek_api_key="test-key", deepseek_retry_count=3))
+
+        with patch("app.integrations.llm.deepseek.httpx.Client", return_value=http_client):
+            with self.assertRaisesRegex(RuntimeError, "HTTP 401"):
+                client.chat_json("system", "user")
+
+        self.assertEqual(http_client.post.call_count, 1)
+
     def test_cancel_closes_active_http_request_and_stops_retries(self) -> None:
         request_started = threading.Event()
         request_closed = threading.Event()

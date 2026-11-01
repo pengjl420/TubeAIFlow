@@ -1,12 +1,14 @@
+import json
 import unittest
 
+from app.integrations.llm.deepseek import ProviderOutputTruncatedError
 from app.services.narration.segmenter import split_script, split_script_with_ai
 from app.services.narration.text_cleaner import clean_script
 from app.shared.time import seconds_to_srt_time
 
 
 class TextServiceTests(unittest.TestCase):
-    def test_ai_segmentation_preserves_content_and_visual_descriptions(self) -> None:
+    def test_ai_segmentation_preserves_content_without_redundant_visual_output(self) -> None:
         class FakeClient:
             def chat_json(self, _system_prompt: str, _user_prompt: str) -> dict:
                 return {
@@ -19,7 +21,7 @@ class TextServiceTests(unittest.TestCase):
         segments = split_script_with_ai("第一句。\n第二句。", FakeClient())
 
         self.assertEqual([item["text"] for item in segments], ["第一句。", "第二句。"])
-        self.assertEqual(segments[0]["visual_description"], "Opening scene")
+        self.assertNotIn("visual_description", segments[0])
 
     def test_ai_segmentation_rejects_rewritten_transcript(self) -> None:
         class FakeClient:
@@ -28,6 +30,54 @@ class TextServiceTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "修改、遗漏或重排"):
             split_script_with_ai("原始内容", FakeClient())
+
+    def test_ai_segmentation_chunks_long_transcripts_and_preserves_content(self) -> None:
+        class FakeClient:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def chat_json(self, _system_prompt: str, user_prompt: str) -> dict:
+                self.calls += 1
+                window = json.loads(user_prompt)["script"]
+                return {"segments": [{"text": window}]}
+
+        client = FakeClient()
+        script = "\n".join(f"Paragraph {index}: " + "word " * 80 for index in range(20))
+
+        segments = split_script_with_ai(script, client)
+
+        self.assertGreater(client.calls, 1)
+        self.assertTrue(all(len(item["text"]) <= 180 for item in segments))
+        self.assertEqual(
+            "".join("".join(item["text"].split()) for item in segments),
+            "".join(script.split()),
+        )
+
+    def test_ai_segmentation_falls_back_only_for_truncated_window(self) -> None:
+        class FakeClient:
+            def chat_json(self, _system_prompt: str, _user_prompt: str) -> dict:
+                raise ProviderOutputTruncatedError("output truncated")
+
+        script = "A complete sentence. " * 30
+        segments = split_script_with_ai(script, FakeClient())
+
+        self.assertGreater(len(segments), 1)
+        self.assertEqual(
+            "".join("".join(item["text"].split()) for item in segments),
+            "".join(script.split()),
+        )
+
+    def test_ai_segmentation_uses_language_appropriate_guidance(self) -> None:
+        prompts: list[str] = []
+
+        class FakeClient:
+            def chat_json(self, system_prompt: str, user_prompt: str) -> dict:
+                prompts.append(system_prompt)
+                return {"segments": [{"text": json.loads(user_prompt)["script"]}]}
+
+        split_script_with_ai("This is a complete English narration sentence.", FakeClient())
+
+        self.assertIn("15-35 words", prompts[0])
 
     def test_clean_script_normalizes_markdown_and_ellipsis(self) -> None:
         self.assertEqual(clean_script("# 标题\r\n\r\n- 内容......"), "标题\n内容。。")

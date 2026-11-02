@@ -25,8 +25,8 @@ export interface ProjectSettingsInput {
   storyboardTransitionEnabled: boolean
   segmentationMode: SegmentationMode
   storyboardMode: StoryboardMode
-  visualEnrichmentMode: 'auto' | 'advanced' | 'basic'
   visualGenerationMode: VisualGenerationMode
+  visualStyleRevisionId: string
 }
 
 export interface ProjectTask {
@@ -157,6 +157,9 @@ export interface SceneImageVariant {
   height: number
   status: string
   error_message?: string | null
+  style_profile_id?: string | null
+  style_revision_id?: string | null
+  style_content_hash?: string
   selected: boolean
 }
 
@@ -200,7 +203,6 @@ export async function createProject(input: CreateProjectInput): Promise<Project>
   form.append('media_video_dir', input.mediaVideoDir || '')
   form.append('segmentation_mode', input.segmentationMode || 'ai')
   form.append('storyboard_mode', input.storyboardMode || 'ai')
-  form.append('visual_enrichment_mode', 'auto')
   form.append('visual_generation_mode', 'curated')
   return unwrap<Project>(await apiClient.post('/projects', form))
 }
@@ -220,7 +222,6 @@ export async function updateProjectSettings(projectId: string, input: ProjectSet
     storyboard_transition_enabled: input.storyboardTransitionEnabled,
     segmentation_mode: input.segmentationMode,
     storyboard_mode: input.storyboardMode,
-    visual_enrichment_mode: input.visualEnrichmentMode,
     visual_generation_mode: input.visualGenerationMode,
   }))
 }
@@ -231,7 +232,6 @@ export async function updateProjectVideoSettings(projectId: string, input: Proje
     media_video_dir: input.mediaVideoDir,
     storyboard_mode: input.storyboardMode,
     storyboard_transition_enabled: input.storyboardTransitionEnabled,
-    visual_enrichment_mode: input.visualEnrichmentMode,
     visual_generation_mode: input.visualGenerationMode,
   }))
 }

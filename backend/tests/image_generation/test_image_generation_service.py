@@ -1,7 +1,6 @@
 import json
 import tempfile
 import unittest
-from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -17,6 +16,7 @@ from app.models.media import (
 )
 from app.models.project import Project
 from app.models.storyboard import VisualScene
+from app.models.visual_style import StyleAsset, StyleAssetMatch
 from app.schemas.storyboard import StoryboardContent
 from app.services.image_generation import image_generation_service
 
@@ -30,30 +30,33 @@ class ImageGenerationServiceTests(unittest.TestCase):
         self.assertEqual(first, retry)
         self.assertNotEqual(first, next_request)
 
+    def test_flash_provider_resolves_official_model_metadata(self) -> None:
+        project = Project(
+            id="project-flash",
+            name="Flash",
+            output_dir=".",
+            config_json='{"image_provider_id":"image.seedream_5_flash"}',
+        )
+        settings = SimpleNamespace(image_generation_provider_id="image.seedream_5")
+
+        with patch.object(image_generation_service, "get_settings", return_value=settings):
+            provider_id = image_generation_service._provider_id(project)
+
+        provider = image_generation_service.provider_registry.get(provider_id)
+        self.assertEqual(provider_id, "image.seedream_5_flash")
+        self.assertEqual(provider.model_id, "doubao-seedream-5-0-flash-260915")
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
-        self.model_path = self.root / "juggernautXL_ragnarok.safetensors"
-        self.model_path.write_bytes(b"checkpoint")
-        self.config_dir = self.root / "diffusers_config"
-        self.config_dir.mkdir()
-        (self.config_dir / "model_index.json").write_text("{}", encoding="utf-8")
         self.engine = create_engine(f"sqlite:///{self.root / 'test.db'}")
         SQLModel.metadata.create_all(self.engine)
         self.settings = SimpleNamespace(
             workspace_dir=self.root,
-            image_generation_model_path=self.model_path,
-            image_generation_config_dir=self.config_dir,
-            image_generation_python=Path(__import__("sys").executable),
-            image_generation_device="cuda:0",
-            image_generation_dtype="float16",
-            image_generation_width=1024,
-            image_generation_height=576,
-            image_generation_steps=20,
-            image_generation_guidance_scale=5.0,
             image_generation_candidates_per_scene=2,
-            image_generation_cpu_offload=True,
             image_generation_negative_prompt="text, watermark",
+            image_generation_provider_id="image.seedream_5",
+            seedream_api_key="secret",
         )
 
     def tearDown(self) -> None:
@@ -64,9 +67,9 @@ class ImageGenerationServiceTests(unittest.TestCase):
         with Session(self.engine) as session:
             project, scene = self._project_scene(session)
 
-            def fake_batch(_project, _python, _model, _config, batch_path, result_path, *_args):
+            def fake_batch(request):
                 results = []
-                for job in json.loads(batch_path.read_text(encoding="utf-8")):
+                for job in request.jobs:
                     output = Path(job["output_path"])
                     output.parent.mkdir(parents=True, exist_ok=True)
                     Image.new("RGB", (job["width"], job["height"]), (20, 30, 40)).save(output)
@@ -78,17 +81,14 @@ class ImageGenerationServiceTests(unittest.TestCase):
                             "generation_seconds": 1.25,
                         }
                     )
-                result_path.write_text(json.dumps(results), encoding="utf-8")
+                request.result_path.write_text(json.dumps(results), encoding="utf-8")
 
             with (
                 patch.object(image_generation_service, "get_settings", return_value=self.settings),
                 patch.object(
-                    image_generation_service.gpu_resource,
-                    "exclusive_gpu",
-                    return_value=nullcontext(),
-                ),
-                patch.object(
-                    image_generation_service, "_run_batch", side_effect=fake_batch
+                    image_generation_service,
+                    "_runtime",
+                    return_value=SimpleNamespace(generate_batch=fake_batch),
                 ) as runner,
             ):
                 first = image_generation_service.generate_project_images(session, project)
@@ -114,9 +114,9 @@ class ImageGenerationServiceTests(unittest.TestCase):
         with Session(self.engine) as session:
             project, _scene = self._project_scene(session)
 
-            def fake_batch(_project, _python, _model, _config, batch_path, result_path, *_args):
+            def fake_batch(request):
                 results = []
-                for job in json.loads(batch_path.read_text(encoding="utf-8")):
+                for job in request.jobs:
                     output = Path(job["output_path"])
                     output.parent.mkdir(parents=True, exist_ok=True)
                     Image.new("RGB", (job["width"], job["height"]), (40, 50, 60)).save(output)
@@ -127,17 +127,14 @@ class ImageGenerationServiceTests(unittest.TestCase):
                             "generation_seconds": 1.5,
                         }
                     )
-                result_path.write_text(json.dumps(results), encoding="utf-8")
+                request.result_path.write_text(json.dumps(results), encoding="utf-8")
 
             with (
                 patch.object(image_generation_service, "get_settings", return_value=self.settings),
                 patch.object(
-                    image_generation_service.gpu_resource,
-                    "exclusive_gpu",
-                    return_value=nullcontext(),
-                ),
-                patch.object(
-                    image_generation_service, "_run_batch", side_effect=fake_batch
+                    image_generation_service,
+                    "_runtime",
+                    return_value=SimpleNamespace(generate_batch=fake_batch),
                 ) as runner,
             ):
                 image_generation_service.generate_project_images(session, project)
@@ -155,28 +152,65 @@ class ImageGenerationServiceTests(unittest.TestCase):
             self.assertTrue(all(item.status == "completed" for item in variants))
             self.assertTrue(all(item.generation_seconds == 1.5 for item in variants))
 
+    def test_reuses_approved_style_asset_before_calling_cloud_provider(self) -> None:
+        with Session(self.engine) as session:
+            first_project, _ = self._project_scene(session, project_id="project-1", name="First")
+
+            def fake_batch(request):
+                results = []
+                for job in request.jobs:
+                    output = Path(job["output_path"])
+                    output.parent.mkdir(parents=True, exist_ok=True)
+                    Image.new("RGB", (job["width"], job["height"]), (30, 40, 50)).save(output)
+                    results.append({"variant_id": job["variant_id"], "status": "completed"})
+                request.result_path.write_text(json.dumps(results), encoding="utf-8")
+
+            with (
+                patch.object(image_generation_service, "get_settings", return_value=self.settings),
+                patch.object(
+                    image_generation_service,
+                    "_runtime",
+                    return_value=SimpleNamespace(generate_batch=fake_batch),
+                ),
+            ):
+                image_generation_service.generate_project_images(session, first_project)
+
+            second_project, _ = self._project_scene(
+                session, project_id="project-2", scene_id="scene-2", name="Second"
+            )
+            with (
+                patch.object(image_generation_service, "get_settings", return_value=self.settings),
+                patch.object(image_generation_service, "_runtime") as runtime,
+            ):
+                result = image_generation_service.generate_project_images(session, second_project)
+
+            self.assertEqual(result["generated_count"], 0)
+            self.assertEqual(result["reused_count"], 1)
+            runtime.assert_not_called()
+            self.assertEqual(len(session.exec(select(StyleAsset)).all()), 1)
+            audit = session.exec(select(StyleAssetMatch)).one()
+            self.assertEqual(audit.project_id, second_project.id)
+            self.assertTrue(Path(audit.materialized_path).is_file())
+
     def test_failed_regeneration_keeps_previous_successful_candidates(self) -> None:
         with Session(self.engine) as session:
             project, scene = self._project_scene(session)
 
-            def successful_batch(
-                _project, _python, _model, _config, batch_path, result_path, *_args
-            ):
+            def successful_batch(request):
                 results = []
-                for job in json.loads(batch_path.read_text(encoding="utf-8")):
+                for job in request.jobs:
                     output = Path(job["output_path"])
                     output.parent.mkdir(parents=True, exist_ok=True)
                     Image.new("RGB", (job["width"], job["height"]), (70, 80, 90)).save(output)
                     results.append({"variant_id": job["variant_id"], "status": "completed"})
-                result_path.write_text(json.dumps(results), encoding="utf-8")
+                request.result_path.write_text(json.dumps(results), encoding="utf-8")
 
-            def failed_batch(_project, _python, _model, _config, batch_path, result_path, *_args):
-                jobs = json.loads(batch_path.read_text(encoding="utf-8"))
-                result_path.write_text(
+            def failed_batch(request):
+                request.result_path.write_text(
                     json.dumps(
                         [
                             {"variant_id": job["variant_id"], "status": "failed", "error": "boom"}
-                            for job in jobs
+                            for job in request.jobs
                         ]
                     ),
                     encoding="utf-8",
@@ -185,11 +219,10 @@ class ImageGenerationServiceTests(unittest.TestCase):
             with (
                 patch.object(image_generation_service, "get_settings", return_value=self.settings),
                 patch.object(
-                    image_generation_service.gpu_resource,
-                    "exclusive_gpu",
-                    return_value=nullcontext(),
+                    image_generation_service,
+                    "_runtime",
+                    return_value=SimpleNamespace(generate_batch=successful_batch),
                 ),
-                patch.object(image_generation_service, "_run_batch", side_effect=successful_batch),
             ):
                 image_generation_service.generate_project_images(session, project)
 
@@ -206,11 +239,10 @@ class ImageGenerationServiceTests(unittest.TestCase):
             with (
                 patch.object(image_generation_service, "get_settings", return_value=self.settings),
                 patch.object(
-                    image_generation_service.gpu_resource,
-                    "exclusive_gpu",
-                    return_value=nullcontext(),
+                    image_generation_service,
+                    "_runtime",
+                    return_value=SimpleNamespace(generate_batch=failed_batch),
                 ),
-                patch.object(image_generation_service, "_run_batch", side_effect=failed_batch),
                 self.assertRaisesRegex(RuntimeError, "2 个图片候选生成失败"),
             ):
                 image_generation_service.regenerate_scene_images(
@@ -220,8 +252,15 @@ class ImageGenerationServiceTests(unittest.TestCase):
             self.assertTrue(all(session.get(GeneratedImageVariant, item.id) for item in original))
             self.assertTrue(all(path.is_file() for path in original_paths))
 
-    def _project_scene(self, session: Session):
-        project = Project(id="project-1", name="Generated", output_dir=str(self.root))
+    def _project_scene(
+        self,
+        session: Session,
+        *,
+        project_id: str = "project-1",
+        scene_id: str = "scene-1",
+        name: str = "Generated",
+    ):
+        project = Project(id=project_id, name=name, output_dir=str(self.root))
         storyboard = StoryboardContent(
             visual_summary="A 1990s Chinese factory at dawn",
             visual_type="historical_reconstruction",
@@ -240,7 +279,7 @@ class ImageGenerationServiceTests(unittest.TestCase):
             confidence=0.9,
         )
         scene = VisualScene(
-            id="scene-1",
+            id=scene_id,
             project_id=project.id,
             scene_index=1,
             start_ms=0,

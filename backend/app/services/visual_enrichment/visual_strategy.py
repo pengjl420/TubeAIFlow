@@ -209,17 +209,7 @@ class AnimeFullCoverageStrategy:
         base_prompt, negative_parts = _base_prompt(
             storyboard, configured_negative, photorealistic=False
         )
-        profile = load_anime_generation_profile(project)
-        prompt = (
-            f"SERIES ART DIRECTION — apply exactly to this scene:\n{profile.style_prompt}\n\n"
-            f"SCENE CONTENT:\n{base_prompt}\n\n"
-            "Create one concrete story moment matching the narration. Preserve recurring character "
-            "appearance and wardrobe when the same entity returns. 16:9 landscape, clear focal "
-            "hierarchy, quiet subtitle-safe lower area, no visible text.\n\n"
-            f"MOTION GUIDANCE:\n{profile.motion_prompt}"
-        )
-        negative_parts.append(profile.negative_prompt)
-        return prompt, ", ".join(item for item in negative_parts if item)
+        return base_prompt, ", ".join(item for item in negative_parts if item)
 
 
 visual_strategy_registry = VisualStrategyRegistry()

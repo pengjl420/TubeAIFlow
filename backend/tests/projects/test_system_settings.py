@@ -24,20 +24,24 @@ class SettingsModelTests(unittest.TestCase):
             qwen_tts_root="",
             qwen_tts_python="  ",
             cosyvoice_root="",
-            image_generation_model_path="",
-            image_generation_config_dir="",
-            image_generation_python="",
         )
         self.assertIsNone(settings.qwen_tts_root)
         self.assertIsNone(settings.qwen_tts_python)
         self.assertIsNone(settings.cosyvoice_root)
-        self.assertIsNone(settings.image_generation_model_path)
 
     def test_local_model_dtypes_are_validated(self) -> None:
         with self.assertRaisesRegex(ValueError, "Unsupported Qwen3-TTS dtype"):
             Settings(qwen_tts_dtype="int8")
-        with self.assertRaisesRegex(ValueError, "Unsupported image generation dtype"):
-            Settings(image_generation_dtype="int8")
+        self.assertEqual(
+            Settings(image_generation_provider_id="image.local_sdxl").image_generation_provider_id,
+            "image.seedream_5",
+        )
+        self.assertEqual(
+            Settings(
+                image_generation_provider_id="image.seedream_5_flash"
+            ).image_generation_provider_id,
+            "image.seedream_5_flash",
+        )
 
     def test_subtitle_duration_range_is_validated(self) -> None:
         with self.assertRaisesRegex(ValueError, "Minimum subtitle cue duration"):
@@ -100,7 +104,6 @@ class SettingsModelTests(unittest.TestCase):
         settings = Settings(
             workspace_dir=Path("workspace"),
             premiere_pro_path=Path("missing-premiere.exe"),
-            image_generation_model_path=None,
         )
         with (
             patch.object(Path, "mkdir"),

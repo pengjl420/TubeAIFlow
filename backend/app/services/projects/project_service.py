@@ -288,6 +288,7 @@ def delete_project(session: Session, project: Project) -> dict:
         if media_file and media_file.provider in {
             "local_image_generation",
             "image.seedream_5",
+            "image.seedream_5_flash",
         }:
             session.delete(media_file)
     for revision in session.exec(
@@ -441,7 +442,11 @@ def _invalidate_script_outputs(session: Session, project: Project) -> None:
     for media_id in generated_media_ids:
         session.exec(delete(MediaShot).where(MediaShot.media_file_id == media_id))
         media = session.get(MediaFile, media_id)
-        if media and media.provider in {"local_image_generation", "image.seedream_5"}:
+        if media and media.provider in {
+            "local_image_generation",
+            "image.seedream_5",
+            "image.seedream_5_flash",
+        }:
             session.delete(media)
 
     settings = get_settings()
@@ -630,7 +635,6 @@ def update_project_settings(
     storyboard_transition_enabled: bool = True,
     segmentation_mode: str | None = None,
     storyboard_mode: str | None = None,
-    visual_enrichment_mode: str = "auto",
     visual_generation_mode: str | None = None,
 ) -> Project:
     project_name = name.strip()
@@ -665,9 +669,6 @@ def update_project_settings(
     resolved_video_output_format = VIDEO_OUTPUT_PRPROJ
     resolved_segmentation_mode = normalize_segmentation_mode(segmentation_mode)
     resolved_storyboard_mode = normalize_storyboard_mode(storyboard_mode)
-    resolved_visual_enrichment_mode = str(visual_enrichment_mode or "auto").strip().lower()
-    if resolved_visual_enrichment_mode not in {"auto", "advanced", "basic"}:
-        raise ValueError("Unsupported visual enrichment mode")
     from app.services.visual_enrichment.visual_strategy import visual_strategy_registry
 
     requested_strategy = visual_generation_mode
@@ -716,7 +717,7 @@ def update_project_settings(
     config["storyboard_transition_enabled"] = bool(storyboard_transition_enabled)
     config["segmentation_mode"] = resolved_segmentation_mode
     config["storyboard_mode"] = resolved_storyboard_mode
-    config["visual_enrichment_mode"] = resolved_visual_enrichment_mode
+    config.pop("visual_enrichment_mode", None)
     config["visual_generation_mode"] = resolved_visual_generation_mode
     if video_directory:
         config["media_video_dir"] = str(video_directory)
@@ -774,16 +775,12 @@ def update_video_workflow_settings(
     media_video_dir: str = "",
     storyboard_mode: str = STORYBOARD_MODE_AI,
     storyboard_transition_enabled: bool = True,
-    visual_enrichment_mode: str = "auto",
     visual_generation_mode: str | None = None,
 ) -> Project:
     """Enable or adjust downstream video production without invalidating narration."""
     config = load_project_config(project)
     resolved_video_mode = normalize_video_mode(video_mode, video_mode != VIDEO_MODE_NONE)
     resolved_storyboard_mode = normalize_storyboard_mode(storyboard_mode)
-    resolved_visual_enrichment_mode = str(visual_enrichment_mode or "auto").strip().lower()
-    if resolved_visual_enrichment_mode not in {"auto", "advanced", "basic"}:
-        raise ValueError("Unsupported visual enrichment mode")
     from app.services.visual_enrichment.visual_strategy import visual_strategy_registry
 
     requested_strategy = visual_generation_mode
@@ -808,7 +805,6 @@ def update_video_workflow_settings(
         "media_video_dir": str(config.get("media_video_dir") or ""),
         "storyboard_mode": get_storyboard_mode(project),
         "storyboard_transition_enabled": config.get("storyboard_transition_enabled", True),
-        "visual_enrichment_mode": str(config.get("visual_enrichment_mode") or "auto"),
         "visual_generation_mode": str(config.get("visual_generation_mode") or "curated"),
     }
     next_values = {
@@ -816,7 +812,6 @@ def update_video_workflow_settings(
         "media_video_dir": str(video_directory) if video_directory else "",
         "storyboard_mode": resolved_storyboard_mode,
         "storyboard_transition_enabled": storyboard_transition_enabled,
-        "visual_enrichment_mode": resolved_visual_enrichment_mode,
         "visual_generation_mode": resolved_visual_generation_mode,
     }
     if previous_values != next_values:
@@ -826,9 +821,7 @@ def update_video_workflow_settings(
         )
         storyboard_changed = previous_values["storyboard_mode"] != next_values["storyboard_mode"]
         generation_strategy_changed = (
-            previous_values["visual_enrichment_mode"]
-            != next_values["visual_enrichment_mode"]
-            or previous_values["visual_generation_mode"]
+            previous_values["visual_generation_mode"]
             != next_values["visual_generation_mode"]
         )
         _invalidate_video_workflow(
@@ -852,6 +845,40 @@ def update_video_workflow_settings(
             **next_values,
         }
     )
+    project.config_json = json.dumps(config, ensure_ascii=False)
+    project.updated_at = utc_now_iso()
+    session.add(project)
+    session.commit()
+    session.refresh(project)
+    write_project_descriptor(project)
+    return project
+
+
+def update_project_visual_style(
+    session: Session,
+    project: Project,
+    revision,
+    *,
+    apply_existing: bool = False,
+) -> Project:
+    """Pin a project to one published style revision without mutating that revision."""
+    if getattr(revision, "status", None) != "published":
+        raise ValueError("项目只能绑定已发布的风格版本")
+    config = load_project_config(project)
+    previous_revision_id = str(config.get("visual_style_revision_id") or "")
+    if previous_revision_id == revision.id and not apply_existing:
+        return project
+    config["visual_style_profile_id"] = revision.style_profile_id
+    config["visual_style_revision_id"] = revision.id
+    config["visual_style_content_hash"] = revision.content_hash
+    if apply_existing:
+        _invalidate_video_workflow(
+            session,
+            project,
+            storyboard_changed=False,
+            generated_visuals_changed=True,
+            assignment_policy="all",
+        )
     project.config_json = json.dumps(config, ensure_ascii=False)
     project.updated_at = utc_now_iso()
     session.add(project)

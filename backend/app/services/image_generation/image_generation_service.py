@@ -4,22 +4,19 @@ import hashlib
 import json
 import logging
 import random
-import subprocess
-import sys
-import time
+from functools import partial
 from pathlib import Path
 
 from PIL import Image
 from sqlmodel import Session, select
 
 from app.config import get_settings
-from app.infrastructure import gpu_resource, process_runner as task_control
 from app.infrastructure.project_layout import ensure_project_dirs, get_project_work_dir
 from app.infrastructure.serialization import stable_json_hash
-from app.integrations.tts.runner_io import write_json
 from app.integrations.image_generation.seedream import (
     SEEDREAM_BASE_URL,
-    SEEDREAM_MODEL_ID,
+    SEEDREAM_FLASH_MODEL_ID,
+    SEEDREAM_PRO_MODEL_ID,
     SEEDREAM_SIZE,
     generate_batch as generate_seedream_batch,
 )
@@ -35,13 +32,14 @@ from app.models.storyboard import VisualScene
 from app.providers import ImageBatchRequest, ImageProviderRuntime, provider_registry
 from app.schemas.storyboard import StoryboardContent
 from app.services.visual_enrichment.visual_strategy import compose_image_prompts
+from app.services.visual_styles import style_asset_service
+from app.services.visual_styles.style_service import compile_project_style
 from app.shared.time import utc_now_iso
 
 
 logger = logging.getLogger(__name__)
-WORKFLOW_VERSION = "sdxl_single_file_v1"
-PROVIDER = "local_image_generation"
 SEEDREAM_WORKFLOW_VERSION = "seedream_5_v1"
+SEEDREAM_PROVIDER_IDS = {"image.seedream_5", "image.seedream_5_flash"}
 
 
 def _generate_project_images_local(session: Session, project: Project) -> dict:
@@ -74,10 +72,9 @@ def _generate_project_images_local(session: Session, project: Project) -> dict:
         ).all()
         if Path(item.path).is_file()
     }
-    if _provider_id(project) == "image.seedream_5":
-        # Existing FLUX/ComfyUI outputs must not suppress the newly selected
-        # project-wide Seedream generation path.
-        advanced_scene_ids.clear()
+    # Local FLUX/ComfyUI artifacts from older versions never suppress the
+    # cloud-only generation path.
+    advanced_scene_ids.clear()
     pending_scenes = [
         scene
         for scene in scenes
@@ -114,23 +111,22 @@ def _regenerate_scene_images_local(
 
 
 def _runtime(project: Project) -> ImageProviderRuntime:
-    provider_id = getattr(get_settings(), "image_generation_provider_id", "image.local_sdxl")
-    try:
-        config = json.loads(project.config_json or "{}")
-        provider_id = str(config.get("image_provider_id") or provider_id)
-    except (TypeError, json.JSONDecodeError):
-        pass
-    return provider_registry.runtime(provider_id, ImageProviderRuntime)
+    return provider_registry.runtime(_provider_id(project), ImageProviderRuntime)
 
 
 def _provider_id(project: Project) -> str:
-    provider_id = getattr(get_settings(), "image_generation_provider_id", "image.local_sdxl")
+    provider_id = getattr(get_settings(), "image_generation_provider_id", "image.seedream_5")
     try:
         config = json.loads(project.config_json or "{}")
-        provider_id = str(config.get("image_provider_id") or provider_id)
+        configured = str(config.get("image_provider_id") or provider_id)
+        provider_id = "image.seedream_5" if configured == "image.local_sdxl" else configured
     except (TypeError, json.JSONDecodeError):
         pass
-    provider_registry.get(provider_id)
+    if provider_id not in SEEDREAM_PROVIDER_IDS:
+        raise ValueError("Only cloud image providers are supported")
+    provider = provider_registry.get(provider_id)
+    if provider.local:
+        raise ValueError("Only cloud image providers are supported")
     return provider_id
 
 
@@ -160,7 +156,7 @@ def register_generated_variant(
     project: Project,
     variant: GeneratedImageVariant,
     *,
-    provider: str = PROVIDER,
+    provider: str = "image.seedream_5",
 ) -> None:
     """Register an image produced by another Image Provider in the shared asset model."""
     _register_generated_image(session, project, variant, provider=provider)
@@ -175,41 +171,17 @@ def _generate(
 ) -> dict:
     settings = get_settings()
     provider_id = _provider_id(project)
-    python_path = settings.image_generation_python or Path(sys.executable)
-    if provider_id == "image.local_sdxl":
-        model_path = settings.image_generation_model_path
-        if model_path is None or not model_path.is_file():
-            raise ValueError("本地图片生成模型未配置或文件不存在")
-        config_dir = settings.image_generation_config_dir
-        if config_dir is None or not (config_dir / "model_index.json").is_file():
-            raise ValueError("SDXL 本地管线配置未配置或缺少 model_index.json")
-        if not python_path.is_file():
-            raise ValueError(f"图片生成 Python 不存在：{python_path}")
-        model_ref = str(model_path.resolve())
-        model_revision = model_path.stat().st_mtime_ns
-        model_name = model_path.stem
-        width = settings.image_generation_width
-        height = settings.image_generation_height
-        steps = settings.image_generation_steps
-        guidance_scale = settings.image_generation_guidance_scale
-        workflow_version = WORKFLOW_VERSION
-    elif provider_id == "image.seedream_5":
-        if not settings.seedream_api_key.strip():
-            raise ValueError("系统尚未配置火山方舟 Seedream API Key")
-        model_path = Path(SEEDREAM_MODEL_ID)
-        config_dir = Path(".")
-        model_ref = f"{SEEDREAM_BASE_URL}:{SEEDREAM_MODEL_ID}"
-        model_revision = SEEDREAM_SIZE
-        model_name = SEEDREAM_MODEL_ID
-        try:
-            width, height = (int(value) for value in SEEDREAM_SIZE.lower().split("x", 1))
-        except (TypeError, ValueError) as exc:
-            raise ValueError("Seedream size 必须使用 WIDTHxHEIGHT 格式") from exc
-        steps = 0
-        guidance_scale = 0.0
-        workflow_version = SEEDREAM_WORKFLOW_VERSION
-    else:
-        raise ValueError(f"Unsupported image provider: {provider_id}")
+    provider = provider_registry.get(provider_id)
+    model_ref = f"{SEEDREAM_BASE_URL}:{provider.model_id}"
+    model_revision = SEEDREAM_SIZE
+    model_name = provider.model_id
+    try:
+        width, height = (int(value) for value in SEEDREAM_SIZE.lower().split("x", 1))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Seedream size 必须使用 WIDTHxHEIGHT 格式") from exc
+    steps = 0
+    guidance_scale = 0.0
+    workflow_version = f"{SEEDREAM_WORKFLOW_VERSION}:{provider.model_version}"
 
     base_dir = get_project_work_dir(project, settings.workspace_dir)
     ensure_project_dirs(base_dir)
@@ -219,19 +191,120 @@ def _generate(
     recovered_results = _load_results_by_variant(result_path)
     jobs = []
     variants = []
+    storyboards: dict[str, StoryboardContent] = {}
+    reused_asset_ids: list[str] = []
     for scene in scenes:
         if not scene.storyboard_json:
             raise ValueError(f"场景 {scene.scene_index} 尚未生成 Storyboard")
         storyboard = StoryboardContent.model_validate_json(scene.storyboard_json)
-        prompt, negative_prompt = compose_image_prompts(
-            project, storyboard, settings.image_generation_negative_prompt
+        storyboards[scene.id] = storyboard
+        scene_prompt, scene_negative = compose_image_prompts(project, storyboard, "")
+        compiled_style = compile_project_style(
+            session,
+            project,
+            scene_prompt=scene_prompt,
+            scene_negative=scene_negative,
+            configured_negative=settings.image_generation_negative_prompt,
         )
+        prompt = compiled_style["image_prompt"]
+        negative_prompt = compiled_style["negative_prompt"]
         scene_dir = generated_dir / f"scene_{scene.scene_index:04d}"
         attempt_key = (
             hashlib.sha1(regeneration_id.encode()).hexdigest()[:16]
             if force and regeneration_id
             else None
         )
+        existing_project_candidate = session.exec(
+            select(GeneratedImageVariant).where(
+                GeneratedImageVariant.project_id == project.id,
+                GeneratedImageVariant.scene_id == scene.id,
+                GeneratedImageVariant.style_revision_id == compiled_style["style_revision_id"],
+            )
+        ).first()
+        if not force and not (
+            existing_project_candidate and Path(existing_project_candidate.path).is_file()
+        ):
+            reusable_asset = style_asset_service.find_reusable_asset(
+                session,
+                style_revision_id=compiled_style["style_revision_id"],
+                storyboard=storyboard,
+                width=width,
+                height=height,
+                excluded_asset_ids=set(reused_asset_ids),
+            )
+            if reusable_asset:
+                asset, score = reusable_asset
+                variant_id = f"{scene.id}:image:1"
+                output_path = scene_dir / "candidate_01.png"
+                style_asset_service.materialize_reuse(
+                    session,
+                    asset=asset,
+                    project=project,
+                    scene_id=scene.id,
+                    query_text=style_asset_service.storyboard_query(storyboard),
+                    score=score,
+                    destination=output_path,
+                )
+                variant = session.get(GeneratedImageVariant, variant_id) or GeneratedImageVariant(
+                    id=variant_id,
+                    project_id=project.id,
+                    scene_id=scene.id,
+                    variant_index=1,
+                    path=str(output_path),
+                    prompt=prompt,
+                    negative_prompt=negative_prompt,
+                    model_path=f"style-asset:{asset.id}",
+                    model_name=asset.model_id or "style-asset-library",
+                    workflow_version="style_asset_reuse_v1",
+                    input_signature=_signature(
+                        "style_asset_library",
+                        prompt,
+                        negative_prompt,
+                        asset.id,
+                        asset.file_hash,
+                        0,
+                        width,
+                        height,
+                        0,
+                        0,
+                    ),
+                    seed=0,
+                    width=asset.width,
+                    height=asset.height,
+                    steps=0,
+                    guidance_scale=0,
+                )
+                variant.path = str(output_path)
+                variant.prompt = prompt
+                variant.negative_prompt = negative_prompt
+                variant.model_path = f"style-asset:{asset.id}"
+                variant.model_name = asset.model_id or "style-asset-library"
+                variant.workflow_version = "style_asset_reuse_v1"
+                variant.input_signature = _signature(
+                    "style_asset_library",
+                    prompt,
+                    negative_prompt,
+                    asset.id,
+                    asset.file_hash,
+                    0,
+                    asset.width,
+                    asset.height,
+                    0,
+                    0,
+                )
+                variant.width = asset.width
+                variant.height = asset.height
+                variant.status = "completed"
+                variant.error_message = None
+                variant.generation_seconds = 0
+                variant.style_profile_id = compiled_style["style_profile_id"]
+                variant.style_revision_id = compiled_style["style_revision_id"]
+                variant.style_content_hash = compiled_style["style_content_hash"]
+                variant.updated_at = utc_now_iso()
+                session.add(variant)
+                variants.append(variant)
+                reused_asset_ids.append(asset.id)
+                continue
         for variant_index in range(1, settings.image_generation_candidates_per_scene + 1):
             variant_id = (
                 f"{scene.id}:image:regen:{attempt_key}:{variant_index}"
@@ -286,6 +359,9 @@ def _generate(
                     height=height,
                     steps=steps,
                     guidance_scale=guidance_scale,
+                    style_profile_id=compiled_style["style_profile_id"],
+                    style_revision_id=compiled_style["style_revision_id"],
+                    style_content_hash=compiled_style["style_content_hash"],
                 )
             elif not reusable:
                 variant.path = str(output_path)
@@ -300,6 +376,9 @@ def _generate(
                 variant.height = height
                 variant.steps = steps
                 variant.guidance_scale = guidance_scale
+                variant.style_profile_id = compiled_style["style_profile_id"]
+                variant.style_revision_id = compiled_style["style_revision_id"]
+                variant.style_content_hash = compiled_style["style_content_hash"]
                 variant.status = "pending"
                 variant.error_message = None
                 variant.generation_seconds = None
@@ -336,6 +415,8 @@ def _generate(
     session.commit()
 
     if jobs:
+        if not settings.seedream_api_key.strip():
+            raise ValueError("系统尚未配置火山方舟 Seedream API Key")
         batch_path = logs_dir / "image_generation_batch.json"
         progress_path = logs_dir / "image_generation_progress.json"
         _runtime(project).generate_batch(
@@ -345,12 +426,6 @@ def _generate(
                 batch_path=batch_path,
                 result_path=result_path,
                 progress_path=progress_path,
-                python_path=python_path,
-                model_path=model_path,
-                config_dir=config_dir,
-                device=settings.image_generation_device,
-                dtype=settings.image_generation_dtype,
-                cpu_offload=settings.image_generation_cpu_offload,
             )
         )
         _apply_results(session, result_path)
@@ -367,8 +442,17 @@ def _generate(
     registered = 0
     for variant in variants:
         if variant.status == "completed" and Path(variant.path).is_file():
-            media_provider = PROVIDER if provider_id == "image.local_sdxl" else provider_id
-            _register_generated_image(session, project, variant, provider=media_provider)
+            _register_generated_image(session, project, variant, provider=provider_id)
+            storyboard = storyboards.get(variant.scene_id)
+            if storyboard:
+                style_asset_service.archive_generated_variant(
+                    session,
+                    project,
+                    variant,
+                    storyboard,
+                    provider_id=provider_id,
+                    workspace_dir=settings.workspace_dir,
+                )
             registered += 1
     stale_paths: list[Path] = []
     if force:
@@ -388,57 +472,10 @@ def _generate(
         "scene_count": len(scenes),
         "candidate_count": registered,
         "generated_count": len(jobs),
+        "reused_count": len(reused_asset_ids),
+        "reused_style_asset_ids": reused_asset_ids,
         "variants": [item.model_dump() for item in variants],
     }
-
-
-def _run_batch(
-    project_id: str,
-    python_path: Path,
-    model_path: Path,
-    config_dir: Path,
-    batch_path: Path,
-    result_path: Path,
-    progress_path: Path,
-    device: str,
-    dtype: str,
-    cpu_offload: bool,
-) -> None:
-    runner = Path(__file__).parents[2] / "integrations" / "image_generation" / "sdxl_runner.py"
-    command = [
-        str(python_path),
-        "-s",
-        str(runner),
-        "--model-path",
-        str(model_path),
-        "--config-dir",
-        str(config_dir),
-        "--batch-file",
-        str(batch_path),
-        "--result-file",
-        str(result_path),
-        "--progress-file",
-        str(progress_path),
-        "--device",
-        device,
-        "--dtype",
-        dtype,
-    ]
-    if cpu_offload:
-        command.append("--cpu-offload")
-    started = time.monotonic()
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    task_control.register_process(project_id, process)
-    try:
-        stdout, stderr = process.communicate()
-    finally:
-        task_control.unregister_process(project_id, process)
-    task_control.check_cancelled(project_id)
-    logger.info("Image generation runner completed in %.2fs", time.monotonic() - started)
-    if process.returncode != 0:
-        details = (stderr or stdout or "图片生成子进程失败").strip()
-        if not result_path.is_file():
-            raise RuntimeError(details[-4000:])
 
 
 def _apply_results(session: Session, result_path: Path) -> None:
@@ -490,7 +527,7 @@ def _register_generated_image(
     project: Project,
     variant: GeneratedImageVariant,
     *,
-    provider: str = PROVIDER,
+    provider: str = "image.seedream_5",
 ) -> None:
     path = Path(variant.path).resolve()
     file_hash = _sha256(path)
@@ -651,7 +688,7 @@ def _clear_scene_generated_assets(
         for shot in shots:
             session.delete(shot)
         media_file = session.get(MediaFile, media_id)
-        if media_file and media_file.provider in {PROVIDER, "image.seedream_5"}:
+        if media_file and media_file.provider in SEEDREAM_PROVIDER_IDS:
             session.delete(media_file)
             deleted_media_ids.add(media_id)
     session.flush()
@@ -734,36 +771,18 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _generate_batch_local(request: ImageBatchRequest) -> None:
-    request.result_path.unlink(missing_ok=True)
-    write_json(request.batch_path, list(request.jobs))
-    write_json(
-        request.progress_path,
-        {"status": "queued", "completed": 0, "failed": 0, "total": len(request.jobs)},
-    )
-    with gpu_resource.exclusive_gpu(f"image-generation:project:{request.project_id}"):
-        _run_batch(
-            request.project_id,
-            request.python_path,
-            request.model_path,
-            request.config_dir,
-            request.batch_path,
-            request.result_path,
-            request.progress_path,
-            request.device,
-            request.dtype,
-            request.cpu_offload,
-        )
-
-
 def bind_builtin_provider_runtimes() -> None:
-    if not provider_registry.is_executable("image.local_sdxl"):
-        provider_registry.bind_runtime(
-            "image.local_sdxl",
-            ImageProviderRuntime(generate_batch=_generate_batch_local),
-        )
     if not provider_registry.is_executable("image.seedream_5"):
         provider_registry.bind_runtime(
             "image.seedream_5",
-            ImageProviderRuntime(generate_batch=generate_seedream_batch, local=False),
+            ImageProviderRuntime(
+                generate_batch=partial(generate_seedream_batch, model_id=SEEDREAM_PRO_MODEL_ID)
+            ),
+        )
+    if not provider_registry.is_executable("image.seedream_5_flash"):
+        provider_registry.bind_runtime(
+            "image.seedream_5_flash",
+            ImageProviderRuntime(
+                generate_batch=partial(generate_seedream_batch, model_id=SEEDREAM_FLASH_MODEL_ID)
+            ),
         )

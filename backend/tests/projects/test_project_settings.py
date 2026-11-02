@@ -592,7 +592,6 @@ class ProjectSettingsTests(unittest.TestCase):
                     project,
                     video_mode="ai_generated_images",
                     storyboard_mode="ai",
-                    visual_enrichment_mode="auto",
                     visual_generation_mode="anime_full_coverage",
                 )
 

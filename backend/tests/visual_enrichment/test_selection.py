@@ -79,6 +79,6 @@ class SelectionTests(unittest.TestCase):
 
         self.assertEqual(plan.strategy, "anime_full_coverage")
         self.assertEqual([item.scene_id for item in plan.visuals], ["first", "second", "third"])
-        self.assertTrue(all(item.renderer.value == "flux2_klein_4b" for item in plan.visuals))
+        self.assertTrue(all(item.renderer.value == "cloud_image" for item in plan.visuals))
         self.assertTrue(all(item.generation.candidates == 1 for item in plan.visuals))
         self.assertTrue(all("consistent original 2D style" in item.prompt for item in plan.visuals))

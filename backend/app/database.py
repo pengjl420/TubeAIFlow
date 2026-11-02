@@ -12,7 +12,7 @@ from sqlmodel import Session, SQLModel, create_engine
 from app.config import DATABASE_PATH
 
 
-LATEST_SCHEMA_VERSION = 23
+LATEST_SCHEMA_VERSION = 26
 logger = logging.getLogger(__name__)
 
 
@@ -503,6 +503,146 @@ def _apply_migrations() -> None:
             "ALTER TABLE scene_assignments ADD COLUMN visual_beat_id VARCHAR",
             "CREATE INDEX IF NOT EXISTS ix_scene_assignments_visual_beat_id "
             "ON scene_assignments (visual_beat_id)",
+        ],
+        24: [
+            """
+            CREATE TABLE IF NOT EXISTS visual_style_profiles (
+                id VARCHAR NOT NULL PRIMARY KEY,
+                name VARCHAR NOT NULL,
+                description VARCHAR NOT NULL DEFAULT '',
+                tags_json VARCHAR NOT NULL DEFAULT '[]',
+                status VARCHAR NOT NULL DEFAULT 'draft',
+                current_revision_id VARCHAR,
+                draft_revision_id VARCHAR,
+                cover_image_path VARCHAR,
+                builtin_key VARCHAR,
+                created_at VARCHAR NOT NULL,
+                updated_at VARCHAR NOT NULL
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_visual_style_profiles_status ON visual_style_profiles (status)",
+            "CREATE INDEX IF NOT EXISTS ix_visual_style_profiles_current_revision_id ON visual_style_profiles (current_revision_id)",
+            "CREATE INDEX IF NOT EXISTS ix_visual_style_profiles_draft_revision_id ON visual_style_profiles (draft_revision_id)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_visual_style_profiles_builtin_key ON visual_style_profiles (builtin_key) WHERE builtin_key IS NOT NULL",
+            """
+            CREATE TABLE IF NOT EXISTS visual_style_revisions (
+                id VARCHAR NOT NULL PRIMARY KEY,
+                style_profile_id VARCHAR NOT NULL,
+                version INTEGER NOT NULL,
+                status VARCHAR NOT NULL DEFAULT 'draft',
+                style_prompt VARCHAR NOT NULL,
+                negative_prompt VARCHAR NOT NULL DEFAULT '',
+                continuity_rules_json VARCHAR NOT NULL DEFAULT '[]',
+                composition_rules_json VARCHAR NOT NULL DEFAULT '[]',
+                motion_preset_json VARCHAR NOT NULL DEFAULT '{}',
+                source VARCHAR NOT NULL DEFAULT 'manual',
+                parent_revision_id VARCHAR,
+                content_hash VARCHAR NOT NULL,
+                optimization_metadata_json VARCHAR NOT NULL DEFAULT '{}',
+                created_at VARCHAR NOT NULL,
+                published_at VARCHAR
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_visual_style_revisions_profile ON visual_style_revisions (style_profile_id)",
+            "CREATE INDEX IF NOT EXISTS ix_visual_style_revisions_status ON visual_style_revisions (status)",
+            "CREATE INDEX IF NOT EXISTS ix_visual_style_revisions_hash ON visual_style_revisions (content_hash)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_visual_style_revision_version ON visual_style_revisions (style_profile_id, version)",
+            """
+            CREATE TABLE IF NOT EXISTS style_test_runs (
+                id VARCHAR NOT NULL PRIMARY KEY,
+                style_revision_id VARCHAR NOT NULL,
+                status VARCHAR NOT NULL DEFAULT 'queued',
+                scene_description VARCHAR NOT NULL,
+                compiled_prompt VARCHAR NOT NULL DEFAULT '',
+                compiled_negative_prompt VARCHAR NOT NULL DEFAULT '',
+                provider_id VARCHAR NOT NULL DEFAULT 'image.seedream_5',
+                model_id VARCHAR NOT NULL DEFAULT 'doubao-seedream-5-0-pro-260628',
+                output_json VARCHAR NOT NULL DEFAULT '[]',
+                generation_seconds FLOAT,
+                error_code VARCHAR,
+                error_message VARCHAR,
+                created_at VARCHAR NOT NULL,
+                finished_at VARCHAR
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_style_test_runs_revision ON style_test_runs (style_revision_id)",
+            "CREATE INDEX IF NOT EXISTS ix_style_test_runs_status ON style_test_runs (status)",
+            "ALTER TABLE generated_image_variants ADD COLUMN style_profile_id VARCHAR",
+            "ALTER TABLE generated_image_variants ADD COLUMN style_revision_id VARCHAR",
+            "ALTER TABLE generated_image_variants ADD COLUMN style_content_hash VARCHAR NOT NULL DEFAULT ''",
+            "CREATE INDEX IF NOT EXISTS ix_generated_image_variants_style_profile_id ON generated_image_variants (style_profile_id)",
+            "CREATE INDEX IF NOT EXISTS ix_generated_image_variants_style_revision_id ON generated_image_variants (style_revision_id)",
+        ],
+        25: [
+            "ALTER TABLE style_test_runs ADD COLUMN client_request_id VARCHAR",
+            "ALTER TABLE style_test_runs ADD COLUMN candidate_count INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE style_test_runs ADD COLUMN updated_at VARCHAR",
+            "ALTER TABLE style_test_runs ADD COLUMN started_at VARCHAR",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_style_test_runs_client_request_id "
+            "ON style_test_runs (client_request_id) WHERE client_request_id IS NOT NULL",
+        ],
+        26: [
+            """
+            CREATE TABLE IF NOT EXISTS style_assets (
+                id VARCHAR NOT NULL PRIMARY KEY,
+                style_profile_id VARCHAR NOT NULL,
+                style_revision_id VARCHAR NOT NULL,
+                source_type VARCHAR NOT NULL,
+                source_project_id VARCHAR,
+                source_scene_id VARCHAR,
+                source_test_run_id VARCHAR,
+                source_variant_id VARCHAR,
+                path VARCHAR NOT NULL,
+                file_hash VARCHAR NOT NULL,
+                perceptual_hash VARCHAR NOT NULL DEFAULT '',
+                prompt VARCHAR NOT NULL DEFAULT '',
+                negative_prompt VARCHAR NOT NULL DEFAULT '',
+                query_text VARCHAR NOT NULL DEFAULT '',
+                entities_json VARCHAR NOT NULL DEFAULT '[]',
+                locations_json VARCHAR NOT NULL DEFAULT '[]',
+                mood VARCHAR NOT NULL DEFAULT '',
+                fact_risk VARCHAR NOT NULL DEFAULT 'low',
+                width INTEGER NOT NULL DEFAULT 0,
+                height INTEGER NOT NULL DEFAULT 0,
+                provider_id VARCHAR NOT NULL DEFAULT '',
+                model_id VARCHAR NOT NULL DEFAULT '',
+                status VARCHAR NOT NULL DEFAULT 'unreviewed',
+                text_fingerprint_json VARCHAR NOT NULL DEFAULT '[]',
+                embedding_model_id VARCHAR NOT NULL DEFAULT 'local-text-fingerprint-v1',
+                usage_count INTEGER NOT NULL DEFAULT 0,
+                last_used_at VARCHAR,
+                created_at VARCHAR NOT NULL,
+                updated_at VARCHAR NOT NULL
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_style_assets_profile ON style_assets (style_profile_id)",
+            "CREATE INDEX IF NOT EXISTS ix_style_assets_revision ON style_assets (style_revision_id)",
+            "CREATE INDEX IF NOT EXISTS ix_style_assets_source_type ON style_assets (source_type)",
+            "CREATE INDEX IF NOT EXISTS ix_style_assets_source_project ON style_assets (source_project_id)",
+            "CREATE INDEX IF NOT EXISTS ix_style_assets_source_scene ON style_assets (source_scene_id)",
+            "CREATE INDEX IF NOT EXISTS ix_style_assets_source_test ON style_assets (source_test_run_id)",
+            "CREATE INDEX IF NOT EXISTS ix_style_assets_source_variant ON style_assets (source_variant_id)",
+            "CREATE INDEX IF NOT EXISTS ix_style_assets_hash ON style_assets (file_hash)",
+            "CREATE INDEX IF NOT EXISTS ix_style_assets_phash ON style_assets (perceptual_hash)",
+            "CREATE INDEX IF NOT EXISTS ix_style_assets_status ON style_assets (status)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_style_assets_revision_hash ON style_assets (style_revision_id, file_hash)",
+            """
+            CREATE TABLE IF NOT EXISTS style_asset_matches (
+                id VARCHAR NOT NULL PRIMARY KEY,
+                project_id VARCHAR NOT NULL,
+                scene_id VARCHAR NOT NULL,
+                style_asset_id VARCHAR NOT NULL,
+                query_text VARCHAR NOT NULL,
+                semantic_score FLOAT NOT NULL,
+                decision VARCHAR NOT NULL,
+                materialized_path VARCHAR,
+                created_at VARCHAR NOT NULL
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_style_asset_matches_project ON style_asset_matches (project_id)",
+            "CREATE INDEX IF NOT EXISTS ix_style_asset_matches_scene ON style_asset_matches (scene_id)",
+            "CREATE INDEX IF NOT EXISTS ix_style_asset_matches_asset ON style_asset_matches (style_asset_id)",
+            "CREATE INDEX IF NOT EXISTS ix_style_asset_matches_decision ON style_asset_matches (decision)",
         ],
     }
     with engine.begin() as connection:

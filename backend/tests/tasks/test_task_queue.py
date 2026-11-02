@@ -562,6 +562,12 @@ class DatabaseMigrationTests(unittest.TestCase):
                     column["name"]
                     for column in inspect(engine).get_columns("generated_image_variants")
                 }
+                style_test_columns = {
+                    column["name"] for column in inspect(engine).get_columns("style_test_runs")
+                }
+                style_test_indexes = {
+                    index["name"] for index in inspect(engine).get_indexes("style_test_runs")
+                }
                 with engine.connect() as connection:
                     versions = connection.exec_driver_sql(
                         "SELECT version FROM schema_migrations ORDER BY version"
@@ -596,6 +602,14 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertIn("avatar_profiles", table_names)
         self.assertIn("avatar_generation_tasks", table_names)
         self.assertIn("avatar_clips", table_names)
+        self.assertIn("visual_style_profiles", table_names)
+        self.assertIn("visual_style_revisions", table_names)
+        self.assertIn("style_test_runs", table_names)
+        self.assertIn("client_request_id", style_test_columns)
+        self.assertIn("candidate_count", style_test_columns)
+        self.assertIn("started_at", style_test_columns)
+        self.assertIn("updated_at", style_test_columns)
+        self.assertIn("uq_style_test_runs_client_request_id", style_test_indexes)
         self.assertEqual(
             versions,
             [
@@ -622,6 +636,9 @@ class DatabaseMigrationTests(unittest.TestCase):
                 (21,),
                 (22,),
                 (23,),
+                (24,),
+                (25,),
+                (26,),
             ],
         )
 

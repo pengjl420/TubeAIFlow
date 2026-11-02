@@ -91,10 +91,7 @@ class VisualType(StrEnum):
 
 
 class Renderer(StrEnum):
-    FLUX = "flux2_klein_4b"
-    SVG = "svg"
-    MATPLOTLIB = "matplotlib"
-    PILLOW = "pillow"
+    CLOUD_IMAGE = "cloud_image"
     NONE = "none"
 
 

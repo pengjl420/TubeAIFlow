@@ -9,7 +9,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session
 
 from app.api import (
-    avatars,
     batches,
     exports,
     local_video_merge,
@@ -26,9 +25,9 @@ from app.api import (
     tts,
     voices,
     voice_generation,
+    visual_styles,
 )
 from app.database import create_db_and_tables, engine
-from app.services.avatar import avatar_service
 from app.services.image_generation import image_generation_service
 from app.services.narration import voice_generation_queue, voice_profile_service
 from app.services.rendering import local_video_merge_queue
@@ -36,6 +35,7 @@ from app.services.settings import system_settings_service
 from app.services.settings import cleanup_service
 from app.services.settings import llm_model_manager
 from app.services.tasks import task_worker
+from app.services.visual_styles import style_test_queue
 
 
 logger = logging.getLogger(__name__)
@@ -49,10 +49,10 @@ async def lifespan(_app: FastAPI):
         system_settings_service.migrate_plaintext_secrets(session)
         voice_profile_service.migrate_profile_directories(session)
         voice_profile_service.migrate_profile_language_engines(session)
-    avatar_service.recover_and_start_worker()
     local_video_merge_queue.recover_and_start_worker()
     voice_generation_queue.recover_and_start_worker()
     task_worker.recover_and_start_worker()
+    style_test_queue.recover_and_start_worker()
     cleanup_stop, cleanup_thread = cleanup_service.start_worker()
     llm_model_manager.recover_and_start_worker()
     try:
@@ -129,7 +129,6 @@ async def unexpected_exception_handler(request: Request, exc: Exception) -> JSON
     )
 
 
-app.include_router(avatars.router, prefix="/api")
 app.include_router(batches.router, prefix="/api")
 app.include_router(exports.router, prefix="/api")
 app.include_router(local_video_merge.router, prefix="/api")
@@ -146,3 +145,4 @@ app.include_router(tasks.router, prefix="/api")
 app.include_router(tts.router, prefix="/api")
 app.include_router(voices.router, prefix="/api")
 app.include_router(voice_generation.router, prefix="/api")
+app.include_router(visual_styles.router, prefix="/api")

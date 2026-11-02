@@ -14,6 +14,7 @@ from app.models.media import GeneratedImageVariant, MediaFile, MediaShot, SceneA
 from app.models.project import Project
 from app.models.storyboard import VisualScene
 from app.services.rendering import timeline_composer
+from app.services.visual_styles.style_service import project_motion_settings
 
 
 def scene_assets(session: Session, project: Project, scene_id: str) -> dict:
@@ -51,6 +52,9 @@ def scene_assets(session: Session, project: Project, scene_id: str) -> dict:
                 "height": item.height,
                 "status": item.status,
                 "error_message": item.error_message,
+                "style_profile_id": item.style_profile_id,
+                "style_revision_id": item.style_revision_id,
+                "style_content_hash": item.style_content_hash,
                 "selected": bool(item.media_file_id and item.media_file_id in assigned_media_ids),
             }
             for item in variants
@@ -83,6 +87,7 @@ def assign_generated_variant(
         raise ValueError("Image candidate file is missing")
     session.exec(delete(SceneAssignment).where(SceneAssignment.scene_id == scene.id))
     duration_ms = scene.end_ms - scene.start_ms
+    motion = project_motion_settings(session, project)
     assignment = SceneAssignment(
         id=f"assignment_{uuid.uuid4().hex}",
         project_id=project.id,
@@ -93,6 +98,11 @@ def assign_generated_variant(
         scene_offset_end_ms=duration_ms,
         display_duration_ms=duration_ms,
         selection_stage="generated_image",
+        motion_type=motion["motion_type"],
+        zoom_start=motion["zoom_start"],
+        zoom_end=motion["zoom_end"],
+        pan_direction=motion["pan_direction"],
+        transition=motion["transition"],
     )
     session.add(assignment)
     session.commit()

@@ -36,7 +36,8 @@ class ProductionAppContractTests(unittest.TestCase):
             "/api/providers",
             "/api/tools/voice-generation/tasks",
             "/api/tools/local-video-merge/tasks",
-            "/api/avatars/tasks",
+            "/api/visual-styles/{style_id}/tests",
+            "/api/visual-styles/tests/{run_id}",
         }
         self.assertTrue(required.issubset(paths), required - paths)
 

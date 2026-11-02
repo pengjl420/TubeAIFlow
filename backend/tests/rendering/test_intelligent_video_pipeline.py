@@ -40,7 +40,6 @@ class GeneratedImageVideoPipelineTests(unittest.TestCase):
             with (
                 patch.object(video_synthesis, "ensure_ffmpeg_available"),
                 patch.object(video_synthesis, "_artifact_exists", return_value=True),
-                patch.object(video_synthesis.advanced_visual_workflow, "enrich_project_visuals"),
                 patch.object(video_synthesis.image_generation_service, "generate_project_images"),
                 patch.object(video_synthesis.image_assignment_service, "assign_generated_images"),
                 patch.object(video_synthesis.prproj_export_service, "export_project_prproj"),

@@ -9,6 +9,15 @@ from app.services.settings import llm_model_manager
 router = APIRouter(tags=["providers"])
 
 
+def _provider_available(provider_id: str) -> bool:
+    settings = get_settings()
+    if provider_id == "llm.deepseek":
+        return bool(settings.deepseek_api_key.strip())
+    if provider_id.startswith("image.seedream_5"):
+        return bool(settings.seedream_api_key.strip())
+    return True
+
+
 @router.get("/models/llm")
 def list_llm_models() -> dict:
     return {"success": True, "data": llm_model_manager.list_models()}
@@ -75,19 +84,12 @@ def get_llm_provider_status() -> dict:
 
 @router.get("/providers")
 def list_providers(category: ProviderCategory | None = Query(default=None)) -> dict:
-    settings = get_settings()
     return {
         "success": True,
         "data": [
             {
                 **item.model_dump(mode="json"),
-                "available": (
-                    bool(settings.deepseek_api_key.strip())
-                    if item.id == "llm.deepseek"
-                    else bool(settings.seedream_api_key.strip())
-                    if item.id == "image.seedream_5"
-                    else True
-                ),
+                "available": _provider_available(item.id),
                 "legacy_id": item.legacy_id,
             }
             for item in provider_registry.list(category)
@@ -104,14 +106,7 @@ def get_provider(provider_id: str) -> dict:
             status_code=404,
             detail={"error": str(exc), "code": "PROVIDER_NOT_FOUND"},
         ) from exc
-    settings = get_settings()
-    available = (
-        bool(settings.deepseek_api_key.strip())
-        if item.id == "llm.deepseek"
-        else bool(settings.seedream_api_key.strip())
-        if item.id == "image.seedream_5"
-        else True
-    )
+    available = _provider_available(item.id)
     return {
         "success": True,
         "data": {

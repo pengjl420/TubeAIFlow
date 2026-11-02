@@ -11,6 +11,7 @@ from app.models.storyboard import VisualScene
 from app.config import get_settings
 from app.infrastructure.project_layout import get_project_work_dir
 from app.services.rendering import timeline_composer
+from app.services.visual_styles.style_service import project_motion_settings
 
 
 def assign_generated_images(session: Session, project: Project) -> dict:
@@ -33,7 +34,8 @@ def assign_scene_image(session: Session, project: Project, scene_id: str) -> dic
     if existing:
         return {"scene_id": scene.id, "assignment_id": existing[0].id, "reused": True}
 
-    beat_assignments = _assign_visual_beats(session, project, scene)
+    motion = project_motion_settings(session, project)
+    beat_assignments = _assign_visual_beats(session, project, scene, motion)
     if beat_assignments:
         session.add_all(beat_assignments)
         session.commit()
@@ -72,6 +74,11 @@ def assign_scene_image(session: Session, project: Project, scene_id: str) -> dic
         scene_offset_end_ms=duration_ms,
         display_duration_ms=duration_ms,
         selection_stage="generated_image",
+        motion_type=motion["motion_type"],
+        zoom_start=motion["zoom_start"],
+        zoom_end=motion["zoom_end"],
+        pan_direction=motion["pan_direction"],
+        transition=motion["transition"],
     )
     session.add(assignment)
     session.commit()
@@ -79,7 +86,7 @@ def assign_scene_image(session: Session, project: Project, scene_id: str) -> dic
 
 
 def _assign_visual_beats(
-    session: Session, project: Project, scene: VisualScene
+    session: Session, project: Project, scene: VisualScene, motion: dict
 ) -> list[SceneAssignment]:
     plan_path = (
         get_project_work_dir(project, get_settings().workspace_dir)
@@ -138,7 +145,11 @@ def _assign_visual_beats(
                 scene_offset_end_ms=end_ms,
                 display_duration_ms=end_ms - start_ms,
                 selection_stage="generated_image",
-                motion_type="anime_master_kenburns",
+                motion_type=motion["motion_type"],
+                zoom_start=motion["zoom_start"],
+                zoom_end=motion["zoom_end"],
+                pan_direction=motion["pan_direction"],
+                transition=motion["transition"],
             )
         )
     return assignments

@@ -1,5 +1,4 @@
 from app.models.batch import BatchItem, BatchJob
-from app.models.avatar import AvatarClip, AvatarGenerationTask, AvatarProfile
 from app.models.local_video_merge import LocalVideoMergeTask
 from app.models.media import (
     GeneratedImageVariant,
@@ -14,14 +13,18 @@ from app.models.project import Project
 from app.models.settings import SystemSetting
 from app.models.storyboard import SceneRevision, SubtitleCue, VisualScene
 from app.models.task import TaskRun
+from app.models.visual_style import (
+    StyleAsset,
+    StyleAssetMatch,
+    StyleTestRun,
+    VisualStyleProfile,
+    VisualStyleRevision,
+)
 from app.models.voice_generation import VoiceGenerationTask
 
 __all__ = [
     "BatchItem",
     "BatchJob",
-    "AvatarClip",
-    "AvatarGenerationTask",
-    "AvatarProfile",
     "GeneratedImageVariant",
     "LocalVideoMergeTask",
     "MediaFile",
@@ -35,6 +38,11 @@ __all__ = [
     "SystemSetting",
     "SubtitleCue",
     "TaskRun",
+    "StyleTestRun",
+    "StyleAsset",
+    "StyleAssetMatch",
+    "VisualStyleProfile",
+    "VisualStyleRevision",
     "VisualScene",
     "VoiceProfile",
     "VoiceGenerationTask",

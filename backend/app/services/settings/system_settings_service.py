@@ -122,7 +122,6 @@ def _validate_paths(settings: Settings) -> None:
         "moss_tts_root",
         "moss_tts_model_dir",
         "moss_tts_codec_dir",
-        "image_generation_config_dir",
         "subtitle_whisper_model_path",
         "local_llm_models_dir",
     ):
@@ -139,16 +138,6 @@ def _validate_paths(settings: Settings) -> None:
         raise ValueError("index_tts_python must be an existing file")
     if settings.moss_tts_python is not None and not settings.moss_tts_python.is_file():
         raise ValueError("moss_tts_python must be an existing file")
-    if (
-        settings.image_generation_model_path is not None
-        and not settings.image_generation_model_path.is_file()
-    ):
-        raise ValueError("image_generation_model_path must be an existing file")
-    if (
-        settings.image_generation_python is not None
-        and not settings.image_generation_python.is_file()
-    ):
-        raise ValueError("image_generation_python must be an existing file")
 
 
 def _serialize_settings(

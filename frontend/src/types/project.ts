@@ -20,8 +20,10 @@ export interface Project {
     storyboard_transition_enabled?: boolean
     segmentation_mode?: SegmentationMode
     storyboard_mode?: StoryboardMode
-    visual_enrichment_mode?: 'auto' | 'advanced' | 'basic'
     visual_generation_mode?: VisualGenerationMode
+    visual_style_profile_id?: string
+    visual_style_revision_id?: string
+    visual_style_content_hash?: string
     [key: string]: unknown
   }
   created_at: string

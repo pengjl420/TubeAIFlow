@@ -102,6 +102,9 @@ class GeneratedImageVariant(SQLModel, table=True):
     generation_seconds: float | None = None
     error_message: str | None = None
     media_file_id: str | None = Field(default=None, index=True)
+    style_profile_id: str | None = Field(default=None, index=True)
+    style_revision_id: str | None = Field(default=None, index=True)
+    style_content_hash: str = ""
     created_at: str = Field(default_factory=utc_now_iso)
     updated_at: str = Field(default_factory=utc_now_iso)
 

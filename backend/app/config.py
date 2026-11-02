@@ -12,21 +12,6 @@ from sqlalchemy.exc import OperationalError
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_WORKSPACE_DIR = (BASE_DIR / "workspace").resolve()
-DEFAULT_IMAGE_MODEL_PATH = (
-    BASE_DIR.parent
-    / "models"
-    / "image_generation"
-    / "juggernaut_xiii_ragnarok"
-    / "checkpoint"
-    / "juggernautXL_ragnarok.safetensors"
-).resolve()
-DEFAULT_IMAGE_CONFIG_DIR = (
-    BASE_DIR.parent
-    / "models"
-    / "image_generation"
-    / "juggernaut_xiii_ragnarok"
-    / "diffusers_config"
-).resolve()
 DEFAULT_LOCAL_LLM_MODELS_DIR = (BASE_DIR.parent / "models" / "llm").resolve()
 DATABASE_PATH = DEFAULT_WORKSPACE_DIR / "app.db"
 _SETTINGS_OVERRIDE: ContextVar[dict | None] = ContextVar(
@@ -72,11 +57,6 @@ class Settings(BaseModel):
     cleanup_completed_voice_tasks: bool = False
     ffmpeg_path: str = "ffmpeg"
     ffprobe_path: str = "ffprobe"
-    duix_base_url: str = "http://127.0.0.1:8383"
-    duix_host_shared_dir: Path = Path(r"D:\duix_avatar_data\face2face")
-    duix_container_shared_dir: str = "/code/data"
-    duix_poll_interval_seconds: float = Field(default=3.0, ge=0.5, le=30)
-    duix_task_timeout_seconds: float = Field(default=43200, ge=60, le=86400)
     premiere_pro_path: Path | None = None
     storyboard_transition_effects: list[StoryboardTransitionEffect] = Field(
         default_factory=default_storyboard_transition_effects
@@ -101,30 +81,14 @@ class Settings(BaseModel):
     storyboard_cloud_confidence_threshold: float = Field(default=0.68, ge=0, le=1)
     storyboard_cloud_identity_risk_threshold: int = Field(default=8, ge=0, le=10)
     storyboard_llm_cache_enabled: bool = True
-    image_generation_model_path: Path | None = (
-        DEFAULT_IMAGE_MODEL_PATH if DEFAULT_IMAGE_MODEL_PATH.is_file() else None
-    )
-    image_generation_config_dir: Path | None = (
-        DEFAULT_IMAGE_CONFIG_DIR
-        if (DEFAULT_IMAGE_CONFIG_DIR / "model_index.json").is_file()
-        else None
-    )
-    image_generation_python: Path | None = None
-    image_generation_device: str = "cuda:0"
-    image_generation_dtype: str = "float16"
-    image_generation_width: int = Field(default=1344, ge=512, le=2048, multiple_of=64)
-    image_generation_height: int = Field(default=768, ge=512, le=2048, multiple_of=64)
-    image_generation_steps: int = Field(default=30, ge=1, le=100)
-    image_generation_guidance_scale: float = Field(default=5.5, ge=0, le=30)
     image_generation_candidates_per_scene: int = Field(default=2, ge=1, le=4)
-    image_generation_cpu_offload: bool = True
     image_generation_negative_prompt: str = (
         "text, watermark, logo, caption, signature, deformed anatomy, extra fingers, "
         "duplicate people, low resolution, blurry, oversaturated"
     )
-    image_generation_provider_id: Literal["image.seedream_5", "image.local_sdxl"] = (
-        "image.seedream_5"
-    )
+    image_generation_provider_id: Literal[
+        "image.seedream_5", "image.seedream_5_flash"
+    ] = "image.seedream_5"
     seedream_api_key: str = ""
     qwen_tts_root: Path | None = None
     qwen_tts_python: Path | None = None
@@ -187,11 +151,7 @@ class Settings(BaseModel):
         "moss_tts_python",
         "moss_tts_model_dir",
         "moss_tts_codec_dir",
-        "image_generation_model_path",
-        "image_generation_config_dir",
-        "image_generation_python",
         "premiere_pro_path",
-        "duix_host_shared_dir",
         "subtitle_whisper_model_path",
         "local_llm_models_dir",
         mode="before",
@@ -281,21 +241,20 @@ class Settings(BaseModel):
             raise ValueError("Qwen3-TTS device and language cannot be empty")
         return text
 
-    @field_validator("image_generation_dtype")
-    @classmethod
-    def validate_image_generation_dtype(cls, value):
-        dtype = str(value or "").strip().lower()
-        if dtype not in {"bfloat16", "float16", "float32"}:
-            raise ValueError("Unsupported image generation dtype")
-        return dtype
-
-    @field_validator("image_generation_device", "image_generation_negative_prompt")
+    @field_validator("image_generation_negative_prompt")
     @classmethod
     def non_empty_image_generation_setting(cls, value):
         text = str(value or "").strip()
         if not text:
-            raise ValueError("Image generation device and negative prompt cannot be empty")
+            raise ValueError("Image generation negative prompt cannot be empty")
         return text
+
+    @field_validator("image_generation_provider_id", mode="before")
+    @classmethod
+    def migrate_legacy_local_image_provider(cls, value):
+        if str(value or "").strip() == "image.local_sdxl":
+            return "image.seedream_5"
+        return value
 
     @property
     def database_url(self) -> str:
@@ -321,10 +280,6 @@ def _normalize_paths(settings: Settings) -> Settings:
         "moss_tts_python",
         "moss_tts_model_dir",
         "moss_tts_codec_dir",
-        "image_generation_model_path",
-        "image_generation_config_dir",
-        "image_generation_python",
-        "duix_host_shared_dir",
         "subtitle_whisper_model_path",
         "local_llm_models_dir",
     ):

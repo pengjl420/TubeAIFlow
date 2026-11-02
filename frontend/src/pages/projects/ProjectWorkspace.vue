@@ -5,6 +5,7 @@ import { AlertTriangle, CheckCircle2, ChevronRight, CircleStop, Download, FileAu
 import { cancelProjectTask, enqueueProjectQualityCheck, enqueueSceneStoryboardJob, exportProjectPrproj, getProject, getProjectOutputs, getProjectQualityReport, getProjectScenes, getProjectScript, getProjectTask, getSceneRevisions, listVisualStrategies, projectOutputUrl, recordProjectManualAcceptance, restoreSceneRevision, saveProjectScript, startProjectWorkflow, updateProjectScene, updateProjectSettings, updateProjectVideoSettings, type ProjectOutputs, type ProjectSettingsInput, type ProjectTask, type QualityIssue, type QualityReport, type VisualStrategyMetadata } from '../../api/projects'
 import { listVoices, type VoiceProfile } from '../../api/voices'
 import { selectDirectory } from '../../api/settings'
+import { bindProjectVisualStyle, listVisualStyles, type VisualStyleProfile } from '../../api/visualStyles'
 import type { Project, VideoGenerationMode } from '../../types/project'
 import type { SceneRevision, VisualScene } from '../../types/storyboard'
 import { confirmAction, usePageFeedback } from '../../services/feedback'
@@ -36,9 +37,12 @@ const settingsDraft = ref<ProjectSettingsInput>({
   name: '', outputDir: '', outputFilename: '', mediaVideoDir: '', videoMode: 'none',
   ttsEngine: 'index_tts', referenceAudioText: '', voiceProfileId: '',
   storyboardTransitionEnabled: true, segmentationMode: 'ai', storyboardMode: 'ai',
-  visualEnrichmentMode: 'auto', visualGenerationMode: 'curated',
+  visualGenerationMode: 'curated',
+  visualStyleRevisionId: '',
 })
 const visualStrategies = ref<VisualStrategyMetadata[]>([])
+const visualStyles = ref<VisualStyleProfile[]>([])
+const applyStyleExisting = ref(false)
 let timer: number | undefined
 usePageFeedback(error, message, { errorTitle: '项目工作流错误' })
 
@@ -245,6 +249,7 @@ async function openProjectSettings() {
   try {
     if (!voices.value.length) voices.value = await listVoices()
     if (!visualStrategies.value.length) visualStrategies.value = await listVisualStrategies()
+    if (!visualStyles.value.length) visualStyles.value = await listVisualStyles()
     const config = project.value.config || {}
     const selectedVoice = voices.value.find(item => item.id === config.voice_profile_id)
     settingsDraft.value = {
@@ -259,13 +264,16 @@ async function openProjectSettings() {
       storyboardTransitionEnabled: config.storyboard_transition_enabled !== false,
       segmentationMode: config.segmentation_mode === 'newline' ? 'newline' : 'ai',
       storyboardMode: config.storyboard_mode === 'segments' ? 'segments' : 'ai',
-      visualEnrichmentMode: ['advanced', 'basic'].includes(String(config.visual_enrichment_mode))
-        ? config.visual_enrichment_mode as 'advanced' | 'basic'
-        : 'auto',
       visualGenerationMode: config.visual_generation_mode === 'anime_full_coverage'
         ? 'anime_full_coverage'
         : 'curated',
+      visualStyleRevisionId: String(config.visual_style_revision_id || ''),
     }
+    if (!settingsDraft.value.visualStyleRevisionId) {
+      const preferred = visualStyles.value.find(item => item.builtin_key === (settingsDraft.value.visualGenerationMode === 'anime_full_coverage' ? 'anime_documentary' : 'documentary'))
+      settingsDraft.value.visualStyleRevisionId = preferred?.current_revision?.id || ''
+    }
+    applyStyleExisting.value = false
     showSettings.value = true
   } catch (reason) { error.value = reason instanceof Error ? reason.message : '读取项目设置失败' }
 }
@@ -294,6 +302,13 @@ async function saveSettings() {
     project.value = projectEditable.value
       ? await updateProjectSettings(project.value.id, settingsDraft.value)
       : await updateProjectVideoSettings(project.value.id, settingsDraft.value)
+    if (settingsDraft.value.visualStyleRevisionId) {
+      project.value = await bindProjectVisualStyle(
+        project.value.id,
+        settingsDraft.value.visualStyleRevisionId,
+        applyStyleExisting.value,
+      )
+    }
     showSettings.value = false
     message.value = '项目生产配置已保存'
   } catch (reason) { error.value = reason instanceof Error ? reason.message : '保存项目设置失败' }
@@ -407,7 +422,7 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', handleBeforeU
       </div>
       <div class="actions"><button v-if="videoSettingsEditable" class="secondary" @click="openProjectSettings"><Settings2 :size="15" />项目设置</button><button class="secondary icon-action" title="刷新项目" aria-label="刷新项目" @click="load()"><RefreshCw :size="15" /></button><button v-if="selectedStage === 'storyboard' && sceneDraft" class="secondary" :disabled="operating || active || sceneDirty || sceneDraft.locked_visual" @click="regenerateScene"><RefreshCw :size="15" />重做 Scene</button><button v-if="active" class="danger" :disabled="operating" @click="cancelWorkflow"><CircleStop :size="16" />停止任务</button><button v-else class="primary-action" :disabled="operating || !project.script_clean_path" @click="runWorkflow"><Play :size="16" />{{ project.status === 'failed' ? '重新运行' : project.status === 'narration_ready' && project.config?.include_video ? '继续生成视频' : '运行工作流' }}</button></div>
     </header>
-    <Teleport to="body"><div v-if="showSettings && settingsDraft" class="project-settings-backdrop" @mousedown.self="showSettings = false"><form class="project-settings-dialog" @submit.prevent="saveSettings"><header><div><Settings2 :size="20" /><div><h2>项目生产配置</h2><p>{{ recoverableSegmentationFailure ? '分段失败后可修改配置；重新运行会创建新任务并保留原失败记录。' : projectEditable ? '生成开始后，旁白与输出基础配置将锁定。' : '旁白已完成；当前只允许调整后续视频配置。' }}</p></div></div><button type="button" aria-label="关闭" @click="showSettings = false"><X :size="18" /></button></header><div class="project-settings-grid"><label><span>项目名称</span><input v-model="settingsDraft.name" required :disabled="!projectEditable" /></label><label><span>输出文件名</span><input v-model="settingsDraft.outputFilename" required :disabled="!projectEditable" /></label><label class="wide"><span>输出目录</span><div><input v-model="settingsDraft.outputDir" required :disabled="!projectEditable" /><button v-if="projectEditable" type="button" @click="chooseSettingsDirectory('output')"><Folder :size="14" />浏览</button></div></label><label><span>默认音色</span><select v-model="settingsDraft.voiceProfileId" required :disabled="!projectEditable"><option v-for="voice in voices" :key="voice.id" :value="voice.id">{{ voice.name }} · {{ voice.tts_engine }}</option></select></label><label><span>TTS 分段</span><select v-model="settingsDraft.segmentationMode" :disabled="!projectEditable"><option value="ai">AI 语义分段</option><option value="newline">按换行分段</option></select></label><label><span>视频生产模式</span><select v-model="settingsDraft.videoMode"><option value="ai_generated_images">AI 分镜图片</option><option value="ai_landscape_mix">AI 图片 + 本地横屏素材</option><option value="landscape">仅本地横屏素材</option><option value="none">仅配音与字幕</option></select></label><label><span>分镜方式</span><select v-model="settingsDraft.storyboardMode" :disabled="settingsDraft.videoMode === 'none'"><option value="ai">AI 语义分镜</option><option value="segments">沿用 TTS 分段</option></select></label><label v-if="compatibleVisualStrategies.length"><span>画面生成方式</span><select v-model="settingsDraft.visualGenerationMode"><option v-for="strategy in compatibleVisualStrategies" :key="strategy.id" :value="strategy.id">{{ strategy.display_name }}</option></select><small>{{ compatibleVisualStrategies.find(item => item.id === settingsDraft.visualGenerationMode)?.description }}</small></label><label v-if="settingsNeedMedia" class="wide"><span>横屏素材目录</span><div><input v-model="settingsDraft.mediaVideoDir" required /><button type="button" @click="chooseSettingsDirectory('media')"><Folder :size="14" />浏览</button></div></label><label class="check wide"><input v-model="settingsDraft.storyboardTransitionEnabled" type="checkbox" />启用基础转场</label></div><footer><button type="button" @click="showSettings = false">取消</button><button class="primary" type="submit" :disabled="saving || !settingsDraft.name.trim() || !settingsDraft.outputDir.trim() || !settingsDraft.voiceProfileId || (settingsNeedMedia && !settingsDraft.mediaVideoDir.trim())">{{ saving ? '保存中…' : '保存配置' }}</button></footer></form></div></Teleport>
+    <Teleport to="body"><div v-if="showSettings && settingsDraft" class="project-settings-backdrop" @mousedown.self="showSettings = false"><form class="project-settings-dialog" @submit.prevent="saveSettings"><header><div><Settings2 :size="20" /><div><h2>项目生产配置</h2><p>{{ recoverableSegmentationFailure ? '分段失败后可修改配置；重新运行会创建新任务并保留原失败记录。' : projectEditable ? '生成开始后，旁白与输出基础配置将锁定。' : '旁白已完成；当前只允许调整后续视频配置。' }}</p></div></div><button type="button" aria-label="关闭" @click="showSettings = false"><X :size="18" /></button></header><div class="project-settings-grid"><label><span>项目名称</span><input v-model="settingsDraft.name" required :disabled="!projectEditable" /></label><label><span>输出文件名</span><input v-model="settingsDraft.outputFilename" required :disabled="!projectEditable" /></label><label class="wide"><span>输出目录</span><div><input v-model="settingsDraft.outputDir" required :disabled="!projectEditable" /><button v-if="projectEditable" type="button" @click="chooseSettingsDirectory('output')"><Folder :size="14" />浏览</button></div></label><label><span>默认音色</span><select v-model="settingsDraft.voiceProfileId" required :disabled="!projectEditable"><option v-for="voice in voices" :key="voice.id" :value="voice.id">{{ voice.name }} · {{ voice.tts_engine }}</option></select></label><label><span>TTS 分段</span><select v-model="settingsDraft.segmentationMode" :disabled="!projectEditable"><option value="ai">AI 语义分段</option><option value="newline">按换行分段</option></select></label><label><span>视频生产模式</span><select v-model="settingsDraft.videoMode"><option value="ai_generated_images">AI 分镜图片</option><option value="ai_landscape_mix">AI 图片 + 本地横屏素材</option><option value="landscape">仅本地横屏素材</option><option value="none">仅配音与字幕</option></select></label><label><span>分镜方式</span><select v-model="settingsDraft.storyboardMode" :disabled="settingsDraft.videoMode === 'none'"><option value="ai">AI 语义分镜</option><option value="segments">沿用 TTS 分段</option></select></label><label v-if="compatibleVisualStrategies.length"><span>画面生成方式</span><select v-model="settingsDraft.visualGenerationMode"><option v-for="strategy in compatibleVisualStrategies" :key="strategy.id" :value="strategy.id">{{ strategy.display_name }}</option></select><small>{{ compatibleVisualStrategies.find(item => item.id === settingsDraft.visualGenerationMode)?.description }}</small></label><label><span>统一画面风格</span><select v-model="settingsDraft.visualStyleRevisionId"><option v-for="style in visualStyles.filter(item => item.current_revision)" :key="style.current_revision!.id" :value="style.current_revision!.id">{{ style.name }} · v{{ style.current_revision!.version }}</option></select><small>项目锁定已发布版本，风格库后续编辑不会静默改变本项目。</small></label><label v-if="settingsNeedMedia" class="wide"><span>横屏素材目录</span><div><input v-model="settingsDraft.mediaVideoDir" required /><button type="button" @click="chooseSettingsDirectory('media')"><Folder :size="14" />浏览</button></div></label><label class="check wide"><input v-model="settingsDraft.storyboardTransitionEnabled" type="checkbox" />启用基础转场</label><label v-if="!projectEditable" class="check wide"><input v-model="applyStyleExisting" type="checkbox" />将新风格应用到所有未锁定 Scene（会使旧视觉分配与工程导出失效）</label></div><footer><button type="button" @click="showSettings = false">取消</button><button class="primary" type="submit" :disabled="saving || !settingsDraft.name.trim() || !settingsDraft.outputDir.trim() || !settingsDraft.voiceProfileId || (settingsNeedMedia && !settingsDraft.mediaVideoDir.trim())">{{ saving ? '保存中…' : '保存配置' }}</button></footer></form></div></Teleport>
 
     <nav class="stage-bar" aria-label="项目生产阶段"><button v-for="([id, label], index) in stages" :key="id" type="button" :class="{ reached: stageReached(id), current: task?.stage === id, selected: selectedStage === id }" :aria-current="task?.stage === id ? 'step' : undefined" @click="selectedStage = id"><span><CheckCircle2 v-if="stageReached(id)" :size="14" /><b v-else>{{ index + 1 }}</b></span><small>{{ label }}</small><i v-if="index < stages.length - 1" /></button></nav>
     <section class="stage-context" aria-live="polite"><div class="stage-context-icon"><Info :size="17" /></div><div><strong>第 {{ selectedStageIndex + 1 }} 步 · {{ stages.find(item => item[0] === selectedStage)?.[1] }}</strong><span>{{ selectedStageDetail.description }}</span></div><small><span>预期产物</span>{{ selectedStageDetail.output }}</small></section>

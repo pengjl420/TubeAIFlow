@@ -50,7 +50,6 @@ class ProjectSettingsRequest(BaseModel):
     storyboard_transition_enabled: bool = True
     segmentation_mode: str = project_service.SEGMENTATION_MODE_NEWLINE
     storyboard_mode: str = project_service.STORYBOARD_MODE_AI
-    visual_enrichment_mode: str = "auto"
     visual_generation_mode: str | None = None
 
 
@@ -59,7 +58,6 @@ class VideoWorkflowSettingsRequest(BaseModel):
     media_video_dir: str = ""
     storyboard_mode: str = project_service.STORYBOARD_MODE_AI
     storyboard_transition_enabled: bool = True
-    visual_enrichment_mode: str = "auto"
     visual_generation_mode: str | None = None
 
 
@@ -104,7 +102,6 @@ def create_project(
     storyboard_transition_enabled: bool = Form(True),
     segmentation_mode: str = Form(project_service.SEGMENTATION_MODE_NEWLINE),
     storyboard_mode: str = Form(project_service.STORYBOARD_MODE_AI),
-    visual_enrichment_mode: str = Form("auto"),
     visual_generation_mode: str = Form("curated"),
     session: Session = Depends(get_session),
 ) -> dict:
@@ -137,7 +134,6 @@ def create_project(
             storyboard_transition_enabled,
             segmentation_mode,
             storyboard_mode,
-            visual_enrichment_mode,
             visual_generation_mode,
         )
         if voice_profile_id.strip():
@@ -339,7 +335,6 @@ def save_project_settings(
             payload.storyboard_transition_enabled,
             payload.segmentation_mode,
             payload.storyboard_mode,
-            payload.visual_enrichment_mode,
             payload.visual_generation_mode,
         )
         return ok(project_service.get_project_response(session, updated))
@@ -428,7 +423,6 @@ def save_video_workflow_settings(
             media_video_dir=payload.media_video_dir,
             storyboard_mode=payload.storyboard_mode,
             storyboard_transition_enabled=payload.storyboard_transition_enabled,
-            visual_enrichment_mode=payload.visual_enrichment_mode,
             visual_generation_mode=payload.visual_generation_mode,
         )
         return ok(project_service.get_project_response(session, updated))

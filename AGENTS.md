@@ -29,7 +29,7 @@
 
 ---
 
-# 0. 当前实现状态快照（2026-09-20）
+# 0. 当前实现状态快照（2026-11-01）
 
 > 本节记录已经通过代码与测试核验的实现现状，供后续 Coding Agent 优先读取。
 >
@@ -80,11 +80,7 @@ backend\.venv\Scripts\python.exe scripts\verify_long_form_delivery.py --qa-repor
 ↓
 语义 Storyboard / Visual Scene
 ↓
-本地素材匹配或本地 AI 图片生成
-↓
-高级本地视觉增强（BGE-M3 / Qwen / FLUX / Qwen3-VL）
-↓
-本地素材匹配或本地 AI 图片生成
+本地素材匹配或云端 API 图片生成
 ↓
 Scene Preview 与基础质量检查
 ↓
@@ -102,6 +98,9 @@ Scene Preview 与基础质量检查
 - 项目删除时移动到 Windows 回收站
 - 全局 SQLite Schema Migration、迁移前备份、失败恢复
 - Schema v23 为生成图片与 SceneAssignment 增加稳定 `visual_beat_id`，旧项目可原地迁移
+- Schema v24 增加版本化 Visual Style Profile、Style Revision 和 Style Test Run；项目可锁定已发布风格版本
+- Schema v25 为 Style Test Run 增加客户端幂等请求标识、候选数量和运行时间字段；风格测试改为持久化异步队列
+- Schema v26 增加按 Visual Style Revision 隔离的 StyleAsset、StyleAssetMatch 与复用审计；风格测试图和正式项目生成图会归档到独立风格资产目录
 
 注意：当前权威数据库仍是全局 SQLite；AGENTS.md 规划的每项目 `project.db` 尚未实现。
 
@@ -118,7 +117,7 @@ Scene Preview 与基础质量检查
 - 失败的非批次项目重新运行时会创建使用当前配置快照的新 TaskRun，并保留原失败任务审计记录；分段阶段失败后允许修改项目与分段配置
 - 应用启动后恢复中断任务
 - Scene 级 Storyboard、图片生成和 Preview Job
-- 项目级素材扫描、Scene Preview、Visual Enrichment 和 PRPROJ Project Export Job
+- 项目级素材扫描、Scene Preview 和 PRPROJ Project Export Job
 - 稳定的部分 Error Code 与统一 API 错误响应
 - LLM 输出长度截断使用 `PROVIDER_OUTPUT_TRUNCATED`，确定性截断不会重复请求同一 Provider
 
@@ -200,15 +199,12 @@ Scene Preview 与基础质量检查
 - AI 图片与本地横屏素材混合分配
 - Scene 内多 Shot、Trim、Playback Speed 和显示时长
 
-高级视觉管线已经接入正式项目 Workflow：
+视觉生成已切换为云端 API 唯一路径：
 
-- `auto`：运行 BGE-M3、Local Qwen、FLUX / ComfyUI 和 Qwen3-VL；可选组件未就绪时记录报告并回退到 SDXL
-- `advanced`：高级视觉管线失败时让持久化 Job 明确失败
-- `basic`：只使用基础 SDXL 管线
-- 高级 Visual Plan 会回写正式 VisualScene Storyboard；Qwen3-VL 通过的 FLUX 图片会注册为 GeneratedImageVariant、MediaFile 和 MediaShot
-- 新增独立 `anime_full_coverage` 画面生成策略：逐字稿按 8~15 秒语义主场景全片覆盖，跳过重点视觉模式的候选阈值、10 秒抑制和每分钟数量上限；统一注入原创二维动漫 Style Prompt，并为后续 3~6 秒取景/运动变化保留 Motion Prompt。高级管线不可用时，未锁定 Scene 使用当前注册的图片 Provider 继续生成。
-- 视觉生成策略已经统一到可注册的 Strategy Registry；后端提供策略能力元数据，前端按视频模式动态显示兼容策略。动漫策略保留正式 VisualScene 作为父级，对超长 Scene 按字幕边界派生稳定 Visual Beat，并生成 Scene 内连续多镜头 Assignment。
-- 动漫 Style Prompt 在生成时动态组合，不永久覆盖基础 Storyboard；视觉策略切换会失效未锁定 Scene 的旧图片变体，高级管线固定复用每 Scene 的 `variant_index=0` 槽位，避免历史图片误复用和唯一索引冲突。
+- 正式项目 Workflow 不再调用本地 BGE-M3 / Qwen / FLUX / ComfyUI / Qwen3-VL 图片生成与图片 QC 管线。
+- `visual_enrichment_mode`、本地 SDXL Provider、ComfyUI Workflow 和相关模型安装/启动脚本已经移除。
+- `anime_full_coverage` 与 `curated` 继续作为 Provider-neutral Prompt / 画面策略；实际图片统一交给云端 Image Provider 生成。
+- 视觉策略切换会失效未锁定 Scene 的旧图片变体；历史本地图片记录只用于旧项目迁移和清理，不可再执行本地生成。
 
 部分实现：`MediaKeyframe` 表已存在，但本地视频的关键帧提取、镜头切分和 AI Caption 尚未完成；本地素材候选匹配仍需继续统一到 BGE-M3 Embedding。
 
@@ -216,20 +212,24 @@ Scene Preview 与基础质量检查
 
 已实现：
 
-- Provider Registry 中的本地 SDXL Image Provider
-- Provider Registry 中的 Doubao Seedream 5.0 火山方舟 Image Provider；固定使用 `doubao-seedream-5-0-260128`、`2848x1600`、PNG、Base64 返回、无明水印、300 秒超时和 2 次重试，通过 BYOK 调用并原子落盘；用户只需配置 API Key
+- Provider Registry 中的 Doubao Seedream 5.0 Pro 与 Doubao Seedream 5.0 Flash 火山方舟 Image Provider；分别使用 `doubao-seedream-5-0-pro-260628` 与 `doubao-seedream-5-0-flash-260915`，共用 `2848x1600`、PNG、Base64 返回、无明水印和 600 秒读取超时，通过同一个 BYOK API Key 调用并原子落盘；只对明确未建立连接或服务端明确拒绝的限流请求做退避重试，读取超时、发送后断线和 5xx 等不确定结果不会自动重发；用户可在图片生成设置中选择模型
 - Seedream API Key 使用 Windows DPAPI Secret Store，任务配置、项目文件和日志不保存明文密钥
-- Seedream 作为默认图片 Provider 时跳过 FLUX / ComfyUI 图片生成阶段，确保正式分镜图片统一由 Seedream 生成；本地 SDXL 保留为显式回退
-- Prompt、Negative Prompt、Seed、Width、Height、Steps、Guidance Scale
+- 图片生成只允许云端 Provider；旧设置中的 `image.local_sdxl` 会自动迁移为 `image.seedream_5`
+- Prompt、Negative Prompt、Seed 和云端固定输出规格
 - 每 Scene 多候选图片
 - GeneratedImageVariant、输入签名、模型信息、耗时和错误记录
 - Scene 级重生成、未变化输入复用
-- CUDA OOM 后降低分辨率重试
 - 生成图片注册为 MediaFile / MediaShot 并进入 SceneAssignment
+- 独立“风格中心”可创建、复制、编辑和发布视觉风格版本，管理主提示词、排除词、连续性、构图与 Motion Preset
+- 可使用 DeepSeek 生成结构化风格优化建议，用户确认后才写入草稿；内置风格不可直接覆盖
+- 风格中心可用 Seedream 生成 1~4 张隔离的调试图片并保留测试历史、最终编译 Prompt、模型、耗时和错误信息；调试生成通过带客户端幂等键的持久化异步队列执行，前端轮询本地状态，应用重启或远程结果不确定时不会自动重复调用付费 API
+- 风格测试图按 Profile / Revision / Asset 独立归档为待审核 StyleAsset；正式项目生成图归档为已批准资产，保留 SHA-256、感知哈希、Prompt、Storyboard 查询文本、Provider、模型和来源元数据
+- 正式图片生成前会在相同 Style Revision 内执行本地资产匹配；仅对低事实风险、低身份风险、实体不冲突且高置信度的候选自动复用，命中后复制到项目目录并记录 StyleAssetMatch 审计，不直接让工程依赖全局母版路径
+- 当前本地匹配使用零模型文本指纹、画面比例、实体约束与 pHash 元数据；已预留 Embedding 模型版本字段，尚未接入 CLIP / SigLIP 图文向量或 ANN 索引
+- 项目锁定具体已发布风格 Revision；正式图片 Prompt 由风格契约、Scene 内容和系统排除词统一编译，生成记录保留风格 ID、版本和内容哈希
+- 项目切换风格可选择仅影响后续重生成，或失效所有未锁定 Scene 的旧视觉分配与工程交付产物；锁定 Scene 不受影响
 
-已实现补充：FLUX / ComfyUI 已通过高级视觉桥接进入正式项目 Workflow，并由 Qwen3-VL 做生成结果筛选。
-
-明确范围：云端图片生成仅正式支持 Doubao Seedream 5.0 BYOK；OpenAI Image、Gemini Image 等其他 Cloud Image Provider、Upscale Provider 和图片费用统计不属于当前计划。Reference Image、ControlNet、LoRA 仍是可选的本地后续能力。
+明确范围：云端图片生成当前正式支持 Doubao Seedream 5.0 Pro 与 Doubao Seedream 5.0 Flash BYOK；不得新增或恢复任何本地图片/视频生成模型。OpenAI Image、Gemini Image 等其他 Cloud Image Provider、云端 AI Video Provider、Upscale Provider 和费用统计尚未实现。
 
 ### 剪辑工程编排与 PRPROJ 导出
 
@@ -259,7 +259,6 @@ Scene Preview 与基础质量检查
 
 现有能力：
 
-- Qwen3-VL 对高级管线生成图片的语义与瑕疵筛选
 - 工程交付型 QA Job / API：检查 PRPROJ、WAV、SRT 文件及 SRT 与字幕时间线一致性、Scene 时间轴与素材覆盖、关联素材文件存在性和绝对路径重链接风险
 - 主工作流在 PRPROJ 导出后进入独立 `delivery_quality_check` Step；Project Workspace 显示错误、提醒、文件路径和处理建议，支持定位 Scene、显示 SRT 全局条目序号与时间、手动复检
 - 交付 QC 只读检查已保存的镜头范围，不重排或写回 SceneAssignment；读取报告时检查交付文件、素材和项目编排是否变化，过期报告不再显示为通过
@@ -291,10 +290,9 @@ Scene Preview 与基础质量检查
 - 单个项目失败后继续执行
 - 批次和项目级进度、状态及耗时
 - 独立本地视频拼接工具
-- 独立数字人合成工具及其任务恢复
 - FCPXML、Premiere XML 和 PRPROJ 导出
 
-数字人不属于 V1 优先功能；除非有明确用户需求，后续 Agent 不应继续扩大数字人范围。
+本地 Duix 数字人生成入口已移除；未来如恢复数字人或 AI 视频能力，只允许通过云端 API Provider 接入。
 
 ### Settings / Security / Infrastructure
 
@@ -340,13 +338,14 @@ Scene Preview 与基础质量检查
 
 ## 0.4 当前最重要的技术债务
 
-1. 高级视觉能力已经通过桥接服务进入主 Workflow，但仍需把 CLI 的 Artifact/Generation History 完全统一到主应用数据库，消除剩余双存储。
+1. 云端图片生成目前只有 Seedream Provider；云端 AI 视频 Provider、异步轮询、Webhook/轮询恢复和统一生成契约尚未实现。
 2. 全局 SQLite 仍是权威数据库，项目工程尚未拥有版本化 `project.db`。
 3. Project、Scene 和 Asset 的部分核心字段仍保存在 `config_json`、`storyboard_json`、`metadata_json` 中。
 4. Frontend 自动化测试只有 5 项，Project Workspace、Batch、Settings、Scene 和工程导出缺少 UI / E2E 测试。
-5. 现有长视频测试和交付核验脚本不能代表真实 20~60 分钟本地模型生产及目标剪辑软件导入验收。
+5. 现有长视频测试和交付核验脚本不能代表真实 20~60 分钟云端生成生产及目标剪辑软件导入验收。
 6. Error Code 已有基础，但部分服务仍直接返回异常文本，尚未完成全覆盖。
-7. 高级视觉模型的下载、启动和串行 GPU 调度主要依赖脚本，尚未形成统一 Model Manager 和 UI。
+7. 云端图片/视频 Provider 的配额、费用、限流、幂等与长任务恢复仍需统一设计。
+8. StyleAsset 当前使用本地文本指纹做保守复用，尚未接入 CLIP / SigLIP 图文向量、批量资产审核和大规模 ANN 索引。
 
 ## 0.5 后续 Agent 的读取与更新规则
 
@@ -364,8 +363,8 @@ Scene Preview 与基础质量检查
 以下决策优先于后文仍可能存在的历史性建议：
 
 1. Script Engine 只接收 TXT / Markdown 完整逐字稿；不开发 Word、PDF、Podcast、已有音频统一导入器，也不开发章节编辑或章节审核界面。
-2. 保留 BGE-M3、Local Qwen、FLUX / ComfyUI、Qwen3-VL 高级视觉管线，并持续把它统一进项目 Workflow、Provider、Artifact 和 Job 体系。
-3. Image Generation 默认使用 Doubao Seedream 5.0 火山方舟 BYOK，并保留本地 SDXL 回退；不开发 OpenAI Image、Gemini Image 等其他 Cloud Image Provider，不开发 Upscale Provider，不统计图片生成费用。（2026-11-01 更新）
+2. 图片与视频生成全面禁止使用本地模型；本地 SDXL、FLUX / ComfyUI、Qwen3-VL 图片生成/QC 和 Duix 本地数字人入口均已移除。未来图片、AI 视频和数字人生成只能通过可替换的云端 API Provider 接入。（2026-11-01 更新）
+3. Image Generation 当前正式支持 Doubao Seedream 5.0 Pro 与 Doubao Seedream 5.0 Flash 火山方舟 BYOK；不开发本地回退，不开发 Upscale Provider，不统计图片生成费用。（2026-11-01 更新）
 4. TubeAiFolw 不提供 Timeline 内容编辑。SceneAssignment 等时间信息只能作为自动编排和工程导出的内部数据。
 5. 主交付物是带旁白、字幕和素材链接的真实 `.prproj` 工程，供支持 PR 工程导入的剪映专业版继续深度剪辑；同时保留 WAV、SRT 和素材回退文件。
 6. 真实 PRPROJ 必须由 Adobe Premiere Pro 转换生成；禁止把 XML 或 JSON 简单改名为 `.prproj`。
@@ -521,7 +520,6 @@ TubeAiFolw 的付费价值应围绕：
 - STT
 - 字幕对齐
 - FFmpeg
-- 本地图片模型
 - 本地 OCR（非核心）
 - 本地视频处理
 - 本地缓存
@@ -531,6 +529,8 @@ TubeAiFolw 的付费价值应围绕：
 - 本地 SQLite
 
 除非功能必须依赖云端，否则不要把用户内容上传到 TubeAiFolw 自有服务器。
+
+例外：图片与视频生成必须使用用户配置的云端 API，不允许在本地执行生成模型推理。
 
 ## 5.2 BYOK
 
@@ -1478,10 +1478,15 @@ class ImageProvider:
 
 正式支持的 Provider：
 
-- Doubao Seedream 5.0（默认，火山方舟 BYOK）
-- FLUX
-- SDXL
-- ComfyUI Workflow
+- Doubao Seedream 5.0 Pro（默认，火山方舟 BYOK）
+- Doubao Seedream 5.0 Flash（火山方舟 BYOK）
+
+禁止接入：
+
+- 本地 FLUX
+- 本地 SDXL
+- 本地 ComfyUI Workflow
+- 任何在用户设备上执行图片或视频生成推理的模型
 
 支持：
 
@@ -1493,8 +1498,6 @@ class ImageProvider:
 - Resolution
 - Batch Count
 - Reference Image
-- ControlNet（可选）
-- LoRA（可选）
 
 生成图片必须记录：
 
@@ -3037,7 +3040,7 @@ V1 核心：
 - Storyboard
 - AI Image
 - 本地素材
-- 高级视觉语义、Caption、Embedding 与 QC
+- 云端视觉生成与 Provider-neutral QC
 - 素材工程编排
 - 真实 PRPROJ 导出
 - Scene Regenerate

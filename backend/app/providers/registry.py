@@ -164,31 +164,23 @@ def _register_builtin_providers() -> None:
 
     provider_registry.register(
         ProviderMetadata(
-            id="image.local_sdxl",
+            id="image.seedream_5",
             category=ProviderCategory.IMAGE,
-            display_name="Local SDXL",
-            model_id="sdxl-single-file",
-            capabilities=frozenset(
-                {
-                    ProviderCapability.LOCAL_INFERENCE,
-                    ProviderCapability.NEGATIVE_PROMPT,
-                    ProviderCapability.SEED,
-                }
-            ),
-            configuration_fields=(
-                "image_generation_model_path",
-                "image_generation_config_dir",
-                "image_generation_device",
-            ),
+            display_name="Doubao Seedream 5.0 Pro",
+            model_id="doubao-seedream-5-0-pro-260628",
+            model_version="5.0-pro",
+            local=False,
+            capabilities=frozenset(),
+            configuration_fields=("seedream_api_key",),
         )
     )
     provider_registry.register(
         ProviderMetadata(
-            id="image.seedream_5",
+            id="image.seedream_5_flash",
             category=ProviderCategory.IMAGE,
-            display_name="Doubao Seedream 5.0",
-            model_id="doubao-seedream-5-0-260128",
-            model_version="5.0",
+            display_name="Doubao Seedream 5.0 Flash",
+            model_id="doubao-seedream-5-0-flash-260915",
+            model_version="5.0-flash",
             local=False,
             capabilities=frozenset(),
             configuration_fields=("seedream_api_key",),

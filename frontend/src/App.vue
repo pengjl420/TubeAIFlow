@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { AudioLines, CircleUserRound, FolderKanban, Layers3, Merge, Mic2, Settings2 } from 'lucide-vue-next'
+import { AudioLines, FolderKanban, Image, Layers3, Merge, Mic2, Settings2 } from 'lucide-vue-next'
 import AppFeedback from './components/common/AppFeedback.vue'
 import { getEngineHealth } from './api/client'
 
@@ -11,9 +11,9 @@ const navigation = [
   { label: '独立工具', items: [
     { to: '/voice-generation', label: '配音生成', icon: Mic2 },
     { to: '/local-video-merge', label: '素材拼接', icon: Merge },
-    { to: '/avatars', label: '数字人合成', icon: CircleUserRound },
   ] },
   { label: '资源与系统', items: [
+    { to: '/styles', label: '风格中心', icon: Image },
     { to: '/voices', label: '音色中心', icon: AudioLines },
     { to: '/settings/general', label: '系统设置', icon: Settings2 },
   ] },

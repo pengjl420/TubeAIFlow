@@ -40,27 +40,7 @@ class VisualPlanningDecision(BaseModel):
 
 
 def renderer_for(visual_type: VisualType) -> Renderer:
-    if visual_type in {VisualType.CINEMATIC_SCENE, VisualType.CONCEPTUAL_ILLUSTRATION}:
-        return Renderer.FLUX
-    if visual_type in {VisualType.BAR_CHART, VisualType.LINE_CHART, VisualType.PIE_CHART}:
-        return Renderer.MATPLOTLIB
-    if visual_type in {
-        VisualType.COMPARISON,
-        VisualType.FLOW_DIAGRAM,
-        VisualType.ARCHITECTURE_DIAGRAM,
-        VisualType.TIMELINE,
-        VisualType.MAP,
-    }:
-        return Renderer.SVG
-    if visual_type in {
-        VisualType.FACT_CARD,
-        VisualType.QUOTE_CARD,
-        VisualType.KEYWORD_CARD,
-        VisualType.LIST_CARD,
-        VisualType.OBJECT_CUTOUT,
-    }:
-        return Renderer.PILLOW
-    return Renderer.NONE
+    return Renderer.NONE if visual_type == VisualType.NONE else Renderer.CLOUD_IMAGE
 
 
 def fact_risk_for(text: str) -> str:
@@ -85,8 +65,11 @@ def build_visual_plan(
         visual_type = decision.visual_type
         risk = fact_risk_for(candidate.voiceover)
         renderer = renderer_for(visual_type)
-        if risk == "high" and renderer == Renderer.FLUX:
-            visual_type, renderer = VisualType.FACT_CARD, Renderer.PILLOW
+        if risk == "high" and visual_type in {
+            VisualType.CINEMATIC_SCENE,
+            VisualType.CONCEPTUAL_ILLUSTRATION,
+        }:
+            visual_type, renderer = VisualType.FACT_CARD, Renderer.CLOUD_IMAGE
         priority = (
             "high" if candidate.score >= 0.78 else "medium" if candidate.score >= 0.68 else "low"
         )
@@ -177,7 +160,7 @@ def build_anime_visual_plan(
                 core_claim=candidate.voiceover,
                 visual_purpose="Cover this complete narration beat with a coherent 2D animated scene.",
                 visual_type=VisualType.CONCEPTUAL_ILLUSTRATION,
-                renderer=Renderer.FLUX,
+                renderer=Renderer.CLOUD_IMAGE,
                 fact_risk=fact_risk_for(candidate.voiceover),
                 visual_brief=brief,
                 prompt=prompt,

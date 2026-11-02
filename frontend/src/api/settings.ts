@@ -59,19 +59,9 @@ export interface SystemSettings {
   storyboard_cloud_confidence_threshold: number
   storyboard_cloud_identity_risk_threshold: number
   storyboard_llm_cache_enabled: boolean
-  image_generation_model_path: string | null
-  image_generation_config_dir: string | null
-  image_generation_python: string | null
-  image_generation_device: string
-  image_generation_dtype: 'bfloat16' | 'float16' | 'float32'
-  image_generation_width: number
-  image_generation_height: number
-  image_generation_steps: number
-  image_generation_guidance_scale: number
   image_generation_candidates_per_scene: number
-  image_generation_cpu_offload: boolean
   image_generation_negative_prompt: string
-  image_generation_provider_id: 'image.seedream_5' | 'image.local_sdxl'
+  image_generation_provider_id: 'image.seedream_5' | 'image.seedream_5_flash'
   seedream_api_key: string
   seedream_api_key_configured: boolean
   qwen_tts_root: string | null

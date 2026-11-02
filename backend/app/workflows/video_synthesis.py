@@ -16,7 +16,6 @@ from app.services.image_generation import (
 from app.services.projects import project_service
 from app.services.projects import prproj_export_service
 from app.services.storyboard import storyboard_service
-from app.services.visual_enrichment import project_workflow as advanced_visual_workflow
 from app.workflows.engine import WorkflowContext, WorkflowGraph, WorkflowStep
 from app.domain.states import ResourceClass
 
@@ -74,7 +73,6 @@ def _image_generation_step(context: WorkflowContext) -> str:
     if video_mode == project_service.VIDEO_MODE_AI_LANDSCAPE_MIX:
         hybrid_assignment_service.assign_landscape_scenes(context.session, context.project)
     with task_control.controlled(context.project.id, "image_generation"):
-        advanced_visual_workflow.enrich_project_visuals(context.session, context.project)
         image_generation_service.generate_project_images(context.session, context.project)
     image_assignment_service.assign_generated_images(context.session, context.project)
     return "project_export"

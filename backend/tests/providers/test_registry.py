@@ -47,21 +47,22 @@ class ProviderRegistryTests(unittest.TestCase):
                 TTSProviderRuntime,
             )
 
-    def test_local_image_provider_has_executable_runtime_adapter(self) -> None:
+    def test_cloud_image_provider_has_executable_runtime_adapter(self) -> None:
         image_generation_service.bind_builtin_provider_runtimes()
         providers = provider_registry.list(ProviderCategory.IMAGE)
         self.assertEqual(
             [item.id for item in providers],
-            ["image.local_sdxl", "image.seedream_5"],
+            ["image.seedream_5", "image.seedream_5_flash"],
         )
-        self.assertIsInstance(
-            provider_registry.runtime("image.local_sdxl", ImageProviderRuntime),
-            ImageProviderRuntime,
-        )
-        self.assertIsInstance(
-            provider_registry.runtime("image.seedream_5", ImageProviderRuntime),
-            ImageProviderRuntime,
-        )
+        for provider in providers:
+            self.assertIsInstance(
+                provider_registry.runtime(provider.id, ImageProviderRuntime),
+                ImageProviderRuntime,
+            )
+
+        flash = provider_registry.get("image.seedream_5_flash")
+        self.assertEqual(flash.model_id, "doubao-seedream-5-0-flash-260915")
+        self.assertFalse(flash.local)
 
     def test_local_provider_cost_contract_does_not_invent_cloud_cost(self) -> None:
         tts = provider_registry.runtime("tts.cosyvoice", TTSProviderRuntime)
@@ -71,7 +72,7 @@ class ProviderRegistryTests(unittest.TestCase):
         self.assertEqual(estimate.estimated_usd, 0)
         self.assertEqual(estimate.usage, {"characters": 1234})
 
-    def test_image_provider_health_reports_missing_local_assets(self) -> None:
+    def test_image_provider_uses_external_billing_contract(self) -> None:
         runtime = ImageProviderRuntime(generate_batch=Mock())
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -81,20 +82,13 @@ class ProviderRegistryTests(unittest.TestCase):
                 batch_path=root / "batch.json",
                 result_path=root / "result.json",
                 progress_path=root / "progress.json",
-                python_path=root / "missing-python.exe",
-                model_path=root / "missing-model.safetensors",
-                config_dir=root / "missing-config",
-                device="cpu",
-                dtype="float32",
-                cpu_offload=False,
             )
 
             health = runtime.health_check(request)
             estimate = runtime.estimate_cost(request)
 
-        self.assertFalse(health.available)
-        self.assertIn("missing-python.exe", health.error or "")
-        self.assertEqual(estimate.billing, ProviderBillingMode.LOCAL)
+        self.assertTrue(health.available)
+        self.assertEqual(estimate.billing, ProviderBillingMode.EXTERNAL)
         self.assertEqual(estimate.usage, {"images": 2})
 
 

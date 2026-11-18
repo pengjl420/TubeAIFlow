@@ -50,8 +50,8 @@ class StyleTestRun(SQLModel, table=True):
     scene_description: str
     compiled_prompt: str = ""
     compiled_negative_prompt: str = ""
-    provider_id: str = "image.seedream_5"
-    model_id: str = "doubao-seedream-5-0-pro-260628"
+    provider_id: str = "image.seedream_5_flash"
+    model_id: str = "doubao-seedream-5-0-flash-260915"
     output_json: str = "[]"
     generation_seconds: float | None = None
     error_code: str | None = None

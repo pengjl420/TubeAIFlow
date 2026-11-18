@@ -210,9 +210,9 @@ backend\.venv\Scripts\python.exe scripts\verify_long_form_delivery.py --qa-repor
 
 已实现：
 
-- Provider Registry 中的 Doubao Seedream 5.0 Pro 与 Doubao Seedream 5.0 Flash 火山方舟 Image Provider；分别使用 `doubao-seedream-5-0-pro-260628` 与 `doubao-seedream-5-0-flash-260915`，共用 `2848x1600`、PNG、Base64 返回、无明水印和 600 秒读取超时，通过同一个 BYOK API Key 调用并原子落盘；只对明确未建立连接或服务端明确拒绝的限流请求做退避重试，读取超时、发送后断线和 5xx 等不确定结果不会自动重发；用户可在图片生成设置中选择模型
+- Provider Registry 中的 Doubao Seedream 5.0 Flash 火山方舟 Image Provider；使用 `doubao-seedream-5-0-flash-260915`，共用 `2848x1600`、PNG、Base64 返回、无明水印和 600 秒读取超时，通过同一个 BYOK API Key 调用并原子落盘；只对明确未建立连接或服务端明确拒绝的限流请求做退避重试，读取超时、发送后断线和 5xx 等不确定结果不会自动重发；仅支持 Flash；旧 Pro 设置与项目配置在加载时转为 Flash，历史 Pro 风格测试不得继续调用 Pro
 - Seedream API Key 使用 Windows DPAPI Secret Store，任务配置、项目文件和日志不保存明文密钥
-- 图片生成只允许云端 Provider；旧设置中的 `image.local_sdxl` 会自动迁移为 `image.seedream_5`
+- 图片生成只允许云端 Provider；旧设置中的 `image.local_sdxl` 和 `image.seedream_5` 会自动迁移为 `image.seedream_5_flash`
 - Prompt、Negative Prompt、Seed 和云端固定输出规格
 - 每 Scene 多候选图片
 - GeneratedImageVariant、输入签名、模型信息、耗时和错误记录
@@ -227,7 +227,7 @@ backend\.venv\Scripts\python.exe scripts\verify_long_form_delivery.py --qa-repor
 - 项目锁定具体已发布风格 Revision；正式图片 Prompt 由风格契约、Scene 内容和系统排除词统一编译，生成记录保留风格 ID、版本和内容哈希
 - 项目切换风格可选择仅影响后续重生成，或失效所有未锁定 Scene 的旧视觉分配与工程交付产物；锁定 Scene 不受影响
 
-明确范围：云端图片生成当前正式支持 Doubao Seedream 5.0 Pro 与 Doubao Seedream 5.0 Flash BYOK；不得新增或恢复任何本地图片/视频生成模型。OpenAI Image、Gemini Image 等其他 Cloud Image Provider、云端 AI Video Provider、Upscale Provider 和费用统计尚未实现。
+明确范围：云端图片生成当前正式支持 Doubao Seedream 5.0 Flash BYOK；不得新增或恢复任何本地图片/视频生成模型。OpenAI Image、Gemini Image 等其他 Cloud Image Provider、云端 AI Video Provider、Upscale Provider 和费用统计尚未实现。
 
 ### 剪辑工程编排与 PRPROJ 导出
 
@@ -347,10 +347,12 @@ backend\.venv\Scripts\python.exe scripts\verify_long_form_delivery.py --qa-repor
 
 ## 0.5 后续 Agent 的读取与更新规则
 
+2026-11-18 图片模型范围调整：移除 Seedream 5.0 Pro 注册与调用，图片生成仅支持 Seedream 5.0 Flash（`doubao-seedream-5-0-flash-260915`）。旧 Pro 设置和项目配置加载后使用 Flash，保留历史图片与审计记录；未完成的 Pro 风格测试执行时报错，须新建 Flash 测试。验证：相关 Backend `49 passed`；Frontend `7 passed`；`npm run build` 成功。
+
 2026-11-18 范围调整：全面移除本地 LLM、语音识别与精细字幕对齐、Scene 视频预览、独立本地视频拼接。AI 分段与语义分镜仅使用 DeepSeek BYOK；保留按 TTS 段落实际时长生成的基础字幕、SRT、素材审阅、TTS 和 PRPROJ 交付。旧 Scene 预览活动任务在启动恢复时终止，历史文件和数据库记录保留但不执行。此决策优先于下文的历史规划。本次验证：Backend `324 passed`；Frontend `7 passed`；`npm run build` 成功。
 
 
-2026-11-18 实施补充：优云智算控制平面基础接口已实现：独立 ComputeProvider 契约、HTTPS 签名查询、白名单实例响应、DPAPI 凭证、Schema v27 ComputeConnection 持久化、分页发现、绑定与只读检查 API。使用说明见 `docs/providers/compshare-control-plane.md`。前端已增加“系统设置 → 云 GPU 平台”（`/settings/cloud-gpu`）AccessKey ID / AccessKey Secret 加密配置入口，凭证保存后不回显；调试页按连接选择、实例查询绑定和操作记录整理，并标明 DescribeCompShareInstance。前端独立“云 GPU 平台”页面（`/cloud-gpu`）自动汇总所有已配置连接的全部分页实例，每 5 秒独立刷新（同一连接请求未完成时跳过重叠查询）；单连接失败保留旧数据并标记过期。实例行直接开关机，无需绑定，后端实时校验所属连接下的目标实例与状态，禁止抢占式手动关机；不确定结果不自动重发启停。实例行可打开右侧操作日志抽屉，保留本次页面会话全部操作记录，无条数截断；不保存凭证或原始平台响应。旧绑定与只读检查 API 保留兼容。尚无 Worker、远程出图、自动启停或真实平台验收；当前正式图片 Provider 仍只有 Seedream Pro / Flash。完整计划见 `docs/architecture/compshare-gpu-image-provider-plan.md`。仅允许租赁云 GPU 上执行图片生成，不允许恢复用户电脑上的本地图片/视频模型或旧本地 ComfyUI 管线。
+2026-11-18 实施补充：优云智算控制平面基础接口已实现：独立 ComputeProvider 契约、HTTPS 签名查询、白名单实例响应、DPAPI 凭证、Schema v27 ComputeConnection 持久化、分页发现、绑定与只读检查 API。使用说明见 `docs/providers/compshare-control-plane.md`。前端已增加“系统设置 → 云 GPU 平台”（`/settings/cloud-gpu`）AccessKey ID / AccessKey Secret 加密配置入口，凭证保存后不回显；调试页按连接选择、实例查询绑定和操作记录整理，并标明 DescribeCompShareInstance。前端独立“云 GPU 平台”页面（`/cloud-gpu`）自动汇总所有已配置连接的全部分页实例，每 5 秒独立刷新（同一连接请求未完成时跳过重叠查询）；单连接失败保留旧数据并标记过期。实例行直接开关机，无需绑定，后端实时校验所属连接下的目标实例与状态，禁止抢占式手动关机；不确定结果不自动重发启停。实例行可打开右侧操作日志抽屉，保留本次页面会话全部操作记录，无条数截断；不保存凭证或原始平台响应。旧绑定与只读检查 API 保留兼容。尚无 Worker、远程出图、自动启停或真实平台验收；当前正式图片 Provider 仍只有 Seedream Flash。完整计划见 `docs/architecture/compshare-gpu-image-provider-plan.md`。仅允许租赁云 GPU 上执行图片生成，不允许恢复用户电脑上的本地图片/视频模型或旧本地 ComfyUI 管线。
 
 后续 Agent 应遵守：
 
@@ -367,7 +369,7 @@ backend\.venv\Scripts\python.exe scripts\verify_long_form_delivery.py --qa-repor
 
 1. Script Engine 只接收 TXT / Markdown 完整逐字稿；不开发 Word、PDF、Podcast、已有音频统一导入器，也不开发章节编辑或章节审核界面。
 2. 图片与视频生成全面禁止使用本地模型；本地 SDXL、FLUX / ComfyUI、Qwen3-VL 图片生成/QC 和 Duix 本地数字人入口均已移除。未来图片、AI 视频和数字人生成只能通过可替换的云端 API Provider 接入。（2026-11-01 更新）
-3. Image Generation 当前正式支持 Doubao Seedream 5.0 Pro 与 Doubao Seedream 5.0 Flash 火山方舟 BYOK；不开发本地回退，不开发 Upscale Provider，不统计图片生成费用。（2026-11-01 更新）
+3. Image Generation 当前正式支持 Doubao Seedream 5.0 Flash 火山方舟 BYOK；不开发本地回退，不开发 Upscale Provider，不统计图片生成费用。（2026-11-01 更新）
 4. TubeAiFolw 不提供 Timeline 内容编辑。SceneAssignment 等时间信息只能作为自动编排和工程导出的内部数据。
 5. 主交付物是带旁白、字幕和素材链接的真实 `.prproj` 工程，供支持 PR 工程导入的剪映专业版继续深度剪辑；同时保留 WAV、SRT 和素材回退文件。
 6. 真实 PRPROJ 必须由 Adobe Premiere Pro 转换生成；禁止把 XML 或 JSON 简单改名为 `.prproj`。
@@ -1478,7 +1480,7 @@ class ImageProvider:
 
 正式支持的 Provider：
 
-- Doubao Seedream 5.0 Pro（默认，火山方舟 BYOK）
+- Doubao Seedream 5.0 Flash（默认，火山方舟 BYOK）
 - Doubao Seedream 5.0 Flash（火山方舟 BYOK）
 
 禁止接入：

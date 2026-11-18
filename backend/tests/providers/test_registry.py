@@ -52,7 +52,7 @@ class ProviderRegistryTests(unittest.TestCase):
         providers = provider_registry.list(ProviderCategory.IMAGE)
         self.assertEqual(
             [item.id for item in providers],
-            ["image.seedream_5", "image.seedream_5_flash"],
+            ["image.seedream_5_flash"],
         )
         for provider in providers:
             self.assertIsInstance(

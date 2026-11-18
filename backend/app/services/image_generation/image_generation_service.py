@@ -16,7 +16,6 @@ from app.infrastructure.serialization import stable_json_hash
 from app.integrations.image_generation.seedream import (
     SEEDREAM_BASE_URL,
     SEEDREAM_FLASH_MODEL_ID,
-    SEEDREAM_PRO_MODEL_ID,
     SEEDREAM_SIZE,
     generate_batch as generate_seedream_batch,
 )
@@ -115,11 +114,11 @@ def _runtime(project: Project) -> ImageProviderRuntime:
 
 
 def _provider_id(project: Project) -> str:
-    provider_id = getattr(get_settings(), "image_generation_provider_id", "image.seedream_5")
+    provider_id = getattr(get_settings(), "image_generation_provider_id", "image.seedream_5_flash")
     try:
         config = json.loads(project.config_json or "{}")
         configured = str(config.get("image_provider_id") or provider_id)
-        provider_id = "image.seedream_5" if configured == "image.local_sdxl" else configured
+        provider_id = "image.seedream_5_flash" if configured in {"image.local_sdxl", "image.seedream_5"} else configured
     except (TypeError, json.JSONDecodeError):
         pass
     if provider_id not in SEEDREAM_PROVIDER_IDS:
@@ -156,7 +155,7 @@ def register_generated_variant(
     project: Project,
     variant: GeneratedImageVariant,
     *,
-    provider: str = "image.seedream_5",
+    provider: str = "image.seedream_5_flash",
 ) -> None:
     """Register an image produced by another Image Provider in the shared asset model."""
     _register_generated_image(session, project, variant, provider=provider)
@@ -527,7 +526,7 @@ def _register_generated_image(
     project: Project,
     variant: GeneratedImageVariant,
     *,
-    provider: str = "image.seedream_5",
+    provider: str = "image.seedream_5_flash",
 ) -> None:
     path = Path(variant.path).resolve()
     file_hash = _sha256(path)
@@ -772,13 +771,6 @@ def _sha256(path: Path) -> str:
 
 
 def bind_builtin_provider_runtimes() -> None:
-    if not provider_registry.is_executable("image.seedream_5"):
-        provider_registry.bind_runtime(
-            "image.seedream_5",
-            ImageProviderRuntime(
-                generate_batch=partial(generate_seedream_batch, model_id=SEEDREAM_PRO_MODEL_ID)
-            ),
-        )
     if not provider_registry.is_executable("image.seedream_5_flash"):
         provider_registry.bind_runtime(
             "image.seedream_5_flash",

@@ -18,7 +18,7 @@ class ProjectConfig(BaseModel):
     tts_engine: str = Field(default="index_tts", min_length=1)
     segmentation_mode: Literal["newline", "ai"] = "newline"
     storyboard_mode: Literal["ai", "segments"] = "ai"
-    image_provider_id: str = "image.seedream_5"
+    image_provider_id: str = "image.seedream_5_flash"
     visual_generation_mode: str = "curated"
     visual_style_profile_id: str | None = None
     visual_style_revision_id: str | None = None

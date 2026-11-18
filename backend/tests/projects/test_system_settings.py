@@ -14,6 +14,10 @@ from app.services.settings.system_settings_service import (
 
 
 class SettingsModelTests(unittest.TestCase):
+    def test_pro_settings_migrate_to_flash(self) -> None:
+        self.assertEqual(Settings(image_generation_provider_id="image.seedream_5").image_generation_provider_id, "image.seedream_5_flash")
+        self.assertEqual(Settings().image_generation_provider_id, "image.seedream_5_flash")
+
     def test_engine_host_is_clamped_to_loopback(self) -> None:
         self.assertEqual(Settings(app_host="0.0.0.0").app_host, "127.0.0.1")
         self.assertEqual(Settings(app_host="192.168.1.20").app_host, "127.0.0.1")
@@ -34,7 +38,7 @@ class SettingsModelTests(unittest.TestCase):
             Settings(qwen_tts_dtype="int8")
         self.assertEqual(
             Settings(image_generation_provider_id="image.local_sdxl").image_generation_provider_id,
-            "image.seedream_5",
+            "image.seedream_5_flash",
         )
         self.assertEqual(
             Settings(

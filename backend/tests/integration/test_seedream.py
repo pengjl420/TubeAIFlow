@@ -23,6 +23,15 @@ def _png_base64() -> str:
 
 
 class SeedreamClientTests(unittest.TestCase):
+    def test_legacy_pro_request_never_calls_paid_api(self) -> None:
+        with patch("app.integrations.image_generation.seedream.httpx.Client") as http_client:
+            with self.assertRaisesRegex(ValueError, "Only Seedream 5.0 Flash"):
+                SeedreamClient(
+                    Settings(seedream_api_key="secret-key"),
+                    model_id="doubao-seedream-5-0-pro-260628",
+                ).generate(prompt="test", output_path=Path("unused.png"))
+            http_client.assert_not_called()
+
     def test_generates_png_with_ark_contract_without_leaking_key_to_disk(self) -> None:
         settings = Settings(
             seedream_api_key="secret-key",
@@ -52,7 +61,7 @@ class SeedreamClientTests(unittest.TestCase):
             http_client.post.call_args.args[0],
             "https://ark.cn-beijing.volces.com/api/v3/images/generations",
         )
-        self.assertEqual(kwargs["json"]["model"], "doubao-seedream-5-0-pro-260628")
+        self.assertEqual(kwargs["json"]["model"], "doubao-seedream-5-0-flash-260915")
         self.assertEqual(kwargs["json"]["response_format"], "b64_json")
         self.assertEqual(kwargs["json"]["output_format"], "png")
         self.assertEqual(kwargs["json"]["size"], "2848x1600")
@@ -116,7 +125,7 @@ class SeedreamClientTests(unittest.TestCase):
                 ),
                 self.assertRaisesRegex(
                     RuntimeError,
-                    "模型 doubao-seedream-5-0-pro-260628 不存在、未开通.*ModelNotOpen.*request-123",
+                    "模型 doubao-seedream-5-0-flash-260915 不存在、未开通.*ModelNotOpen.*request-123",
                 ) as raised,
             ):
                 SeedreamClient(Settings(seedream_api_key="secret-key")).generate(

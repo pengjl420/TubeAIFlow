@@ -48,7 +48,7 @@ export interface SystemSettings {
   storyboard_llm_cache_enabled: boolean
   image_generation_candidates_per_scene: number
   image_generation_negative_prompt: string
-  image_generation_provider_id: 'image.seedream_5' | 'image.seedream_5_flash'
+  image_generation_provider_id: 'image.seedream_5_flash'
   seedream_api_key: string
   seedream_api_key_configured: boolean
   qwen_tts_root: string | null

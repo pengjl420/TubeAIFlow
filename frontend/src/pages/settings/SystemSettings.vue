@@ -53,7 +53,7 @@ const copy: Record<string, [string, string]> = {
   'ai-services': ['AI 服务', '配置文本模型连接参数'],
   tts: ['配音引擎', '中文 IndexTTS、英文 MOSS-TTS、粤语 CosyVoice，保留 Qwen3-TTS'],
   subtitles: ['基础字幕', '按 TTS 段落时长生成原稿字幕'],
-  'image-generation': ['图片生成', '配置 Doubao Seedream 5.0 Pro / Flash 云端 API'],
+  'image-generation': ['图片生成', '配置 Doubao Seedream 5.0 Flash 云端 API'],
   render: ['渲染与编码', '检测 FFmpeg 与视频编码环境'],
   transitions: ['转场策略', '配置场景转场比例与时长'],
   diagnostics: ['系统诊断', '检查本地运行环境'],
@@ -140,7 +140,7 @@ async function clearDeepseekKey() {
 async function clearSeedreamKey() {
   const confirmed = await confirmAction({
     title: '清除 Seedream API Key？',
-    description: '清除后，使用 Doubao Seedream 5.0 Pro / Flash 的图片生成任务将无法运行。',
+    description: '清除后，使用 Doubao Seedream 5.0 Flash 的图片生成任务将无法运行。',
     confirmText: '清除密钥',
     tone: 'danger',
   })
@@ -280,7 +280,7 @@ onBeforeUnmount(() => { if (cleanupTimer) clearInterval(cleanupTimer) })
       <article v-else-if="section === 'subtitles'" class="setting-card"><h3>基础字幕</h3><p>按 TTS 段落实际音频时长分配字幕时间，文字取自原稿；请在剪辑软件中人工复核边界。</p><div class="form-list"><label><span>单条显示长度上限</span><input v-model.number="settings.subtitle_max_display_units" type="number" min="8" max="80" /></label><label><span>最短时长（ms）</span><input v-model.number="settings.subtitle_min_cue_duration_ms" type="number" /></label><label><span>最长时长（ms）</span><input v-model.number="settings.subtitle_max_cue_duration_ms" type="number" /></label></div></article>
 
       <div v-else-if="section === 'image-generation'" class="setting-stack">
-        <article class="setting-card"><h3>Doubao Seedream 5.0 <small>火山方舟 · BYOK</small></h3><div class="form-grid compact-form"><label><span>图片模型</span><select v-model="settings.image_generation_provider_id"><option value="image.seedream_5">Seedream 5.0 Pro</option><option value="image.seedream_5_flash">Seedream 5.0 Flash</option></select></label><label><span>单场景图片数</span><input v-model.number="settings.image_generation_candidates_per_scene" type="number" min="1" max="4" /></label><label class="wide"><span>API Key</span><input v-model="settings.seedream_api_key" type="password" :placeholder="settings.seedream_api_key_configured ? '已由 Windows DPAPI 安全保存；输入新密钥可替换' : '输入火山方舟 API Key'" /></label><label class="wide"><span>全局排除内容</span><textarea v-model="settings.image_generation_negative_prompt"></textarea></label></div><p>Pro 与 Flash 共用同一火山方舟 API Key。输出固定为 16:9、2848×1600、PNG、无明水印和 Base64 本地持久化；请求串行执行，并对 429/服务端错误自动重试。</p><p>TubeAiFolw 已禁用本地图片模型，图片只能通过用户配置的云端 API 生成。</p><div v-if="settings.seedream_api_key_configured" class="ai-danger-row"><span>密钥不会写入项目文件、任务快照或日志。</span><button type="button" @click="clearSeedreamKey">清除密钥</button></div></article>
+        <article class="setting-card"><h3>Doubao Seedream 5.0 <small>火山方舟 · BYOK</small></h3><div class="form-grid compact-form"><label><span>图片模型</span><select v-model="settings.image_generation_provider_id"><option value="image.seedream_5_flash">Seedream 5.0 Flash</option></select></label><label><span>单场景图片数</span><input v-model.number="settings.image_generation_candidates_per_scene" type="number" min="1" max="4" /></label><label class="wide"><span>API Key</span><input v-model="settings.seedream_api_key" type="password" :placeholder="settings.seedream_api_key_configured ? '已由 Windows DPAPI 安全保存；输入新密钥可替换' : '输入火山方舟 API Key'" /></label><label class="wide"><span>全局排除内容</span><textarea v-model="settings.image_generation_negative_prompt"></textarea></label></div><p>使用火山方舟 API Key。输出固定为 16:9、2848×1600、PNG、无明水印和 Base64 本地持久化；请求串行执行，仅对连接未建立或明确拒绝的限流请求重试，结果不确定时不自动重发。</p><p>TubeAiFolw 已禁用本地图片模型，图片只能通过用户配置的云端 API 生成。</p><div v-if="settings.seedream_api_key_configured" class="ai-danger-row"><span>密钥不会写入项目文件、任务快照或日志。</span><button type="button" @click="clearSeedreamKey">清除密钥</button></div></article>
       </div>
 
       <article v-else-if="section === 'transitions'" class="setting-card"><h3>转场比例（{{ transitionTotal }}%）</h3><div class="transition-table"><label v-for="item in settings.storyboard_transition_effects" :key="item.name"><strong>{{ item.name }}</strong><input v-model.number="item.percentage" type="number" :aria-label="`${item.name} 转场比例`" :disabled="!item.enabled" /><input v-model="item.enabled" type="checkbox" :aria-label="`启用 ${item.name} 转场`" @change="normalizeTransitions" /></label></div><label class="field"><span>转场时长</span><input v-model.number="settings.storyboard_transition_duration_seconds" type="number" min="0.05" max="10" step="0.05" aria-label="转场时长（秒）" /></label></article>

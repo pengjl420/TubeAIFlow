@@ -52,12 +52,12 @@ class StyleTestQueueTests(unittest.TestCase):
     def _settings(self):
         return SimpleNamespace(
             workspace_dir=self.root,
-            image_generation_provider_id="image.seedream_5",
+            image_generation_provider_id="image.seedream_5_flash",
             image_generation_negative_prompt="watermark",
         )
 
     def test_enqueue_is_idempotent_for_the_same_client_request(self) -> None:
-        provider = SimpleNamespace(id="image.seedream_5", model_id="model")
+        provider = SimpleNamespace(id="image.seedream_5_flash", model_id="model")
         with Session(self.engine) as session:
             with (
                 patch.object(style_service, "get_settings", return_value=self._settings()),

@@ -22,6 +22,11 @@ from app.services.image_generation import image_generation_service
 
 
 class ImageGenerationServiceTests(unittest.TestCase):
+    def test_legacy_pro_project_uses_flash(self) -> None:
+        project = SimpleNamespace(config_json='{"image_provider_id":"image.seedream_5"}')
+        with patch("app.services.image_generation.image_generation_service.get_settings", return_value=SimpleNamespace(image_generation_provider_id="image.seedream_5_flash")):
+            self.assertEqual(image_generation_service._provider_id(project), "image.seedream_5_flash")
+
     def test_regeneration_seed_changes_between_requests_but_is_stable_for_retry(self) -> None:
         first = image_generation_service._regeneration_seed("p", "s", 1, "job-1")
         retry = image_generation_service._regeneration_seed("p", "s", 1, "job-1")

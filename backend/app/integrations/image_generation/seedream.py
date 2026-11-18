@@ -17,10 +17,9 @@ from app.providers import ImageBatchRequest
 
 
 SEEDREAM_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
-SEEDREAM_PRO_MODEL_ID = "doubao-seedream-5-0-pro-260628"
 SEEDREAM_FLASH_MODEL_ID = "doubao-seedream-5-0-flash-260915"
 # Import-compatible default for callers that have not selected a model explicitly.
-SEEDREAM_MODEL_ID = SEEDREAM_PRO_MODEL_ID
+SEEDREAM_MODEL_ID = SEEDREAM_FLASH_MODEL_ID
 SEEDREAM_SIZE = "2848x1600"
 SEEDREAM_OUTPUT_FORMAT = "png"
 SEEDREAM_RESPONSE_FORMAT = "b64_json"
@@ -118,6 +117,8 @@ class SeedreamClient:
         self.model_id = model_id
 
     def generate(self, *, prompt: str, output_path: Path) -> float:
+        if self.model_id != SEEDREAM_FLASH_MODEL_ID:
+            raise ValueError("Only Seedream 5.0 Flash is supported; submit a new Flash task")
         if not self.settings.seedream_api_key.strip():
             raise ValueError("系统尚未配置火山方舟 Seedream API Key")
         endpoint = SEEDREAM_BASE_URL.rstrip("/")

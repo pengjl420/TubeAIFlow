@@ -78,8 +78,8 @@ class Settings(BaseModel):
         "duplicate people, low resolution, blurry, oversaturated"
     )
     image_generation_provider_id: Literal[
-        "image.seedream_5", "image.seedream_5_flash"
-    ] = "image.seedream_5"
+        "image.seedream_5_flash"
+    ] = "image.seedream_5_flash"
     seedream_api_key: str = ""
     qwen_tts_root: Path | None = None
     qwen_tts_python: Path | None = None
@@ -228,8 +228,8 @@ class Settings(BaseModel):
     @field_validator("image_generation_provider_id", mode="before")
     @classmethod
     def migrate_legacy_local_image_provider(cls, value):
-        if str(value or "").strip() == "image.local_sdxl":
-            return "image.seedream_5"
+        if str(value or "").strip() in {"image.local_sdxl", "image.seedream_5"}:
+            return "image.seedream_5_flash"
         return value
 
     @property

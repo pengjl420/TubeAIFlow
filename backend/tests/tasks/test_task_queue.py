@@ -639,6 +639,7 @@ class DatabaseMigrationTests(unittest.TestCase):
                 (24,),
                 (25,),
                 (26,),
+                (27,),
             ],
         )
 

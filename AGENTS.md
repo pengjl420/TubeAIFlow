@@ -76,13 +76,13 @@ backend\.venv\Scripts\python.exe scripts\verify_long_form_delivery.py --qa-repor
 ↓
 本地 TTS 分段生成与合并
 ↓
-字幕对齐与 SRT
+按 TTS 段落时长生成基础字幕与 SRT
 ↓
 语义 Storyboard / Visual Scene
 ↓
 本地素材匹配或云端 API 图片生成
 ↓
-Scene Preview 与基础质量检查
+素材审阅与基础质量检查
 ↓
 带旁白、字幕和素材链接的 Premiere PRPROJ 工程导出
 ```
@@ -116,8 +116,8 @@ Scene Preview 与基础质量检查
 - Pause、Resume、Cancel、Retry、Checkpoint、配置快照
 - 失败的非批次项目重新运行时会创建使用当前配置快照的新 TaskRun，并保留原失败任务审计记录；分段阶段失败后允许修改项目与分段配置
 - 应用启动后恢复中断任务
-- Scene 级 Storyboard、图片生成和 Preview Job
-- 项目级素材扫描、Scene Preview 和 PRPROJ Project Export Job
+- Scene 级 Storyboard 与图片生成 Job
+- 项目级素材扫描和 PRPROJ Project Export Job
 - 稳定的部分 Error Code 与统一 API 错误响应
 - LLM 输出长度截断使用 `PROVIDER_OUTPUT_TRUNCATED`，确定性截断不会重复请求同一 Provider
 
@@ -164,11 +164,10 @@ Scene Preview 与基础质量检查
 已实现：
 
 - TTS Segment 与 Subtitle Cue 解耦
-- Faster-Whisper 本地时间对齐
-- 无本地模型时使用比例计时并标记人工复核
-- 最终字幕文本只取原始逐字稿，ASR 仅用于时间定位
+- 按 TTS 段落实际时长与原稿文本长度分配基础字幕时间，不加载 ASR 模型
+- 字幕文本只取原始逐字稿，边界需要人工复核
 - 字幕字符上限、最短/最长持续时间、CPS 配置
-- Alignment JSON、SRT 生成与读取
+- SRT 生成与读取；已移除精细对齐数据与 API
 - 字幕重叠、溢出、时长、字符数和 CPS 质量检查
 
 ### Storyboard 与 Scene
@@ -177,8 +176,7 @@ Scene Preview 与基础质量检查
 
 - 从 Subtitle Cue 或 TTS Segment 创建 Visual Scene
 - AI 语义分镜和沿用 TTS Segment 两种模式
-- Local / Cloud / Hybrid LLM 路由
-- Local Qwen llama.cpp Provider 与 DeepSeek BYOK Provider
+- 仅 DeepSeek BYOK 云端 LLM；已移除本地 Qwen / llama.cpp、混合路由及模型下载管理
 - 结构化 Storyboard：Visual Type、推荐来源、视觉摘要、查询词、Entity、Location、Mood、Fact Risk、Image Prompt、Negative Prompt
 - Scene 手工编辑、保存、单 Scene 重新生成
 - `locked_text`、`locked_audio`、`locked_visual`
@@ -241,7 +239,7 @@ Scene Preview 与基础质量检查
 
 目标交付软件是支持 PR 工程导入的剪映专业版；不同剪映版本兼容能力可能不同，必须同时保留 WAV、SRT 和素材作为回退交付物。
 
-### FFmpeg / Preview / Render
+### FFmpeg / 工程交付
 
 已实现：
 
@@ -249,8 +247,8 @@ Scene Preview 与基础质量检查
 - Windows FFmpeg 自动下载、SHA-256 校验和本地安装
 - NVENC / QSV / AMF 探测，并实际验证编码器能否打开设备
 - 硬件编码失败后回退到 libx264
-- Scene Preview 与内部媒体验证
-- 历史底层 Scene Render、Visual Track、Rough Cut 和 Final Render 服务代码暂作兼容实现；对应 Timeline 编辑器、项目级 Render API 和 Job 已移除
+- 已移除 Scene 视频预览及其 Job / API、Scene Renderer 和只读范围预览渲染实现
+- 已移除 Scene Render / Visual Track Composer；Rough Cut 和 Final Render 服务仅作为历史兼容实现，主工作流不执行
 - 主项目不再以最终 MP4 为默认交付物
 - Render Signature Cache 和未变化产物复用
 - 原子输出与渲染后时长验证
@@ -289,7 +287,7 @@ Scene Preview 与基础质量检查
 - Batch Start、Pause、Continue、失败项目 Retry
 - 单个项目失败后继续执行
 - 批次和项目级进度、状态及耗时
-- 独立本地视频拼接工具
+- 已移除独立本地视频拼接工具、API、队列与页面；旧数据库迁移和历史记录仅供数据兼容
 - FCPXML、Premiere XML 和 PRPROJ 导出
 
 本地 Duix 数字人生成入口已移除；未来如恢复数字人或 AI 视频能力，只允许通过云端 API Provider 接入。
@@ -301,14 +299,14 @@ Scene Preview 与基础质量检查
 - 基础与存储、AI 服务、TTS、字幕、图片、渲染、转场、诊断设置页
 - 工作目录、模型路径、FFmpeg 路径和 Provider 配置
 - CPU、RAM、GPU、VRAM、CUDA、FFmpeg 和硬件编码器检测
-- LLM Model Manager 的下载、暂停、继续、校验和状态恢复
+- 已移除本地 LLM Model Manager 及下载 API、安装脚本
 - Windows DPAPI Secret Store；SQLite 只保存 Credential ID
 - 启动时迁移历史明文 Secret
 - Task 配置快照自动排除 API Key、Token、Secret 和 Password
 - 自动清理完成任务产物的调度器
 - 原子文件、日志、诊断报告和数据库迁移备份
 
-部分实现：Model Manager 当前主要管理 LLM，不是统一的 TTS / STT / Image / Vision Model Manager。
+尚无统一 Model Manager；不再提供本地 LLM 模型管理。
 
 ## 0.3 明确尚未实现的产品模块
 
@@ -348,6 +346,11 @@ Scene Preview 与基础质量检查
 8. StyleAsset 当前使用本地文本指纹做保守复用，尚未接入 CLIP / SigLIP 图文向量、批量资产审核和大规模 ANN 索引。
 
 ## 0.5 后续 Agent 的读取与更新规则
+
+2026-11-18 范围调整：全面移除本地 LLM、语音识别与精细字幕对齐、Scene 视频预览、独立本地视频拼接。AI 分段与语义分镜仅使用 DeepSeek BYOK；保留按 TTS 段落实际时长生成的基础字幕、SRT、素材审阅、TTS 和 PRPROJ 交付。旧 Scene 预览活动任务在启动恢复时终止，历史文件和数据库记录保留但不执行。此决策优先于下文的历史规划。本次验证：Backend `324 passed`；Frontend `7 passed`；`npm run build` 成功。
+
+
+2026-11-18 实施补充：优云智算控制平面基础接口已实现：独立 ComputeProvider 契约、HTTPS 签名查询、白名单实例响应、DPAPI 凭证、Schema v27 ComputeConnection 持久化、分页发现、绑定与只读检查 API。使用说明见 `docs/providers/compshare-control-plane.md`。前端已增加“系统设置 → 云 GPU 平台”（`/settings/cloud-gpu`）AccessKey ID / AccessKey Secret 加密配置入口，凭证保存后不回显；调试页按连接选择、实例查询绑定和操作记录整理，并标明 DescribeCompShareInstance。前端独立“云 GPU 平台”页面（`/cloud-gpu`）自动汇总所有已配置连接的全部分页实例，每 5 秒独立刷新（同一连接请求未完成时跳过重叠查询）；单连接失败保留旧数据并标记过期。实例行直接开关机，无需绑定，后端实时校验所属连接下的目标实例与状态，禁止抢占式手动关机；不确定结果不自动重发启停。实例行可打开右侧操作日志抽屉，保留本次页面会话全部操作记录，无条数截断；不保存凭证或原始平台响应。旧绑定与只读检查 API 保留兼容。尚无 Worker、远程出图、自动启停或真实平台验收；当前正式图片 Provider 仍只有 Seedream Pro / Flash。完整计划见 `docs/architecture/compshare-gpu-image-provider-plan.md`。仅允许租赁云 GPU 上执行图片生成，不允许恢复用户电脑上的本地图片/视频模型或旧本地 ComfyUI 管线。
 
 后续 Agent 应遵守：
 
@@ -1275,15 +1278,12 @@ Subtitle Segment
 
 支持：
 
-- Whisper
-- Faster-Whisper
-- WhisperX
-- Forced Alignment
-- 原始文稿辅助 Alignment
-- Segment 内二次对齐
+- 按 TTS 段落实际音频时长分配基础字幕时间
+- 原稿文本与可配置的字幕拆分规则
 - SRT
-- VTT
-- JSON Timeline
+- 内部 JSON Timeline
+
+不再实现语音识别、Forced Alignment 或精细时间对齐。
 
 目标：
 
@@ -1681,7 +1681,7 @@ FFmpeg Media Engine 负责：
 
 # 26. Scene Preview
 
-只保留用于检查单个 Scene 素材的轻量 Preview。项目级 30 / 60 秒时间轴预览、Final Render 和对应 Job / API 不属于产品范围。
+已全面移除 Scene 视频预览及对应渲染、Job 和 API。素材审阅保留原始图片与素材展示，不生成预览视频。
 
 ---
 

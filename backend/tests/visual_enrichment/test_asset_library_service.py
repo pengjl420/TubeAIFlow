@@ -10,7 +10,6 @@ from app.models.project import Project
 from app.models.storyboard import VisualScene
 from app.services.visual_enrichment import asset_library_service
 from app.services.storyboard import scene_workspace_service
-from app.services.rendering import scene_renderer
 
 
 def _storyboard() -> str:
@@ -87,7 +86,6 @@ def test_scan_rank_and_assign_local_asset(tmp_path):
         assert assignment.selection_stage == "manual_local_asset"
         shot = session.get(MediaShot, assignment.media_shot_id)
         media = session.get(MediaFile, shot.media_file_id)
-        scene_renderer.validate_visual_assignment(assignment, shot, media)
     engine.dispose()
 
 

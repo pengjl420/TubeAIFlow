@@ -11,7 +11,6 @@ from app.workflows.registry import WorkflowRuntime, workflow_registry
 NARRATION_WORKFLOW_ID = "narration_generation"
 VIDEO_WORKFLOW_ID = "video_synthesis"
 SCENE_IMAGE_WORKFLOW_ID = "scene_image_regeneration"
-SCENE_PREVIEW_WORKFLOW_ID = "scene_preview_render"
 SCENE_STORYBOARD_WORKFLOW_ID = "scene_storyboard_regeneration"
 ASSET_SCAN_WORKFLOW_ID = "asset_library_scan"
 QUALITY_CHECK_WORKFLOW_ID = "quality_check"
@@ -69,20 +68,6 @@ def ensure_builtin_workflows_registered() -> None:
                 run=scene_jobs.run_scene_image_job,
                 initial_stage=lambda _session, _project, _include_video: "generate",
                 resource_class=lambda _stage: ResourceClass.GPU,
-            )
-        )
-    if SCENE_PREVIEW_WORKFLOW_ID not in registered:
-        from app.workflows import scene_jobs
-
-        workflow_registry.register(
-            WorkflowRuntime(
-                id=SCENE_PREVIEW_WORKFLOW_ID,
-                stages=frozenset({"render"}),
-                video_stages=frozenset({"render"}),
-                produces_video=False,
-                run=scene_jobs.run_scene_preview_job,
-                initial_stage=lambda _session, _project, _include_video: "render",
-                resource_class=lambda _stage: ResourceClass.FFMPEG,
             )
         )
     if SCENE_STORYBOARD_WORKFLOW_ID not in registered:

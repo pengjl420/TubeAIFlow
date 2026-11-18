@@ -37,7 +37,7 @@ def split_script_with_ai(
     text: str,
     client: JSONLLMProvider | None = None,
 ) -> list[dict]:
-    """Use the configured local-first LLM to choose TTS boundaries without rewriting."""
+    """Use the configured cloud LLM to choose TTS boundaries without rewriting."""
     source = text.strip()
     if not source:
         return []

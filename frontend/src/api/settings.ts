@@ -22,11 +22,6 @@ export interface SystemSettings {
   subtitle_min_cue_duration_ms: number
   subtitle_max_cue_duration_ms: number
   subtitle_target_characters_per_second: number
-  subtitle_alignment_enabled: boolean
-  subtitle_whisper_model_path: string | null
-  subtitle_whisper_device: string
-  subtitle_whisper_compute_type: 'float16' | 'int8_float16' | 'int8' | 'float32'
-  subtitle_whisper_beam_size: number
   app_host: string
   app_port: number
   workspace_dir: string
@@ -50,14 +45,6 @@ export interface SystemSettings {
   deepseek_timeout_seconds: number
   deepseek_max_tokens: number
   deepseek_retry_count: number
-  storyboard_llm_strategy: 'local' | 'hybrid' | 'cloud'
-  local_llm_base_url: string
-  local_llm_model: string
-  local_llm_models_dir: string
-  local_llm_timeout_seconds: number
-  local_llm_max_tokens: number
-  storyboard_cloud_confidence_threshold: number
-  storyboard_cloud_identity_risk_threshold: number
   storyboard_llm_cache_enabled: boolean
   image_generation_candidates_per_scene: number
   image_generation_negative_prompt: string
@@ -92,35 +79,6 @@ export interface SystemSettings {
   moss_tts_device: string
   moss_tts_dtype: 'bfloat16' | 'float16' | 'float32'
   moss_tts_max_new_tokens: number
-}
-
-export interface ModelDownloadJob {
-  id: string
-  model_id: string
-  status: 'queued' | 'running' | 'completed' | 'failed' | 'interrupted'
-  progress: number
-  downloaded_bytes: number
-  total_bytes: number
-  path: string | null
-  message: string
-  error: string | null
-}
-
-export interface LocalLLMModel {
-  id: string
-  display_name: string
-  description: string
-  repo_id: string
-  filename: string
-  size_bytes: number
-  min_ram_gb: number
-  recommended_vram_gb: number
-  quality: 'fast' | 'balanced' | 'quality'
-  recommended: boolean
-  license: string
-  installed: boolean
-  path: string | null
-  download: ModelDownloadJob | null
 }
 
 export interface FfmpegStatus {
@@ -167,13 +125,7 @@ export async function saveSystemSettings(settings: SystemSettings): Promise<Syst
   return result
 }
 
-export async function listLocalLLMModels(): Promise<LocalLLMModel[]> {
-  return unwrap<LocalLLMModel[]>(await apiClient.get('/models/llm'))
-}
 
-export async function downloadLocalLLMModel(modelId: string): Promise<ModelDownloadJob> {
-  return unwrap<ModelDownloadJob>(await apiClient.post(`/models/llm/${encodeURIComponent(modelId)}/download`))
-}
 
 export interface CleanupStatus {
   enabled: boolean

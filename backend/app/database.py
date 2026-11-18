@@ -12,7 +12,7 @@ from sqlmodel import Session, SQLModel, create_engine
 from app.config import DATABASE_PATH
 
 
-LATEST_SCHEMA_VERSION = 26
+LATEST_SCHEMA_VERSION = 27
 logger = logging.getLogger(__name__)
 
 
@@ -645,6 +645,21 @@ def _apply_migrations() -> None:
             "CREATE INDEX IF NOT EXISTS ix_style_asset_matches_decision ON style_asset_matches (decision)",
         ],
     }
+    migrations[27] = ["""
+        CREATE TABLE IF NOT EXISTS compute_connections (
+            id VARCHAR NOT NULL PRIMARY KEY,
+            name VARCHAR NOT NULL,
+            provider VARCHAR NOT NULL DEFAULT 'compute.compshare',
+            region VARCHAR NOT NULL DEFAULT '',
+            zone VARCHAR NOT NULL DEFAULT '',
+            project_id VARCHAR NOT NULL DEFAULT '',
+            instance_id VARCHAR NOT NULL DEFAULT '',
+            credential_id VARCHAR NOT NULL,
+            config_version INTEGER NOT NULL DEFAULT 1,
+            management_mode VARCHAR NOT NULL DEFAULT 'manual',
+            created_at VARCHAR NOT NULL
+        )
+    """]
     with engine.begin() as connection:
         connection.exec_driver_sql(
             "CREATE TABLE IF NOT EXISTS schema_migrations "

@@ -84,7 +84,7 @@ def run_quality_check(session: Session, project: Project) -> dict:
     _check_subtitles(cues, issues, settings)
     if not cues:
         _issue(issues, "subtitle_cues_missing", "error", "项目没有可交付的字幕时间线",
-               suggestion="重新生成字幕对齐与 SRT")
+               suggestion="重新生成基础字幕与 SRT")
     for path, issue_type, label in (
         (srt_path, "subtitle_missing", "项目 SRT 字幕"),
         (prproj_path, "prproj_missing", "真实 PRPROJ 工程"),

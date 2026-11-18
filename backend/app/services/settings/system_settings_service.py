@@ -122,8 +122,6 @@ def _validate_paths(settings: Settings) -> None:
         "moss_tts_root",
         "moss_tts_model_dir",
         "moss_tts_codec_dir",
-        "subtitle_whisper_model_path",
-        "local_llm_models_dir",
     ):
         path: Path | None = getattr(settings, field_name)
         if path is not None and not path.is_dir():
@@ -159,6 +157,8 @@ def _serialize_settings(
                 if (
                     key not in Settings.model_fields
                     and key != "credential_refs"
+                    and not key.startswith(("local_llm_", "subtitle_whisper_", "storyboard_cloud_"))
+                    and key not in {"storyboard_llm_strategy", "subtitle_alignment_enabled"}
                     and not _looks_secret(key)
                 ):
                     data[key] = value

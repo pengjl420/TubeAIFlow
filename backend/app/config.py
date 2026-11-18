@@ -12,7 +12,6 @@ from sqlalchemy.exc import OperationalError
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_WORKSPACE_DIR = (BASE_DIR / "workspace").resolve()
-DEFAULT_LOCAL_LLM_MODELS_DIR = (BASE_DIR.parent / "models" / "llm").resolve()
 DATABASE_PATH = DEFAULT_WORKSPACE_DIR / "app.db"
 _SETTINGS_OVERRIDE: ContextVar[dict | None] = ContextVar(
     "tubeaifolw_settings_override", default=None
@@ -72,14 +71,6 @@ class Settings(BaseModel):
     deepseek_timeout_seconds: float = Field(default=60.0, gt=0, le=600)
     deepseek_max_tokens: int = Field(default=8192, ge=1, le=65536)
     deepseek_retry_count: int = Field(default=1, ge=0, le=10)
-    storyboard_llm_strategy: Literal["local", "hybrid", "cloud"] = "hybrid"
-    local_llm_base_url: str = "http://127.0.0.1:18090"
-    local_llm_model: str = "qwen3-8b-q4_k_m"
-    local_llm_models_dir: Path = DEFAULT_LOCAL_LLM_MODELS_DIR
-    local_llm_timeout_seconds: float = Field(default=180.0, gt=0, le=900)
-    local_llm_max_tokens: int = Field(default=8192, ge=512, le=65536)
-    storyboard_cloud_confidence_threshold: float = Field(default=0.68, ge=0, le=1)
-    storyboard_cloud_identity_risk_threshold: int = Field(default=8, ge=0, le=10)
     storyboard_llm_cache_enabled: bool = True
     image_generation_candidates_per_scene: int = Field(default=2, ge=1, le=4)
     image_generation_negative_prompt: str = (
@@ -125,11 +116,6 @@ class Settings(BaseModel):
     subtitle_min_cue_duration_ms: int = Field(default=1000, ge=300, le=5000)
     subtitle_max_cue_duration_ms: int = Field(default=6000, ge=1000, le=15000)
     subtitle_target_characters_per_second: float = Field(default=7.0, ge=1, le=20)
-    subtitle_alignment_enabled: bool = True
-    subtitle_whisper_model_path: Path | None = None
-    subtitle_whisper_device: str = "cuda"
-    subtitle_whisper_compute_type: Literal["float16", "int8_float16", "int8", "float32"] = "float16"
-    subtitle_whisper_beam_size: int = Field(default=5, ge=1, le=20)
 
     @field_validator("app_host", mode="before")
     @classmethod
@@ -152,8 +138,6 @@ class Settings(BaseModel):
         "moss_tts_model_dir",
         "moss_tts_codec_dir",
         "premiere_pro_path",
-        "subtitle_whisper_model_path",
-        "local_llm_models_dir",
         mode="before",
     )
     @classmethod
@@ -169,14 +153,6 @@ class Settings(BaseModel):
         if model not in {"deepseek-v4-flash", "deepseek-v4-pro"}:
             raise ValueError("Unsupported DeepSeek model")
         return model
-
-    @field_validator("local_llm_base_url", "local_llm_model")
-    @classmethod
-    def non_empty_local_llm_setting(cls, value):
-        text = str(value or "").strip()
-        if not text:
-            raise ValueError("Local LLM URL and model cannot be empty")
-        return text
 
     @field_validator("qwen_tts_dtype")
     @classmethod
@@ -280,8 +256,6 @@ def _normalize_paths(settings: Settings) -> Settings:
         "moss_tts_python",
         "moss_tts_model_dir",
         "moss_tts_codec_dir",
-        "subtitle_whisper_model_path",
-        "local_llm_models_dir",
     ):
         value = getattr(settings, field_name)
         if value is not None:
@@ -293,7 +267,6 @@ def _ensure_workspace(settings: Settings) -> None:
     settings.workspace_dir.mkdir(parents=True, exist_ok=True)
     for name in ("projects", "voices", "voice_generations", "templates"):
         (settings.workspace_dir / name).mkdir(parents=True, exist_ok=True)
-    settings.local_llm_models_dir.mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache

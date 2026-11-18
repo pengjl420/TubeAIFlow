@@ -2,4 +2,4 @@
 # environments can install requirements-core.txt without the multi-gigabyte CUDA stack.
 -r requirements-core.txt
 -r requirements-local-ai-cu128.txt
--r requirements-tts-asr.txt
+-r requirements-tts.txt

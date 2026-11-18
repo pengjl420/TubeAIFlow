@@ -45,6 +45,8 @@ def build_segment_cues(
             if segment.end_time is not None
             else start_ms + int(round(float(segment.duration) * 1000))
         )
+        if abs((end_ms - start_ms) - round(float(segment.duration) * 1000)) > 80:
+            raise ValueError(f"Segment {segment.segment_id} 时间轴与音频时长误差超过 80ms")
         if end_ms <= start_ms:
             raise ValueError(f"Segment {segment.segment_id} has an invalid audio duration")
 

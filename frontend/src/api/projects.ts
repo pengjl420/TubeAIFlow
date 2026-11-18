@@ -349,17 +349,11 @@ export function localAssetUrl(projectId: string, path: string): string {
   return `${apiClient.defaults.baseURL}/projects/${projectId}/assets/file?${new URLSearchParams({ path })}`
 }
 
-export async function renderScenePreview(projectId: string, sceneId: string): Promise<{ path: string }> {
-  return unwrap<{ path: string }>(await apiClient.post(`/projects/${projectId}/render/scenes/${encodeURIComponent(sceneId)}`, undefined, { timeout: 120000 }))
-}
 
 export async function enqueueSceneImageJob(projectId: string, sceneId: string): Promise<ProjectTask> {
   return unwrap<ProjectTask>(await apiClient.post(`/projects/${projectId}/jobs/scenes/${encodeURIComponent(sceneId)}/images`))
 }
 
-export async function enqueueScenePreviewJob(projectId: string, sceneId: string): Promise<ProjectTask> {
-  return unwrap<ProjectTask>(await apiClient.post(`/projects/${projectId}/jobs/scenes/${encodeURIComponent(sceneId)}/preview`))
-}
 
 export async function exportProjectFcpxml(projectId: string): Promise<Record<string, unknown>> {
   return unwrap<Record<string, unknown>>(await apiClient.post(`/projects/${projectId}/exports/fcpxml`))

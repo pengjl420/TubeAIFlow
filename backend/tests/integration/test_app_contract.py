@@ -14,7 +14,6 @@ class ProductionAppContractTests(unittest.TestCase):
             "/api/projects/{project_id}/workflows/narration/start",
             "/api/projects/{project_id}/tasks/status",
             "/api/projects/{project_id}/jobs/scenes/{scene_id}/images",
-            "/api/projects/{project_id}/jobs/scenes/{scene_id}/preview",
             "/api/projects/{project_id}/jobs/{job_id}",
             "/api/projects/{project_id}/jobs/{job_id}/pause",
             "/api/projects/{project_id}/jobs/{job_id}/resume",
@@ -35,7 +34,6 @@ class ProductionAppContractTests(unittest.TestCase):
             "/api/settings/hardware/status",
             "/api/providers",
             "/api/tools/voice-generation/tasks",
-            "/api/tools/local-video-merge/tasks",
             "/api/visual-styles/{style_id}/tests",
             "/api/visual-styles/tests/{run_id}",
         }

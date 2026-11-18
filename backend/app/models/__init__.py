@@ -1,5 +1,5 @@
 from app.models.batch import BatchItem, BatchJob
-from app.models.local_video_merge import LocalVideoMergeTask
+from app.models.compute import ComputeConnection
 from app.models.media import (
     GeneratedImageVariant,
     MediaFile,
@@ -26,7 +26,6 @@ __all__ = [
     "BatchItem",
     "BatchJob",
     "GeneratedImageVariant",
-    "LocalVideoMergeTask",
     "MediaFile",
     "MediaKeyframe",
     "MediaShot",

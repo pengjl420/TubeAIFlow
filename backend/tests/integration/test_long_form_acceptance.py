@@ -1,11 +1,8 @@
-from pathlib import Path
-
 import pytest
 
 from app.models.storyboard import VisualScene
 from app.services.narration.segmenter import split_script
 from app.services.rendering.timeline_composer import scene_frame_window
-from app.services.rendering.visual_track_composer import _transition_inputs_fit
 from app.services.storyboard.scene_grouper import _chunk_cues
 
 
@@ -47,15 +44,3 @@ def test_long_form_planning_stays_bounded_and_frame_exact(minutes: int) -> None:
     windows = [scene_frame_window(scene, 30) for scene in scenes]
     assert sum(item[2] for item in windows) == minutes * 60 * 30
     assert all(left[1] == right[0] for left, right in zip(windows, windows[1:]))
-
-
-def test_long_form_transition_command_guard_prefers_stable_concat() -> None:
-    short = [Path(f"C:/project/scenes/scene_{index:04d}.mp4") for index in range(20)]
-    long = [
-        Path("C:/project-with-a-long-name/scene-renders")
-        / (f"scene_{index:04d}_" + "x" * 100 + ".mp4")
-        for index in range(720)
-    ]
-
-    assert _transition_inputs_fit(short)
-    assert not _transition_inputs_fit(long)

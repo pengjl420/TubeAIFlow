@@ -34,12 +34,3 @@ def save_video_settings(
         }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"success": False, "error": str(exc)}) from exc
-
-
-@router.post("/projects/{project_id}/render/scenes/{scene_id}")
-def render_scene(project_id: str, scene_id: str, session: Session = Depends(get_session)) -> dict:
-    # Preserve the legacy URL while execution moves to the durable Job protocol.
-    from app.api.tasks import enqueue_scene_preview_job
-
-    return enqueue_scene_preview_job(project_id, scene_id, session)
-

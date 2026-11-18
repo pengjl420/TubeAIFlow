@@ -117,21 +117,6 @@ def enqueue_scene_storyboard_job(
     )
 
 
-@router.post("/projects/{project_id}/jobs/scenes/{scene_id}/preview")
-def enqueue_scene_preview_job(
-    project_id: str, scene_id: str, session: Session = Depends(get_session)
-) -> dict:
-    return _enqueue_scene_job(
-        session,
-        project_id,
-        scene_id,
-        workflow="scene_preview_render",
-        job_type="scene_preview_render",
-        stage="render",
-        resource_class="ffmpeg",
-    )
-
-
 @router.post("/projects/{project_id}/jobs/assets/scan")
 def enqueue_asset_scan_job(project_id: str, session: Session = Depends(get_session)) -> dict:
     return _enqueue_render_job(

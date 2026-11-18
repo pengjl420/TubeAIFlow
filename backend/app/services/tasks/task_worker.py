@@ -80,6 +80,24 @@ def recover_interrupted_tasks(session: Session) -> int:
     now = utc_now_iso()
     recovered = 0
     touched_batch_ids: set[str] = set()
+    retired_tasks = session.exec(
+        select(TaskRun).where(
+            TaskRun.workflow == "scene_preview_render",
+            TaskRun.status.in_(["queued", "running", "paused"]),
+        )
+    ).all()
+    for retired in retired_tasks:
+        retired.status = "cancelled"
+        retired.cancel_requested = False
+        retired.pause_requested = False
+        retired.lease_owner = None
+        retired.heartbeat_at = None
+        retired.finished_at = now
+        retired.updated_at = now
+        retired.error_message = "Scene 视频预览功能已移除，旧任务已终止"
+        session.add(retired)
+    if retired_tasks:
+        session.commit()
     running_tasks = list(session.exec(select(TaskRun).where(TaskRun.status == "running")).all())
     for task in running_tasks:
         batch = session.get(BatchJob, task.batch_id) if task.batch_id else None

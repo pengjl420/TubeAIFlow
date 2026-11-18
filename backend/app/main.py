@@ -9,9 +9,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session
 
 from app.api import (
+    compute,
     batches,
     exports,
-    local_video_merge,
     media_library,
     projects,
     providers,
@@ -30,10 +30,8 @@ from app.api import (
 from app.database import create_db_and_tables, engine
 from app.services.image_generation import image_generation_service
 from app.services.narration import voice_generation_queue, voice_profile_service
-from app.services.rendering import local_video_merge_queue
 from app.services.settings import system_settings_service
 from app.services.settings import cleanup_service
-from app.services.settings import llm_model_manager
 from app.services.tasks import task_worker
 from app.services.visual_styles import style_test_queue
 
@@ -49,12 +47,10 @@ async def lifespan(_app: FastAPI):
         system_settings_service.migrate_plaintext_secrets(session)
         voice_profile_service.migrate_profile_directories(session)
         voice_profile_service.migrate_profile_language_engines(session)
-    local_video_merge_queue.recover_and_start_worker()
     voice_generation_queue.recover_and_start_worker()
     task_worker.recover_and_start_worker()
     style_test_queue.recover_and_start_worker()
     cleanup_stop, cleanup_thread = cleanup_service.start_worker()
-    llm_model_manager.recover_and_start_worker()
     try:
         yield
     finally:
@@ -130,8 +126,8 @@ async def unexpected_exception_handler(request: Request, exc: Exception) -> JSON
 
 
 app.include_router(batches.router, prefix="/api")
+app.include_router(compute.router, prefix="/api")
 app.include_router(exports.router, prefix="/api")
-app.include_router(local_video_merge.router, prefix="/api")
 app.include_router(media_library.router, prefix="/api")
 app.include_router(projects.router, prefix="/api")
 app.include_router(providers.router, prefix="/api")

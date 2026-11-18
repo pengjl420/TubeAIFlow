@@ -12,19 +12,6 @@ video:
   fps: 30
   subtitle_safe_zone: 0.18
 
-semantic:
-  provider: llamacpp
-  model: qwen3-8b-q4_k_m
-  model_path: models/llm/qwen3-8b-q4_k_m/Qwen3-8B-Q4_K_M.gguf
-  base_url: http://127.0.0.1:18090
-  timeout_seconds: 180
-  context_tokens: 16384
-  thinking: false
-  temperature: 0.3
-  chunk_minutes: [2, 4]
-  local_context_before_sec: 15
-  local_context_after_sec: 15
-
 embedding:
   model: BAAI/bge-m3
   model_path: models/embedding/bge-m3-onnx

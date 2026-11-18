@@ -1,0 +1,6 @@
+# Optional local TTS runtimes.
+einops==0.8.2
+librosa==0.11.0
+onnxruntime==1.27.0
+soundfile==0.14.0
+sox==1.5.0

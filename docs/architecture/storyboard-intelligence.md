@@ -1,6 +1,6 @@
 # Storyboard intelligence architecture
 
-TubeAiFolw uses a local-first, cloud-assisted pipeline for transcript-to-visual planning.
+TubeAiFolw uses a cloud LLM pipeline with local project storage for transcript-to-visual planning.
 
 ## Processing stages
 
@@ -13,16 +13,13 @@ TubeAiFolw uses a local-first, cloud-assisted pipeline for transcript-to-visual 
 TTS segments, subtitle cues and visual scenes remain separate concepts. A rough visual hint
 created during TTS segmentation may inform planning, but does not define the final scene.
 
-## Routing modes
+## Cloud provider
 
-- `local`: use the llama.cpp-compatible local model only.
-- `hybrid`: use the local model first, then escalate low-confidence or high identity-risk
-  storyboard batches to the configured cloud provider. A local service failure also falls
-  back to cloud when a BYOK credential is available.
-- `cloud`: use the configured cloud provider for every LLM operation.
-
-The default is `hybrid`. Identical structured requests are cached by provider, model,
-prompts, task and schema. API keys are never part of the cache key or artifact.
+All AI segmentation and storyboard requests use DeepSeek BYOK. Local Qwen / llama.cpp,
+hybrid routing, local health checks and model downloads have been removed.
+A missing credential produces a configuration error before a request is sent.
+Identical structured requests are cached by provider, model, prompts, task and schema.
+API keys are never part of the cache key or artifact.
 
 ## Long-form context policy
 

@@ -19,7 +19,7 @@
 
 TubeAiFolw 不是“又一个 AI 视频生成器”，而是一套面向专业创作者的 **Local-first AI Long-form Video Production Workflow**。
 
-它把脚本、分段 TTS、字幕对齐、语义分镜、本地素材匹配、本地 AI 插图、质量检查和剪辑工程导出组织成可恢复、可人工干预、可批量执行的生产流程，目标是稳定完成 20–60 分钟长视频，而不是只展示几十秒的 Demo。
+它把脚本、分段 TTS、基础字幕、语义分镜、本地素材匹配、云端 AI 插图、质量检查和剪辑工程导出组织成可恢复、可人工干预、可批量执行的生产流程，目标是稳定完成 20–60 分钟长视频，而不是只展示几十秒的 Demo。
 
 核心原则：
 
@@ -40,13 +40,13 @@ TubeAiFolw 不是“又一个 AI 视频生成器”，而是一套面向专业�
   ↓
 本地分段 TTS 与最终 WAV 合并
   ↓
-字幕对齐与 SRT
+基础字幕与 SRT
   ↓
 语义 Storyboard / Visual Scene
   ↓
 本地素材匹配或本地 AI 图片生成
   ↓
-Scene Preview 与交付质量检查
+素材审阅与交付质量检查
   ↓
 通过 Adobe Premiere Pro 转换并导出真实 PRPROJ
 ```
@@ -58,16 +58,16 @@ Scene Preview 与交付质量检查
 - TXT / Markdown 脚本清洗、普通分段与 AI 语义分段。
 - IndexTTS、MOSS-TTS、CosyVoice 和 Qwen3-TTS 本地语音生成。
 - Voice Profile、参考音频、单段重生成、失败重试、暂停与恢复。
-- Faster-Whisper 本地字幕对齐；模型不可用时退回比例计时并标记人工复核。
+- 根据 TTS 段落实际时长生成基础字幕与 SRT。
 - Local Qwen 与 DeepSeek BYOK 的结构化 Storyboard。
 - Scene 编辑、历史版本恢复以及文本、音频、画面锁定。
 - 本地图片/视频扫描、SHA-256 去重、候选排序和手动素材选择。
 - 本地 SDXL，以及 BGE-M3、Qwen、FLUX/ComfyUI、Qwen3-VL 高级视觉流程。
 - `anime_full_coverage` 动漫全片覆盖策略和 Scene 内多镜头分配。
-- Scene Preview、技术质量检查和工程交付质量报告。
+- 素材审阅、技术质量检查和工程交付质量报告。
 - FCPXML、Premiere XML 和真实 PRPROJ 工程导出。
 - 最多 100 个 TXT / Markdown 脚本的批量项目导入与执行。
-- 独立语音生成、本地视频拼接和数字人兼容工具。
+- 独立语音生成工具。
 - Windows DPAPI Secret Store、敏感字段过滤、诊断日志和自动清理。
 
 ## 尚未实现或尚未完成验收
@@ -116,7 +116,7 @@ TubeAiFolw **不计划**成为通用 NLE，不提供可拖拽多轨 Timeline、�
 - FFmpeg / ffprobe；可在系统设置中自动下载并校验 Windows 构建。
 - NVIDIA CUDA GPU；仅在运行本地大模型、图像模型或部分 TTS 时需要。
 - Adobe Premiere Pro；仅生成真实 `.prproj` 时需要。TubeAiFolw 不会把 XML 改名伪装为 PRPROJ。
-- 对应的本地 TTS、LLM、Embedding、Image 或 Vision 模型。
+- 对应的本地 TTS 模型；云端 AI 需要用户配置 API Key。
 
 ## Windows 快速启动
 
@@ -168,7 +168,7 @@ python -m app.run
 依赖文件：
 
 - `requirements-core.txt`：本地引擎和云 Provider 的基础依赖。
-- `requirements-tts-asr.txt`：TTS / ASR 集成。
+- `requirements-tts.txt`：本地 TTS 集成。
 - `requirements-local-ai-cu128.txt`：本地 CUDA AI 依赖。
 - `requirements.txt`：完整 Windows 本地 AI 环境。
 - `requirements-dev.txt`：测试和静态检查工具。
@@ -181,45 +181,13 @@ npm install
 npm run dev
 ```
 
-## 本地模型与高级视觉流程
+## AI 服务与基础字幕
 
-模型按职责存放，模型文件不会提交到 Git：
+AI 语义分段和分镜仅使用 DeepSeek BYOK，请在系统设置中配置密钥。本地 LLM、模型下载与安装入口已移除。
 
-```text
-models/
-  llm/qwen3-8b-q4_k_m/
-  embedding/bge-m3-onnx/
-  image_generation/flux2-klein-4b-fp8/
-  vision/qwen3-vl-4b-instruct-bf16/
-```
+基础字幕按 TTS 段落的实际音频时长分配时间，保留原稿文字并输出 SRT；不再加载 Whisper 或执行精细语音对齐。字幕边界请在剪辑软件中人工复核。
 
-下载固定版本并安装本地服务：
-
-```powershell
-backend\.venv\Scripts\python.exe scripts\download_visual_models.py
-backend\.venv\Scripts\python.exe scripts\install_llama_cpp.py
-backend\.venv\Scripts\python.exe scripts\install_comfyui.py
-```
-
-按需启动语义或图像服务：
-
-```powershell
-backend\.venv\Scripts\python.exe scripts\start_visual_model_service.py semantic
-backend\.venv\Scripts\python.exe scripts\start_visual_model_service.py image
-```
-
-默认 RTX 5060 Ti 配置只允许一个大型 GPU 工作负载。语义分析、图像生成和 Qwen3-VL QC 应串行运行。配置位于 `config/production_5060ti.yaml`。
-
-无需加载模型的确定性检查：
-
-```powershell
-python run.py `
-  --project tests/fixtures/demo `
-  --config config/production_5060ti.yaml `
-  --dry-run
-```
-
-使用 `--stage ingest|semantic|plan|generate|qc|timeline|render` 单独执行阶段，使用 `--resume` 复用 SHA-256 验证的产物，或使用 `--force` 重建。
+Scene 视频预览和独立本地视频拼接已移除。保留原始素材审阅、TTS、WAV、SRT 与真实 PRPROJ 工程交付。
 
 ## 项目数据与输出
 
@@ -296,7 +264,6 @@ backend\.venv\Scripts\python.exe scripts\verify_long_form_delivery.py `
 | 项目 | 创建、查看和继续长视频项目 | 单个 20–60 分钟视频的完整生产 |
 | 批量生产 | 一次导入多个 TXT / Markdown 脚本 | 多频道、工作室或系列内容批量处理 |
 | 配音生成 | 不创建视频项目，直接生成分段旁白 | 只需要完整 WAV 和分段 WAV |
-| 本地素材拼接 | 按顺序合并本地视频素材 | 快速合并已有片段 |
 | 数字人合成 | 使用人物模板和完整旁白生成视频 | 兼容工具，非 V1 核心工作流 |
 | 音色中心 | 创建、试听、复制、修改和删除 Voice Profile | 管理不同频道或角色音色 |
 | 系统设置 | 配置存储、模型、Provider、字幕、图片和 FFmpeg | 首次使用及环境维护 |
@@ -306,7 +273,7 @@ backend\.venv\Scripts\python.exe scripts\verify_long_form_delivery.py `
 - **基础与存储**：工作目录、本地服务、自动清理等。
 - **AI 服务**：Local Qwen、DeepSeek BYOK 和模型管理。
 - **配音引擎**：TTS Provider、模型路径与运行环境。
-- **字幕对齐**：Faster-Whisper 路径和字幕质量参数。
+- **基础字幕**：基础字幕拆分与显示参数。
 - **图片生成**：本地 SDXL 等图片模型配置。
 - **渲染与编码**：FFmpeg、ffprobe、Premiere Pro 和硬件编码器。
 - **转场策略**：工程编排使用的基础转场设置。
@@ -321,7 +288,7 @@ backend\.venv\Scripts\python.exe scripts\verify_long_form_delivery.py `
 3. 打开 **系统设置 → 渲染与编码**，检测或自动安装 FFmpeg / ffprobe。
 4. 在 **音色中心** 创建至少一个 Voice Profile，并试听参考音频。
 5. 在 **系统设置 → 配音引擎** 中确认所选 TTS Provider 可用。
-6. 如需 AI 语义分段或分镜，在 **AI 服务** 中配置 Local Qwen 或 DeepSeek。
+6. 如需 AI 语义分段或分镜，在 **AI 服务** 中配置 DeepSeek。
 7. 如需本地图片生成，在 **图片生成** 中配置 SDXL 或准备高级视觉管线。
 8. 如需真实 PRPROJ，配置 Adobe Premiere Pro 路径并完成状态检测。
 
@@ -382,7 +349,7 @@ backend\.venv\Scripts\python.exe scripts\verify_long_form_delivery.py `
 
 ### 5. 运行旁白工作流
 
-点击 **运行工作流** 后，引擎依次完成脚本规范化、分段、逐段 TTS、音频探测、合并 WAV、字幕对齐与 SRT 生成。
+点击 **运行工作流** 后，引擎依次完成脚本规范化、分段、逐段 TTS、音频探测、合并 WAV、基础字幕与 SRT 生成。
 
 长任务可以：
 
@@ -392,7 +359,7 @@ backend\.venv\Scripts\python.exe scripts\verify_long_form_delivery.py `
 - 对失败段重试，或只重新生成某一个 TTS Segment。
 - 重启应用后恢复中断任务。
 
-最终字幕文本始终来自原始逐字稿；ASR 只用于定位时间，不会用识别文本替换原稿。
+最终字幕文本始终来自原始逐字稿；时间由 TTS 段落实际时长按比例分配，不执行语音识别。
 
 ### 6. 检查分镜
 
@@ -421,7 +388,7 @@ Storyboard 创建后，可逐个 Scene 检查：
 - 生成多张图片候选并选择其一。
 - 重新生成当前 Scene 的图片。
 - 设置 Scene 内连续多个 Shot、Trim、Playback Speed 和显示时长。
-- 生成 Scene Preview 进行快速检查。
+- 审阅原始图片与素材。
 
 `MediaKeyframe` 数据表已经存在，但完整视频镜头切分、关键帧提取和 AI Caption 尚未完成。因此，当前本地视频匹配质量仍较依赖文件名、描述和标签。
 
@@ -551,11 +518,11 @@ TubeAiFolw/
 
 ### CUDA OOM / 显存不足
 
-停止其他 GPU 任务，避免同时运行语义、图片和 Vision 模型。图片生成在部分 OOM 场景会降低分辨率重试，但正式项目仍应预留显存。
+本地 GPU 当前主要用于 TTS，请检查配音引擎配置并停止其他占用显存的程序。图片生成使用云端服务。
 
 ### 字幕被标记为需要人工复核
 
-通常表示 Faster-Whisper 模型不可用，系统使用了比例计时。配置本地对齐模型后重新运行字幕阶段，并检查字幕重叠、持续时间、字符数和 CPS。
+基础字幕采用段落时长比例计时，请在剪辑软件中复核字幕边界，并检查重叠、持续时间、字符数和 CPS。
 
 ### PRPROJ 导出失败
 

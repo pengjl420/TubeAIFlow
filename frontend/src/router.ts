@@ -1,6 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
-const LocalVideoMerge = () => import('./pages/LocalVideoMerge.vue')
 const VoiceGeneration = () => import('./pages/VoiceGeneration.vue')
 const SettingsLayout = () => import('./pages/settings/SettingsLayout.vue')
 const SystemSettings = () => import('./pages/settings/SystemSettings.vue')
@@ -19,8 +18,8 @@ const router = createRouter({
     { path: '/projects/:projectId', component: ProjectWorkspace, meta: { title: '项目工作区' } },
     { path: '/batches', component: BatchProduction, meta: { title: '批量生产' } },
     { path: '/styles', component: VisualStyles, meta: { title: '风格中心' } },
+    { path: '/cloud-gpu', component: () => import('./pages/CloudGpu.vue'), meta: { title: '云 GPU 平台' } },
     { path: '/voice-generation', component: VoiceGeneration, meta: { title: '配音生成' } },
-    { path: '/local-video-merge', component: LocalVideoMerge, meta: { title: '本地素材拼接' } },
     { path: '/voices', component: VoiceProfiles, meta: { title: '音色中心' } },
     {
       path: '/settings',
@@ -28,6 +27,7 @@ const router = createRouter({
       meta: { title: '系统设置' },
       children: [
         { path: '', redirect: '/settings/general' },
+        { path: 'cloud-gpu', component: () => import('./pages/settings/CloudGpuSettings.vue') },
         { path: ':section', component: SystemSettings },
       ],
     },
